@@ -1,2 +1,8 @@
+"""VoicePad - Local dictation and transcription tool."""
+
+from voicepad.ui.app import app
+
+
 def main() -> None:
-    print("Hello from voicepad!")
+    """Main entry point."""
+    app.run()

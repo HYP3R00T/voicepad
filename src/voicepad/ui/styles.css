@@ -1,0 +1,90 @@
+/* Catppuccin Mocha theme for VoicePad */
+
+Screen {
+    background: $panel;
+    color: $text;
+}
+
+Static#header {
+    background: $boost;
+    color: $text;
+    padding: 1 2;
+    margin-bottom: 1;
+}
+
+ListView {
+    background: $panel;
+    border: solid $accent;
+    height: 50%;
+}
+
+ListItem {
+    background: $panel;
+    color: $text;
+}
+
+ListItem:hover {
+    background: $boost;
+    color: $accent;
+}
+
+ListItem:focus {
+    background: $boost;
+    color: $accent;
+}
+
+Input {
+    background: $panel;
+    border: solid $accent;
+    color: $text;
+    margin: 1 0;
+}
+
+Input:focus {
+    background: $boost;
+    border: solid $accent;
+}
+
+#buttons_container {
+    height: auto;
+    margin: 1 0;
+}
+
+Button {
+    margin-right: 1;
+}
+
+Button#record_btn {
+    background: $success;
+}
+
+Button#record_btn:hover {
+    background: $success;
+    opacity: 0.8;
+}
+
+Button#stop_btn {
+    background: $error;
+}
+
+Button#stop_btn:hover {
+    background: $error;
+    opacity: 0.8;
+}
+
+Button#exit_btn {
+    background: $warning;
+}
+
+Button#exit_btn:hover {
+    background: $warning;
+    opacity: 0.8;
+}
+
+#status_message {
+    background: $boost;
+    color: $text;
+    padding: 1 2;
+    margin-top: 1;
+    min-height: 3;
+}
