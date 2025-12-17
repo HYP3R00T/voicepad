@@ -1,13 +1,11 @@
 [project]
 name = "voicepad"
 version = "0.1.0"
-description = "Add your description here"
+description = "Local dictation and transcription tool"
 readme = "README.md"
-authors = [
-    { name = "hyperoot", email = "rajesh@hyperoot.dev" }
-]
-requires-python = ">=3.13"
-dependencies = []
+authors = [{ name = "hyperoot", email = "rajesh@hyperoot.dev" }]
+requires-python = ">=3.10"
+dependencies = ["textual>=0.40.0", "sounddevice>=0.4.6", "soundfile>=0.13.0"]
 
 [project.scripts]
 voicepad = "voicepad:main"
@@ -15,3 +13,8 @@ voicepad = "voicepad:main"
 [build-system]
 requires = ["uv_build>=0.9.5,<0.10.0"]
 build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.5.1",
+]
