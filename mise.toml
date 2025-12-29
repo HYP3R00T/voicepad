@@ -1,8 +1,6 @@
 [tools]
 python = "3.13"
 uv = "latest"
-pre-commit = "latest"
-ruff = "latest"
 
 [settings]
 experimental = true
