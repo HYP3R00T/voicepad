@@ -5,7 +5,12 @@ description = "Local dictation and transcription tool"
 readme = "README.md"
 authors = [{ name = "hyperoot", email = "rajesh@hyperoot.dev" }]
 requires-python = ">=3.12"
-dependencies = ["textual>=0.40.0", "sounddevice>=0.4.6", "soundfile>=0.13.0"]
+dependencies = [
+    "textual>=0.40.0",
+    "sounddevice>=0.4.6",
+    "soundfile>=0.13.0",
+    "utilityhub-config>=0.1.1",
+]
 
 [project.scripts]
 voicepad = "voicepad:main"
@@ -15,7 +20,4 @@ requires = ["uv_build>=0.9.5,<0.10.0"]
 build-backend = "uv_build"
 
 [dependency-groups]
-dev = [
-    "pre-commit>=4.5.1",
-    "utilityhub-config==0.1.1",
-]
+dev = ["pre-commit>=4.5.1", "ruff>=0.14.10", "ty>=0.0.7"]
