@@ -60,6 +60,18 @@ cfgv==3.5.0 \
     --hash=sha256:a8dc6b26ad22ff227d2634a65cb388215ce6cc96bbcc5cfde7641ae87e8dacc0 \
     --hash=sha256:d5b1034354820651caa73ede66a6294d6e95c1b00acc5e9b098e917404669132
     # via pre-commit
+click==8.3.1 \
+    --hash=sha256:12ff4785d337a1bb490bb7e9c2b1ee5da3112e94a8622f26a6c77f5d2fc6842a \
+    --hash=sha256:981153a64e25f12d547d3426c367a4857371575ee7ad18df2a6183ab0545b2a6
+    # via zensical
+colorama==0.4.6 ; sys_platform == 'win32' \
+    --hash=sha256:08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44 \
+    --hash=sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6
+    # via click
+deepmerge==2.0 \
+    --hash=sha256:5c3d86081fbebd04dd5de03626a0607b809a98fb6ccba5770b62466fe940ff20 \
+    --hash=sha256:6de9ce507115cff0bed95ff0ce9ecc31088ef50cbdf09bc90a09349a318b3d00
+    # via zensical
 distlib==0.4.0 \
     --hash=sha256:9659f7d87e46584a30b5780e43ac7a2143098441670ff0a49d5f9034c54a6c16 \
     --hash=sha256:feec40075be03a04501a973d81f633735b4b69f98b05450592310c0f401a4e0d
@@ -76,6 +88,12 @@ linkify-it-py==2.0.3 \
     --hash=sha256:68cda27e162e9215c17d786649d1da0021a451bdc436ef9e0fa0ba5234b9b048 \
     --hash=sha256:6bcbc417b0ac14323382aef5c5192c0075bf8a9d6b41820a2b66371eac6b6d79
     # via markdown-it-py
+markdown==3.10 \
+    --hash=sha256:37062d4f2aa4b2b6b32aefb80faa300f82cc790cb949a35b8caede34f2b68c0e \
+    --hash=sha256:b5b99d6951e2e4948d939255596523444c0e677c669700b1d17aa4a8a464cb7c
+    # via
+    #   pymdown-extensions
+    #   zensical
 markdown-it-py==4.0.0 \
     --hash=sha256:87327c59b172c5011896038353a81343b6754500a08cd7a4973bb48c6d578147 \
     --hash=sha256:cb0a2b4aa34f932c007117b194e945bd74e0ec24133ceb5bac59009cda1cb9f3
@@ -239,6 +257,11 @@ pygments==2.19.2 \
     # via
     #   rich
     #   textual
+    #   zensical
+pymdown-extensions==10.19.1 \
+    --hash=sha256:4969c691009a389fb1f9712dd8e7bd70dcc418d15a0faf70acb5117d022f7de8 \
+    --hash=sha256:e8698a66055b1dc0dca2a7f2c9d0ea6f5faa7834a9c432e3535ab96c0c4e509b
+    # via zensical
 python-dotenv==1.2.1 \
     --hash=sha256:42667e897e16ab0d66954af0e60a9caa94f0fd4ecf3aaf6d2d260eec1aa36ad6 \
     --hash=sha256:b81ee9561e9ca4004139c6cbba3a238c32b03e4894671e181b671e8cb8425d61
@@ -285,7 +308,9 @@ pyyaml==6.0.3 \
     --hash=sha256:fc09d0aa354569bc501d4e787133afc08552722d3ab34836a80547331bb5d4a0
     # via
     #   pre-commit
+    #   pymdown-extensions
     #   utilityhub-config
+    #   zensical
 rich==14.2.0 \
     --hash=sha256:73ff50c7c0c1c77c8243079283f4edb376f0f6442433aecb8ce7e6d0b92d1fe4 \
     --hash=sha256:76bc51fe2e57d2b1be1f96c524b890b816e334ab4c1e45888799bfaab0021edd
@@ -374,3 +399,18 @@ virtualenv==20.35.4 \
     --hash=sha256:643d3914d73d3eeb0c552cbb12d7e82adf0e504dbf86a3182f8771a153a1971c \
     --hash=sha256:c21c9cede36c9753eeade68ba7d523529f228a403463376cf821eaae2b650f1b
     # via pre-commit
+zensical==0.0.15 \
+    --hash=sha256:051ea368d268ffebf7ed7b6422f211a57680b2810fcde7f251816eb5c8d2f488 \
+    --hash=sha256:072f80b7346ad4657a4c23008ae5cd3b3511e3bfac8d6bb277cbb6b3c11b6387 \
+    --hash=sha256:07a24e11a0e00d14f37d209cc37df446f91908109ca86ab3fe41c0b981e32668 \
+    --hash=sha256:0d0b303ec8a7aec2e733239f21d3602ce29e0eaabe4e4d60c9bcccb5c2d162dc \
+    --hash=sha256:13f205d24baeb4a77d096c3d385a8496850567b45c397cd54dde7c22dcbf0da8 \
+    --hash=sha256:1d29712dd4659e26b351417534e2ad6364f506514e168ac4c0ed42093b3a9469 \
+    --hash=sha256:31a333afaf54d042bb51ac7dc623bd1b3bbe173c0ce4c7b72764cdef143ff4e2 \
+    --hash=sha256:4fd9382db77eff79eb347d4d0b6194c1c285e4151ad104bc9c8f65a27cb71d7f \
+    --hash=sha256:99702504d38d8f7da4bf9a69513d2f65a0371dcb8f0e9f180c861cb285adb61f \
+    --hash=sha256:a3809be6d5f25bbd69dbe43715a60bf9d0186c51a1ec821e02f106e660e632b4 \
+    --hash=sha256:b3200c91b30370671c50b8b4aa41c20e55ff2814b9003ee23c9b6f923a0c19be \
+    --hash=sha256:cc2bc9b4f89863d8b3443b0b9446ccaf5181085c3fc7a7e1bbc4708afe864f7d \
+    --hash=sha256:ec1b146adb3ee4146a3f800e0a4e6c8e681092d87ac51c60e35e99b68a724b31
+    # via voicepad

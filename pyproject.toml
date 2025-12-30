@@ -10,6 +10,7 @@ dependencies = [
     "sounddevice>=0.4.6",
     "soundfile>=0.13.0",
     "utilityhub-config>=0.1.1",
+    "zensical>=0.0.15",
 ]
 
 [project.scripts]
