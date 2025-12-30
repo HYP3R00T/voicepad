@@ -12,3 +12,23 @@ enter = "bash ./scripts/setup_project.sh"
 
 [env]
 UV_LINK_MODE = "copy"
+
+[tasks.docs]
+description = "Serve Documentation"
+run = "echo http://localhost:8000 && uv run zensical serve"
+
+[tasks.format]
+description = "Format Python code"
+run = "uv run ruff format ."
+
+[tasks.lint]
+description = "Lint Python code"
+run = "uv run ruff check ."
+
+[tasks.check]
+description = "Python type checker and language server"
+run = "uv run ty check"
+
+[tasks.test]
+description = "Test all packages"
+run = "uv run pytest --cov=. --cov-report=term-missing"
