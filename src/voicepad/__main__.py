@@ -1,6 +1,6 @@
-"""Entry point for VoicePad."""
+def main():
+    pass
 
-from voicepad import main
 
 if __name__ == "__main__":
     main()
