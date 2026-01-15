@@ -1,5 +1,8 @@
 import typer
+from utilityhub_config import load_settings
 
+from voicepad.audio.scanner import get_device_by_index, record_voice
+from voicepad.config import Config
 from voicepad.ui.voicepad_ui import VoicepadUI
 
 app = typer.Typer(invoke_without_command=True)
@@ -11,8 +14,14 @@ def ui():
 
 
 @app.command()
-def hello(name: str):
-    print(f"Hello {name}")
+def cli():
+    settings, metadata = load_settings(Config, app_name="voicepad")
+    print(settings.timeout)
+
+    # print_devices()
+
+    print(get_device_by_index(1))
+    record_voice(1, 10)
 
 
 @app.callback()
