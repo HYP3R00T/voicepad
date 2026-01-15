@@ -11,14 +11,15 @@ dependencies = [
     "soundfile>=0.13.0",
     "utilityhub-config>=0.1.1",
     "zensical>=0.0.15",
+    "typer>=0.21.1",
 ]
 
 [project.scripts]
-voicepad = "voicepad:main"
+voicepad = "voicepad.main:main"
 
 [build-system]
 requires = ["uv_build>=0.9.5,<0.10.0"]
 build-backend = "uv_build"
 
 [dependency-groups]
-dev = ["pre-commit>=4.5.1", "ruff>=0.14.10", "ty>=0.0.7"]
+dev = ["pre-commit>=4.5.1", "ruff>=0.14.10", "textual-dev>=1.8.0", "ty>=0.0.7"]
