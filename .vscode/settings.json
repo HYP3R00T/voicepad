@@ -36,18 +36,8 @@
     "chat.instructionsFilesLocations": {
         ".github/instructions": true
     },
-    "chat.useClaudeSkills": true,
+    "chat.useAgentSkills": true,
     "python.languageServer": "None",
-    "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
-    "ruff.interpreter": [
-        "${workspaceFolder}/.venv/bin/python"
-    ],
     "ruff.lint.enable": true,
-    "ruff.nativeServer": true,
-    "ruff.path": [
-        "${workspaceFolder}/.venv/bin/ruff"
-    ],
-    "ty.path": [
-        "${workspaceFolder}/.venv/bin/ty"
-    ]
+    "ruff.nativeServer": true
 }
