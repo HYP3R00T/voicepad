@@ -1,11 +1,18 @@
 import io
+import logging
+import threading
+import time
+from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TypedDict, cast
 
+import numpy as np
 import sounddevice as sd
 import soundfile as sf
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -104,5 +111,92 @@ def record_voice(device_index: int, duration: float) -> bytes:
     project_root = Path(__file__).parents[3]
     out_path = project_root / "recording.wav"
     out_path.write_bytes(data)
+
+    return data
+
+
+def _capture_audio(
+    stream: sd.InputStream,
+    dev: AudioDevice,
+    audio_buffer: deque,
+    is_recording: list[bool],
+    frames_received: list[int],
+    last_stats: list[float],
+) -> None:
+    """Read audio in background thread."""
+    try:
+        with stream:
+            logger.info(f"Recording from: {dev.name} ({dev.sample_rate}Hz)")
+            print(f"Recording from: {dev.name} (Press Enter to stop)")
+
+            while is_recording[0]:
+                chunk, overflow = stream.read(int(dev.sample_rate))
+                if overflow:
+                    logger.warning("Audio overflow detected")
+
+                for frame in chunk:
+                    audio_buffer.append(frame)
+                frames_received[0] += len(chunk)
+
+                # Print stats every 5 seconds
+                now = time.time()
+                if now - last_stats[0] > 5:
+                    buffer_sec = len(audio_buffer) / dev.sample_rate
+                    total_sec = frames_received[0] / dev.sample_rate
+                    mem_mb = (len(audio_buffer) * dev.channels * 4) / (1024 * 1024)
+                    print(f"  Total: {total_sec:.0f}s | Buffer: {buffer_sec:.0f}s | Memory: {mem_mb:.1f}MB")
+                    last_stats[0] = now
+
+    except Exception as e:
+        logger.error(f"Stream error: {e}")
+
+
+def record_voice_continuous(device_index: int, keep_duration_sec: float = 300) -> bytes:
+    """
+    Continuously capture audio using a rolling buffer with bounded memory.
+
+    Args:
+        device_index: OS device index.
+        keep_duration_sec: How many seconds of audio to keep (default: 5 minutes).
+
+    Returns:
+        WAV bytes of the last `keep_duration_sec` seconds of audio.
+    """
+    dev = get_device_by_index(device_index)
+    max_frames = int(keep_duration_sec * dev.sample_rate)
+    audio_buffer = deque(maxlen=max_frames)
+    is_recording = [True]
+    frames_received = [0]
+    last_stats = [time.time()]
+
+    stream = sd.InputStream(
+        device=device_index,
+        samplerate=dev.sample_rate,
+        channels=dev.channels,
+        dtype="float32",
+        blocksize=int(dev.sample_rate),
+    )
+
+    thread = threading.Thread(
+        target=_capture_audio,
+        args=(stream, dev, audio_buffer, is_recording, frames_received, last_stats),
+        daemon=True,
+    )
+    thread.start()
+    input()
+    is_recording[0] = False
+    thread.join(timeout=2)
+
+    if not audio_buffer:
+        return b""
+
+    audio = np.array(list(audio_buffer), dtype="float32")
+    buf = io.BytesIO()
+    sf.write(buf, audio, samplerate=dev.sample_rate, format="WAV")
+    data = buf.getvalue()
+
+    out_path = Path(__file__).parents[3] / "recording.wav"
+    out_path.write_bytes(data)
+    print(f"✓ Saved: {out_path} ({len(audio) / dev.sample_rate:.1f}s)")
 
     return data
