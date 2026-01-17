@@ -15,7 +15,7 @@ def ui():
 
 @app.command()
 def cli():
-    settings, metadata = load_settings(Config, app_name="voicepad")
+    settings, metadata = load_settings(Config, app_name="voicepad", env_prefix="VP")
     print(settings.timeout)
 
     print(get_device_by_index(1))
