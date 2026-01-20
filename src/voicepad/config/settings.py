@@ -6,8 +6,50 @@ from typing import Literal
 from pydantic import BaseModel, Field
 from utilityhub_config import load_settings
 
+SUPPORTED_MODEL_SIZES = (
+    "tiny",
+    "tiny.en",
+    "base",
+    "base.en",
+    "small",
+    "small.en",
+    "distil-small.en",
+    "medium",
+    "medium.en",
+    "distil-medium.en",
+    "large-v1",
+    "large-v2",
+    "large-v3",
+    "large",
+    "distil-large-v2",
+    "distil-large-v3",
+    "large-v3-turbo",
+    "turbo",
+    "auto",
+)
+
 DeviceType = Literal["cuda", "cpu", "auto"]
-ModelSize = Literal["tiny", "base", "small", "medium", "large-v2", "large-v3", "turbo", "distil-large-v3", "auto"]
+ModelSize = Literal[
+    "tiny",
+    "tiny.en",
+    "base",
+    "base.en",
+    "small",
+    "small.en",
+    "distil-small.en",
+    "medium",
+    "medium.en",
+    "distil-medium.en",
+    "large-v1",
+    "large-v2",
+    "large-v3",
+    "large",
+    "distil-large-v2",
+    "distil-large-v3",
+    "large-v3-turbo",
+    "turbo",
+    "auto",
+]
 ComputeType = Literal["float16", "int8", "int8_float16", "auto"]
 
 

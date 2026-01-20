@@ -1,13 +1,11 @@
-import io
 import logging
+import sys
 import threading
-import time
-from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TypedDict, cast
 
-import numpy as np
 import sounddevice as sd
 import soundfile as sf
 
@@ -88,58 +86,55 @@ def print_devices():
 def _capture_audio(
     stream: sd.InputStream,
     dev: AudioDevice,
-    audio_buffer: deque,
     is_recording: list[bool],
-    frames_received: list[int],
-    last_stats: list[float],
+    writer: sf.SoundFile,
 ) -> None:
-    """Read audio in background thread."""
+    """Read audio in background thread and write directly to file."""
     try:
         with stream:
             logger.info(f"Recording from: {dev.name} ({dev.sample_rate}Hz)")
-            print(f"Recording from: {dev.name} (Press Enter to stop)")
 
             while is_recording[0]:
                 chunk, overflow = stream.read(int(dev.sample_rate))
                 if overflow:
                     logger.warning("Audio overflow detected")
 
-                for frame in chunk:
-                    audio_buffer.append(frame)
-                frames_received[0] += len(chunk)
-
-                # Print stats every 5 seconds
-                now = time.time()
-                if now - last_stats[0] > 5:
-                    buffer_sec = len(audio_buffer) / dev.sample_rate
-                    total_sec = frames_received[0] / dev.sample_rate
-                    mem_mb = (len(audio_buffer) * dev.channels * 4) / (1024 * 1024)
-                    print(f"  Total: {total_sec:.0f}s | Buffer: {buffer_sec:.0f}s | Memory: {mem_mb:.1f}MB")
-                    last_stats[0] = now
+                # Write chunk immediately so transcriber can read growing file
+                writer.write(chunk)
 
     except Exception as e:
         logger.error(f"Stream error: {e}")
 
 
-def record_voice(device_index: int, keep_duration_sec: float = 300) -> bytes:
+def record_voice(
+    device_index: int,
+    output_file: Path | str | None = None,
+) -> tuple[bytes, Path | None]:
     """
     Record audio continuously until user presses Enter.
 
-    Uses a rolling buffer to manage memory efficiently while recording.
+    Writes audio directly to disk as it records so transcription can poll
+    the growing file. Uses configured recordings path by default.
 
     Args:
         device_index: OS device index.
-        keep_duration_sec: How many seconds of audio to keep (default: 5 minutes).
+        output_file: Optional path to write audio incrementally. If None, uses configured recordings path.
 
     Returns:
-        WAV bytes of the recorded audio.
+        Tuple of (WAV bytes, output file path)
     """
     dev = get_device_by_index(device_index)
-    max_frames = int(keep_duration_sec * dev.sample_rate)
-    audio_buffer = deque(maxlen=max_frames)
     is_recording = [True]
-    frames_received = [0]
-    last_stats = [time.time()]
+
+    # Decide output path
+    if output_file:
+        output_path = Path(output_file)
+    else:
+        config = get_config()
+        config.recordings_path.mkdir(parents=True, exist_ok=True)
+        output_path = get_recording_path(config.recordings_path)
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
     stream = sd.InputStream(
         device=device_index,
@@ -149,30 +144,31 @@ def record_voice(device_index: int, keep_duration_sec: float = 300) -> bytes:
         blocksize=int(dev.sample_rate),
     )
 
+    # Open writer for incremental writes
+    writer = sf.SoundFile(
+        file=str(output_path),
+        mode="w",
+        samplerate=dev.sample_rate,
+        channels=dev.channels,
+        format="WAV",
+    )
+
     thread = threading.Thread(
         target=_capture_audio,
-        args=(stream, dev, audio_buffer, is_recording, frames_received, last_stats),
+        args=(stream, dev, is_recording, writer),
         daemon=True,
     )
     thread.start()
-    input()
+
+    # Use sys.stdin.readline() instead of input() to avoid terminal clearing
+    sys.stdin.readline()
+
     is_recording[0] = False
     thread.join(timeout=2)
 
-    if not audio_buffer:
-        return b""
+    writer.close()
 
-    audio = np.array(list(audio_buffer), dtype="float32")
-    buf = io.BytesIO()
-    sf.write(buf, audio, samplerate=dev.sample_rate, format="WAV")
-    data = buf.getvalue()
+    # Read bytes to return
+    data = output_path.read_bytes()
 
-    # Get config and create output path with timestamp
-    config = get_config()
-    config.recordings_path.mkdir(parents=True, exist_ok=True)
-
-    out_path = get_recording_path(config.recordings_path)
-    out_path.write_bytes(data)
-    print(f"✓ Saved: {out_path} ({len(audio) / dev.sample_rate:.1f}s)")
-
-    return data
+    return data, output_path

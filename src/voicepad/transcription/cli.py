@@ -7,7 +7,7 @@ from typing import Annotated
 
 import typer
 
-from voicepad.config.settings import get_config
+from voicepad.config.settings import SUPPORTED_MODEL_SIZES, get_config
 from voicepad.system_utils import check_gpu_capabilities, recommend_faster_whisper_model
 from voicepad.transcription import TranscriptionResult, transcribe_audio
 
@@ -93,8 +93,21 @@ def transcribe(
             )
         else:
             model = config.transcription.model
+            if model not in SUPPORTED_MODEL_SIZES:
+                typer.echo(
+                    "✗ Unsupported model in config. Supported: "
+                    + ", ".join(m for m in SUPPORTED_MODEL_SIZES if m != "auto"),
+                    err=True,
+                )
+                raise typer.Exit(1)
             typer.echo(f"Using configured model: {model}")
     else:
+        if model not in SUPPORTED_MODEL_SIZES:
+            typer.echo(
+                "✗ Unsupported model. Supported: " + ", ".join(m for m in SUPPORTED_MODEL_SIZES if m != "auto"),
+                err=True,
+            )
+            raise typer.Exit(1)
         typer.echo(f"Using specified model: {model}")
 
     if device is None:
