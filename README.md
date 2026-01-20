@@ -74,10 +74,27 @@ If you have an NVIDIA GPU but it's not detected, ensure your drivers are up to d
 
 ```bash
 # Record audio (stops when you press Enter)
-uvx voicepad audio record --device-index 1
+uvx voicepad audio record --device 0
 
 # List available audio devices
 uvx voicepad audio devices
+```
+
+### Record and Transcribe Simultaneously
+
+```bash
+# Record and transcribe in real-time (NEW!)
+# Transcription happens every 30 seconds while you're still recording
+uvx voicepad audio record-and-transcribe
+
+# With custom model
+uvx voicepad audio record-and-transcribe --model small
+
+# Change poll interval for transcription (default: 30s)
+uvx voicepad audio record-and-transcribe --poll-interval 15
+
+# Use specific device
+uvx voicepad audio record-and-transcribe --compute-device cuda
 ```
 
 ### Transcribe Audio
@@ -157,7 +174,7 @@ recordings_path: data/recordings
 markdown_path: data/markdown
 
 transcription:
-  model: auto              # tiny, base, small, medium, large-v2, large-v3, turbo, distil-large-v3
+  model: auto              # Supported: tiny, tiny.en, base, base.en, small, small.en, distil-small.en, medium, medium.en, distil-medium.en, large-v1, large-v2, large-v3, large, distil-large-v2, distil-large-v3, large-v3-turbo, turbo
   device: auto             # cuda, cpu, auto
   compute_type: auto       # float16, int8, int8_float16
   language: null           # null for auto-detect, or language code like en, es, fr
@@ -250,6 +267,8 @@ ruff check
 | large-v3 | 1550M | ⚡ | ⭐⭐⭐⭐⭐ | ~4.7 GB |
 | turbo | 809M | ⚡⚡⚡ | ⭐⭐⭐⭐⭐ | ~3-4 GB |
 | distil-large-v3 | 756M | ⚡⚡⚡ | ⭐⭐⭐⭐⭐ | ~3-4 GB |
+
+Supported model names (no custom paths): tiny, tiny.en, base, base.en, small, small.en, distil-small.en, medium, medium.en, distil-medium.en, large-v1, large-v2, large-v3, large, distil-large-v2, distil-large-v3, large-v3-turbo, turbo.
 
 **Recommendation**: Use `--model auto` (default) to let voicepad choose the best model for your GPU.
 
