@@ -59,11 +59,13 @@ def detect_device_capabilities() -> tuple[DeviceType, str | None, float | None, 
         version = getattr(torch, "version", None)
         if version is not None and getattr(version, "hip", False):
             # ROCm detected but faster-whisper doesn't support it
+            logger.warning("ROCm detected but faster-whisper requires CUDA; transcription will use CPU fallback.")
             return "rocm", "AMD GPU (ROCm)", None, None
 
         # Check Apple MPS
         if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
             # MPS available but faster-whisper doesn't support it
+            logger.warning("Apple MPS detected but faster-whisper requires CUDA; transcription will use CPU fallback.")
             return "mps", "Apple Silicon GPU", None, None
 
         # CPU-only

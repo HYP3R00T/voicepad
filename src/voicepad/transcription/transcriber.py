@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 DeviceType = Literal["cuda", "cpu", "auto"]
-ComputeType = Literal["int8", "int8_float16", "int16", "float16", "float32"]
+ComputeType = Literal["int8", "int8_float16", "int16", "float16", "float32", "auto"]
 
 
 @dataclass
@@ -35,14 +35,14 @@ class WhisperTranscriber:
         self,
         model_size: str = "base",
         device: DeviceType = "auto",
-        compute_type: ComputeType = "float16",
+        compute_type: ComputeType = "auto",
     ) -> None:
         """Initialize the transcriber.
 
         Args:
             model_size: Whisper model size (tiny, base, small, medium, large, large-v2, large-v3)
             device: Device to use (cuda, cpu, auto)
-            compute_type: Compute type for model inference
+            compute_type: Compute type for model inference (or auto to choose best option)
         """
         self.model_size = model_size
         self.device = self._determine_device(device)
@@ -86,10 +86,15 @@ class WhisperTranscriber:
         Returns:
             str: Compute type to use
         """
-        # If using CPU, force float32 or int8
+        if compute_type == "auto":
+            resolved = "float16" if self.device == "cuda" else "int8"
+            logger.info(f"Auto compute type selected: {resolved} (device={self.device})")
+            return resolved
+
         if self.device == "cpu" and compute_type in ("float16", "int8_float16"):
             logger.warning(f"Compute type {compute_type} not supported on CPU, using int8")
             return "int8"
+
         return compute_type
 
     def load_model(self) -> None:
@@ -191,7 +196,7 @@ def transcribe_audio(
     model_size: str = "base",
     language: str | None = None,
     device: DeviceType = "auto",
-    compute_type: ComputeType = "float16",
+    compute_type: ComputeType = "auto",
     on_segment: Callable[[str], None] | None = None,
 ) -> TranscriptionResult:
     """Transcribe audio file using faster-whisper.
@@ -201,7 +206,7 @@ def transcribe_audio(
         model_size: Whisper model size (tiny, base, small, medium, large)
         language: Language code (None for auto-detection)
         device: Device to use (cuda, cpu, auto)
-        compute_type: Compute type for model inference
+        compute_type: Compute type for model inference (or auto to choose best option)
         on_segment: Optional callback function called with each segment text as it's transcribed.
                    Signature: on_segment(text: str) -> None
 

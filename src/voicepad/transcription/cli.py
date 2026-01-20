@@ -52,6 +52,14 @@ def transcribe(
             help="Device to use (cuda, cpu, auto). Uses config if not specified.",
         ),
     ] = None,
+    compute_type: Annotated[
+        str | None,
+        typer.Option(
+            "--compute-type",
+            "-c",
+            help="Compute type (float16, int8, int8_float16, auto). Uses config if not specified.",
+        ),
+    ] = None,
     output: Annotated[
         Path | None,
         typer.Option(
@@ -95,15 +103,18 @@ def transcribe(
     if language is None:
         language = config.transcription.language
 
+    if compute_type is None:
+        compute_type = config.transcription.compute_type
+
     typer.echo(f"Transcribing: {audio_file}")
-    typer.echo(f"Device: {device}, Language: {language or 'auto-detect'}")
+    typer.echo(f"Device: {device}, Compute Type: {compute_type}, Language: {language or 'auto-detect'}")
 
     # Suppress HuggingFace symlinks warning
     os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 
     try:
         # Show progress message
-        typer.echo("\n⏳ Processing audio...", nl=False)
+        typer.echo("\n⏳ Processing audio...")
 
         # Prepare segment callback for streaming
         transcribed_text = []
@@ -122,13 +133,24 @@ def transcribe(
             model_size=model,
             language=language,
             device=device,  # type: ignore[arg-type]
+            compute_type=compute_type,  # type: ignore[arg-type]
             on_segment=on_segment_callback,
         )
 
-        # Clear progress line
-        typer.echo("\r✓ Processing complete!   ")
+        # Show transcription text first (either already streamed or display now)
+        if not stream:
+            typer.echo("\nTranscription:")
+            typer.echo("-" * 60)
+            typer.echo(result.text)
+            typer.echo("-" * 60)
 
-        # Display results
+        # Processing complete message
+        if stream:
+            typer.echo("\n\n✓ Processing complete!")
+        else:
+            typer.echo("\n✓ Processing complete!")
+
+        # Display metadata summary
         typer.echo("\n" + "=" * 60)
         typer.secho("Transcription Complete", fg=typer.colors.GREEN, bold=True)
         typer.echo("=" * 60)
@@ -137,15 +159,6 @@ def transcribe(
         typer.echo(f"Segments: {len(result.segments)}")
         typer.echo(f"Device: {result.device_used}")
         typer.echo("=" * 60)
-
-        # Only show transcription section if not streamed
-        if not stream:
-            typer.echo("\nTranscription:")
-            typer.echo("-" * 60)
-            typer.echo(result.text)
-            typer.echo("-" * 60)
-        else:
-            typer.echo("\n" + "=" * 60)
 
         # Save to file - use config markdown path if output not specified
         if output is None:
