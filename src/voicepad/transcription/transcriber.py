@@ -79,15 +79,11 @@ class TranscriptionPoller:
         """
         audio_path = Path(audio_file)
 
-        # Check file size; need enough audio
+        # Check file size; need enough audio (rough estimate: 44100 Hz, float32)
         if not audio_path.exists():
             return None
 
-        file_size = audio_path.stat().st_size
-        # Rough estimate: 44100 Hz, float32 = ~176KB per second + WAV header
-        estimated_duration = max(0.0, (file_size - 1000) / (44100 * 4))
-
-        if estimated_duration < self.min_duration:
+        if (audio_path.stat().st_size - 1000) / (44100 * 4) < self.min_duration:
             return None
 
         try:
@@ -98,15 +94,13 @@ class TranscriptionPoller:
                 on_segment=None,  # Handle deduplication ourselves
             )
 
-            # Filter to only new segments (those after last_segment_end)
-            new_segments = [seg for seg in result.segments if seg["end"] > self.last_segment_end]
+            new_segments = self._filter_new_segments(result.segments)
 
             with self._lock:
                 if new_segments:
                     self.last_segment_end = result.segments[-1]["end"]
-                    # Call callback for each new segment
-                    for seg in new_segments:
-                        if on_segment:
+                    if on_segment:
+                        for seg in new_segments:
                             on_segment(seg["text"])
 
             # Return full result with all segments (not just new)
@@ -115,6 +109,10 @@ class TranscriptionPoller:
         except Exception as e:
             logger.warning(f"Transcription poll failed: {e}")
             return None
+
+    def _filter_new_segments(self, segments: list[dict]) -> list[dict]:
+        """Return only segments that start after the last processed end time."""
+        return [seg for seg in segments if seg["end"] > self.last_segment_end]
 
 
 class WhisperTranscriber:
@@ -126,65 +124,38 @@ class WhisperTranscriber:
         device: DeviceType = "auto",
         compute_type: ComputeType = "auto",
     ) -> None:
-        """Initialize the transcriber.
-
-        Args:
-            model_size: Whisper model size (tiny, base, small, medium, large, large-v2, large-v3)
-            device: Device to use (cuda, cpu, auto)
-            compute_type: Compute type for model inference (or auto to choose best option)
-        """
+        """Initialize the transcriber."""
         self.model_size = model_size
-        self.device = self._determine_device(device)
-        self.compute_type = self._determine_compute_type(compute_type)
+        self.device, self.compute_type = self._resolve_device_and_compute(device, compute_type)
         self.model: WhisperModel | None = None
 
         logger.info(
             f"Initializing WhisperTranscriber (model={model_size}, device={self.device}, compute_type={self.compute_type})"
         )
 
-    def _determine_device(self, device: DeviceType) -> str:
-        """Determine the best device to use.
+    def _resolve_device_and_compute(self, device: DeviceType, compute_type: ComputeType) -> tuple[str, str]:
+        """Determine device and compute type together."""
+        resolved_device = device
 
-        Args:
-            device: Requested device type
+        if device == "auto":
+            try:
+                import torch
 
-        Returns:
-            str: Device to use (cuda or cpu)
-        """
-        if device != "auto":
-            return device
+                resolved_device = "cuda" if torch.cuda.is_available() else "cpu"
+            except ImportError:
+                resolved_device = "cpu"
+        else:
+            resolved_device = device
 
-        try:
-            import torch
-
-            if torch.cuda.is_available():
-                logger.info("CUDA available, using GPU for transcription")
-                return "cuda"
-        except ImportError:
-            pass
-
-        logger.info("CUDA not available, using CPU for transcription")
-        return "cpu"
-
-    def _determine_compute_type(self, compute_type: ComputeType) -> str:
-        """Determine the appropriate compute type based on device.
-
-        Args:
-            compute_type: Requested compute type
-
-        Returns:
-            str: Compute type to use
-        """
         if compute_type == "auto":
-            resolved = "float16" if self.device == "cuda" else "int8"
-            logger.info(f"Auto compute type selected: {resolved} (device={self.device})")
-            return resolved
-
-        if self.device == "cpu" and compute_type in ("float16", "int8_float16"):
+            resolved_compute = "float16" if resolved_device == "cuda" else "int8"
+        elif resolved_device == "cpu" and compute_type in ("float16", "int8_float16"):
             logger.warning(f"Compute type {compute_type} not supported on CPU, using int8")
-            return "int8"
+            resolved_compute = "int8"
+        else:
+            resolved_compute = compute_type
 
-        return compute_type
+        return resolved_device, resolved_compute
 
     def load_model(self) -> None:
         """Load the Whisper model."""
