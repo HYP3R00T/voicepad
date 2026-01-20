@@ -17,6 +17,34 @@ logger = logging.getLogger(__name__)
 audio_app = typer.Typer(help="Audio recording and device commands")
 
 
+def _resolve_model(model: str | None, config) -> str:
+    """Resolve which model to use given CLI value and config."""
+    supported = ", ".join(m for m in SUPPORTED_MODEL_SIZES if m != "auto")
+
+    def _validate(value: str) -> str:
+        if value not in SUPPORTED_MODEL_SIZES:
+            typer.echo(f"✗ Unsupported model. Supported: {supported}", err=True)
+            raise typer.Exit(1)
+        return value
+
+    if model:
+        typer.echo(f"Using specified model: {model}")
+        return _validate(model)
+
+    if config.transcription.model == "auto":
+        gpu_info = check_gpu_capabilities()
+        rec = recommend_faster_whisper_model(gpu_info.device_type, gpu_info.total_memory_gb)
+        detected = _validate(rec.model_size)
+        typer.echo(
+            f"Auto-detected model: {detected} (based on {gpu_info.device_type} with {gpu_info.total_memory_gb or 0:.1f}GB VRAM)"
+        )
+        return detected
+
+    configured = _validate(config.transcription.model)
+    typer.echo(f"Using configured model: {configured}")
+    return configured
+
+
 @audio_app.command()
 def list_devices() -> None:
     """List available audio input devices."""
@@ -84,42 +112,10 @@ def record_and_transcribe(
     Records continuously while polling the temp audio file to transcribe accumulated audio
     at regular intervals. Press Enter to stop recording.
     """
-    # Load config for defaults
     config = get_config()
-
-    # Determine model
-    if model is None:
-        if config.transcription.model == "auto":
-            gpu_info = check_gpu_capabilities()
-            rec = recommend_faster_whisper_model(gpu_info.device_type, gpu_info.total_memory_gb)
-            model = rec.model_size
-            typer.echo(
-                f"Auto-detected model: {model} (based on {gpu_info.device_type} with {gpu_info.total_memory_gb or 0:.1f}GB VRAM)"
-            )
-        else:
-            model = config.transcription.model
-            if model not in SUPPORTED_MODEL_SIZES:
-                typer.echo(
-                    "✗ Unsupported model in config. Supported: "
-                    + ", ".join(m for m in SUPPORTED_MODEL_SIZES if m != "auto"),
-                    err=True,
-                )
-                raise typer.Exit(1)
-            typer.echo(f"Using configured model: {model}")
-    else:
-        if model not in SUPPORTED_MODEL_SIZES:
-            typer.echo(
-                "✗ Unsupported model. Supported: " + ", ".join(m for m in SUPPORTED_MODEL_SIZES if m != "auto"),
-                err=True,
-            )
-            raise typer.Exit(1)
-        typer.echo(f"Using specified model: {model}")
-
-    if device_type is None:
-        device_type = config.transcription.device
-
-    if language is None:
-        language = config.transcription.language
+    model = _resolve_model(model, config)
+    device_type = device_type or config.transcription.device
+    language = language or config.transcription.language
 
     typer.echo(f"Recording from device {device_index}...")
     typer.echo("Press Enter to stop recording...")
@@ -144,32 +140,23 @@ def record_and_transcribe(
             min_duration=3.0,
         )
 
-        # Collect segments during recording instead of printing
+        # Collect segments during recording
         collected_segments: list[str] = []
-
-        def on_segment_callback(text: str) -> None:
-            """Callback for each new segment - collect it."""
-            collected_segments.append(text)
-
-        # Stop event for threading
         stop_event = threading.Event()
 
-        # Thread for polling and transcribing
         def polling_loop() -> None:
             """Poll file and transcribe in background."""
+            append_segment = collected_segments.append
             while not stop_event.is_set():
                 try:
-                    result = poller.poll_and_transcribe(
+                    poller.poll_and_transcribe(
                         temp_audio_file,
-                        on_segment=on_segment_callback,
+                        on_segment=append_segment,
                         stop_event=stop_event,
                     )
-                    if result:
-                        logger.debug(f"Polled transcription: {len(result.segments)} segments")
                 except Exception as e:
                     logger.error(f"Polling error: {e}")
 
-                # Sleep before next poll
                 stop_event.wait(poll_interval)
 
         # Start polling thread
@@ -177,40 +164,32 @@ def record_and_transcribe(
         poll_thread.start()
 
         # Record audio (blocks until Enter pressed)
-        _, output_path = record_voice(device_index, output_file=temp_audio_file)
+        output_path = record_voice(device_index, output_file=temp_audio_file)
 
-        # Signal stop to polling thread
+        # Stop polling and do final transcription pass
         stop_event.set()
         poll_thread.join(timeout=5)
-
-        # Final transcription pass to get any remaining audio
+        append_segment = collected_segments.append
         final_result = poller.poll_and_transcribe(
             temp_audio_file,
-            on_segment=on_segment_callback,
+            on_segment=append_segment,
             stop_event=stop_event,
         )
 
-        # Display all collected transcription after recording stops
-        typer.echo("\n")
+        # Display all transcription
         if collected_segments:
-            typer.echo("".join(collected_segments))
-        typer.echo("\n")
+            typer.echo("\n" + "".join(collected_segments) + "\n")
 
-        # Save transcript file
+        # Save transcript and show file paths
         if output_path and final_result:
             markdown_dir = config.markdown_path
             markdown_dir.mkdir(parents=True, exist_ok=True)
             markdown_file = markdown_dir / f"{output_path.stem}_transcript.txt"
             markdown_file.write_text(final_result.text, encoding="utf-8")
             typer.echo(f"✓ Transcript: {markdown_file}")
-
-        # Show where audio was saved
         typer.echo(f"✓ Audio: {output_path}")
 
     except Exception as e:
         typer.secho(f"✗ Error: {e}", fg=typer.colors.RED, err=True)
         logger.error("Record and transcribe failed", exc_info=e)
         raise typer.Exit(1) from e
-    finally:
-        # Do not delete recorded audio; stored in configured recordings path
-        pass

@@ -109,7 +109,7 @@ def _capture_audio(
 def record_voice(
     device_index: int,
     output_file: Path | str | None = None,
-) -> tuple[bytes, Path | None]:
+) -> Path:
     """
     Record audio continuously until user presses Enter.
 
@@ -168,7 +168,4 @@ def record_voice(
 
     writer.close()
 
-    # Read bytes to return
-    data = output_path.read_bytes()
-
-    return data, output_path
+    return output_path
