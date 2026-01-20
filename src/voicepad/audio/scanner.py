@@ -85,41 +85,6 @@ def print_devices():
         print(dev)
 
 
-def record_voice(device_index: int, duration: float) -> bytes:
-    """
-    Record audio from the given device for `duration` seconds.
-    Saves to configured recordings path with timestamp.
-
-    Args:
-        device_index: OS device index.
-        duration: Recording duration in seconds.
-
-    Returns:
-        Bytes containing the encoded audio.
-    """
-    if duration <= 0:
-        raise ValueError("duration must be positive")
-
-    dev = get_device_by_index(device_index)
-
-    frames = int(duration * dev.sample_rate)
-    arr = sd.rec(frames, samplerate=dev.sample_rate, channels=dev.channels, dtype="float32", device=device_index)
-    sd.wait()
-
-    buf = io.BytesIO()
-    sf.write(buf, arr, samplerate=dev.sample_rate, format="WAV")
-    data = buf.getvalue()
-
-    # Get config and create output path with timestamp
-    config = get_config()
-    config.recordings_path.mkdir(parents=True, exist_ok=True)
-
-    out_path = get_recording_path(config.recordings_path)
-    out_path.write_bytes(data)
-
-    return data
-
-
 def _capture_audio(
     stream: sd.InputStream,
     dev: AudioDevice,
@@ -156,16 +121,18 @@ def _capture_audio(
         logger.error(f"Stream error: {e}")
 
 
-def record_voice_continuous(device_index: int, keep_duration_sec: float = 300) -> bytes:
+def record_voice(device_index: int, keep_duration_sec: float = 300) -> bytes:
     """
-    Continuously capture audio using a rolling buffer with bounded memory.
+    Record audio continuously until user presses Enter.
+
+    Uses a rolling buffer to manage memory efficiently while recording.
 
     Args:
         device_index: OS device index.
         keep_duration_sec: How many seconds of audio to keep (default: 5 minutes).
 
     Returns:
-        WAV bytes of the last `keep_duration_sec` seconds of audio.
+        WAV bytes of the recorded audio.
     """
     dev = get_device_by_index(device_index)
     max_frames = int(keep_duration_sec * dev.sample_rate)
