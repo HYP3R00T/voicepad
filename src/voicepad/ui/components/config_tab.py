@@ -55,7 +55,7 @@ class ConfigTab(Static):
     """A modular configuration editor panel.
 
     - Loads values using `utilityhub_config` (searches project config files)
-    - Allows editing supported fields (currently: `timeout`)
+    - Allows editing supported fields (recordings_path, markdown_path)
     - Saves changes back to disk (writes project `{app_name}.yaml`) and emits `ConfigSaved`
 
     The widget is intentionally small and focused so it can be reused/embedded
@@ -78,15 +78,19 @@ class ConfigTab(Static):
         self.config: Config | None = None
 
         # Input widgets
-        self.timeout_input: Input | None = None
+        self.recordings_input: Input | None = None
+        self.markdown_input: Input | None = None
         self.status_label: Label | None = None
 
     def compose(self) -> Vertical:  # type: ignore[override]
         with Vertical():
             yield Label("Configuration", id="config-title")
-            yield Label("timeout (seconds):")
-            self.timeout_input = Input(placeholder="timeout in seconds", id="timeout-input")
-            yield self.timeout_input
+            yield Label("Recordings path:")
+            self.recordings_input = Input(placeholder="path to recordings", id="recordings-input")
+            yield self.recordings_input
+            yield Label("Markdown path:")
+            self.markdown_input = Input(placeholder="path to markdown", id="markdown-input")
+            yield self.markdown_input
             yield Button("Save", id="save-btn")
             self.status_label = Label("", id="config-status")
             yield self.status_label
@@ -95,8 +99,10 @@ class ConfigTab(Static):
         try:
             self.config = load_config(cwd=self.cwd, app_name=self.app_name)
             # Populate inputs
-            assert self.timeout_input is not None
-            self.timeout_input.value = str(self.config.timeout)
+            assert self.recordings_input is not None
+            assert self.markdown_input is not None
+            self.recordings_input.value = str(self.config.recordings_path)
+            self.markdown_input.value = str(self.config.markdown_path)
             self.set_status("Loaded configuration", success=True)
         except Exception as exc:
             self.set_status(f"Failed to load: {exc}", success=False)
@@ -107,10 +113,13 @@ class ConfigTab(Static):
 
     def action_save(self) -> None:
         """Save current input values to disk and emit `ConfigSaved`."""
-        assert self.timeout_input is not None
+        assert self.recordings_input is not None
+        assert self.markdown_input is not None
         try:
-            timeout = int(self.timeout_input.value.strip())
-            new_config = Config(timeout=timeout)
+            new_config = Config(
+                recordings_path=Path(self.recordings_input.value.strip()),
+                markdown_path=Path(self.markdown_input.value.strip()),
+            )
             save_config(new_config, cwd=self.cwd, app_name=self.app_name)
             self.config = new_config
             self.set_status("Saved configuration", success=True)
