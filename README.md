@@ -55,6 +55,8 @@ uv sync
 
 VoicePad automatically includes PyTorch with CUDA 12.4 support and will use your GPU when available.
 
+If ROCm or Apple MPS is detected, voicepad will fall back to CPU (faster-whisper currently supports CUDA only) and warn you.
+
 Check your system status:
 
 ```bash
@@ -95,6 +97,9 @@ uvx voicepad transcribe transcribe recording.wav --model medium  # Better qualit
 # Specify device
 uvx voicepad transcribe transcribe recording.wav --device cuda  # GPU
 uvx voicepad transcribe transcribe recording.wav --device cpu   # CPU
+
+# Specify compute type (auto chooses float16 on CUDA, int8 on CPU)
+uvx voicepad transcribe transcribe recording.wav --compute-type int8
 
 # Specify language (auto-detect by default)
 uvx voicepad transcribe transcribe recording.wav --language en
@@ -157,6 +162,8 @@ transcription:
   compute_type: auto       # float16, int8, int8_float16
   language: null           # null for auto-detect, or language code like en, es, fr
 ```
+
+Auto compute type picks `float16` on CUDA GPUs and `int8` on CPU (including ROCm/MPS fallback).
 
 **Precedence** (higher overrides lower):
 
