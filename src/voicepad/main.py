@@ -1,12 +1,16 @@
 import typer
 
 from voicepad.audio.cli import audio_app
+from voicepad.config.cli import config_app
 from voicepad.ui.voicepad_ui import VoicepadUI
 
 app = typer.Typer(invoke_without_command=True)
 
-# Register audio sub-commands under 'cli'
-app.add_typer(audio_app, name="cli", help="CLI commands for testing audio features")
+# Register audio sub-commands
+app.add_typer(audio_app, name="audio", help="Audio recording and device commands")
+
+# Register config sub-commands
+app.add_typer(config_app, name="config", help="Configuration management commands")
 
 
 def ui() -> None:
