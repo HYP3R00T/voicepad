@@ -5,12 +5,14 @@ import time
 from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TypedDict, cast
 
 import numpy as np
 import sounddevice as sd
 import soundfile as sf
+
+from voicepad.audio.utils import get_recording_path
+from voicepad.config import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +88,7 @@ def print_devices():
 def record_voice(device_index: int, duration: float) -> bytes:
     """
     Record audio from the given device for `duration` seconds.
-    Saves to project root as recording.wav and returns audio bytes.
+    Saves to configured recordings path with timestamp.
 
     Args:
         device_index: OS device index.
@@ -108,8 +110,11 @@ def record_voice(device_index: int, duration: float) -> bytes:
     sf.write(buf, arr, samplerate=dev.sample_rate, format="WAV")
     data = buf.getvalue()
 
-    project_root = Path(__file__).parents[3]
-    out_path = project_root / "recording.wav"
+    # Get config and create output path with timestamp
+    config = get_config()
+    config.recordings_path.mkdir(parents=True, exist_ok=True)
+
+    out_path = get_recording_path(config.recordings_path)
     out_path.write_bytes(data)
 
     return data
@@ -195,7 +200,11 @@ def record_voice_continuous(device_index: int, keep_duration_sec: float = 300) -
     sf.write(buf, audio, samplerate=dev.sample_rate, format="WAV")
     data = buf.getvalue()
 
-    out_path = Path(__file__).parents[3] / "recording.wav"
+    # Get config and create output path with timestamp
+    config = get_config()
+    config.recordings_path.mkdir(parents=True, exist_ok=True)
+
+    out_path = get_recording_path(config.recordings_path)
     out_path.write_bytes(data)
     print(f"✓ Saved: {out_path} ({len(audio) / dev.sample_rate:.1f}s)")
 

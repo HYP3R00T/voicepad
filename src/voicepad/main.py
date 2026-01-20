@@ -1,33 +1,26 @@
 import typer
-from utilityhub_config import load_settings
 
-from voicepad.audio.scanner import get_device_by_index, record_voice_continuous
-from voicepad.config import Config
+from voicepad.audio.cli import audio_app
 from voicepad.ui.voicepad_ui import VoicepadUI
 
 app = typer.Typer(invoke_without_command=True)
 
-
-def ui():
-    app = VoicepadUI()
-    app.run()
+# Register audio sub-commands under 'cli'
+app.add_typer(audio_app, name="cli", help="CLI commands for testing audio features")
 
 
-@app.command()
-def cli():
-    settings, metadata = load_settings(Config, app_name="voicepad", env_prefix="VP")
-    print(settings.timeout)
-
-    print(get_device_by_index(1))
-    record_voice_continuous(1)
+def ui() -> None:
+    """Create and run the Voicepad UI application."""
+    voicepad_app = VoicepadUI()
+    voicepad_app.run()
 
 
 @app.callback()
-def _default(ctx: typer.Context):
-    # When invoked without a subcommand, run the `ui` command.
+def _default(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand is None:
         ui()
 
 
-def main():
+def main() -> None:
+    """Entry point for the CLI application."""
     app()
