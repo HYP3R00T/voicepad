@@ -1,9 +1,35 @@
 """Configuration management for Voicepad."""
 
 from pathlib import Path
+from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from utilityhub_config import load_settings
+
+DeviceType = Literal["cuda", "cpu", "auto"]
+ModelSize = Literal["tiny", "base", "small", "medium", "large-v2", "large-v3", "turbo", "distil-large-v3", "auto"]
+ComputeType = Literal["float16", "int8", "int8_float16", "auto"]
+
+
+class TranscriptionConfig(BaseModel):
+    """Configuration for audio transcription."""
+
+    model: ModelSize = Field(
+        default="auto",
+        description="Whisper model size to use for transcription",
+    )
+    device: DeviceType = Field(
+        default="auto",
+        description="Device to use for transcription (cuda, cpu, or auto-detect)",
+    )
+    compute_type: ComputeType = Field(
+        default="auto",
+        description="Compute type for transcription (float16, int8, or auto-detect)",
+    )
+    language: str | None = Field(
+        default=None,
+        description="Default language for transcription (None for auto-detection)",
+    )
 
 
 class Config(BaseModel):
@@ -11,6 +37,7 @@ class Config(BaseModel):
 
     recordings_path: Path = Path("data/recordings")
     markdown_path: Path = Path("data/markdown")
+    transcription: TranscriptionConfig = Field(default_factory=TranscriptionConfig)
 
 
 def get_config() -> Config:
