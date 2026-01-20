@@ -2,7 +2,7 @@ import typer
 
 from voicepad.audio.cli import audio_app
 from voicepad.config.cli import config_app
-from voicepad.ui.voicepad_ui import VoicepadUI
+from voicepad.ui.cli import start_ui
 
 app = typer.Typer(invoke_without_command=True)
 
@@ -13,16 +13,11 @@ app.add_typer(audio_app, name="audio", help="Audio recording and device commands
 app.add_typer(config_app, name="config", help="Configuration management commands")
 
 
-def ui() -> None:
-    """Create and run the Voicepad UI application."""
-    voicepad_app = VoicepadUI()
-    voicepad_app.run()
-
-
 @app.callback()
 def _default(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand is None:
-        ui()
+        # Run UI by default when no subcommand is provided
+        start_ui()
 
 
 def main() -> None:
