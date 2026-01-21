@@ -86,7 +86,7 @@ def print_devices():
 def _capture_audio(
     stream: sd.InputStream,
     dev: AudioDevice,
-    is_recording: list[bool],
+    stop_event: threading.Event,
     writer: sf.SoundFile,
 ) -> None:
     """Read audio in background thread and write directly to file."""
@@ -94,46 +94,24 @@ def _capture_audio(
         with stream:
             logger.info(f"Recording from: {dev.name} ({dev.sample_rate}Hz)")
 
-            while is_recording[0]:
+            while not stop_event.is_set():
                 chunk, overflow = stream.read(int(dev.sample_rate))
                 if overflow:
                     logger.warning("Audio overflow detected")
-
-                # Write chunk immediately so transcriber can read growing file
                 writer.write(chunk)
-
     except Exception as e:
         logger.error(f"Stream error: {e}")
+    finally:
+        writer.close()
 
 
-def record_voice(
+def capture_audio_background(
     device_index: int,
-    output_file: Path | str | None = None,
-) -> Path:
-    """
-    Record audio continuously until user presses Enter.
-
-    Writes audio directly to disk as it records so transcription can poll
-    the growing file. Uses configured recordings path by default.
-
-    Args:
-        device_index: OS device index.
-        output_file: Optional path to write audio incrementally. If None, uses configured recordings path.
-
-    Returns:
-        Tuple of (WAV bytes, output file path)
-    """
+    output_path: Path,
+    stop_event: threading.Event,
+) -> threading.Thread:
+    """Start recording in background. Caller sets stop_event to stop."""
     dev = get_device_by_index(device_index)
-    is_recording = [True]
-
-    # Decide output path
-    if output_file:
-        output_path = Path(output_file)
-    else:
-        config = get_config()
-        config.recordings_path.mkdir(parents=True, exist_ok=True)
-        output_path = get_recording_path(config.recordings_path)
-
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     stream = sd.InputStream(
@@ -144,7 +122,6 @@ def record_voice(
         blocksize=int(dev.sample_rate),
     )
 
-    # Open writer for incremental writes
     writer = sf.SoundFile(
         file=str(output_path),
         mode="w",
@@ -155,17 +132,40 @@ def record_voice(
 
     thread = threading.Thread(
         target=_capture_audio,
-        args=(stream, dev, is_recording, writer),
+        args=(stream, dev, stop_event, writer),
         daemon=True,
     )
     thread.start()
+    return thread
 
-    # Use sys.stdin.readline() instead of input() to avoid terminal clearing
+
+def record_voice(
+    device_index: int,
+    output_file: Path | str | None = None,
+) -> Path:
+    """
+    Record audio continuously until user presses Enter.
+
+    Args:
+        device_index: OS device index.
+        output_file: Optional path. If None, uses configured recordings path.
+
+    Returns:
+        Path to the recorded file.
+    """
+    if output_file:
+        output_path = Path(output_file)
+    else:
+        config = get_config()
+        config.recordings_path.mkdir(parents=True, exist_ok=True)
+        output_path = get_recording_path(config.recordings_path)
+
+    stop_event = threading.Event()
+    thread = capture_audio_background(device_index, output_path, stop_event)
+
     sys.stdin.readline()
 
-    is_recording[0] = False
+    stop_event.set()
     thread.join(timeout=2)
-
-    writer.close()
 
     return output_path
