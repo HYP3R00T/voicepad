@@ -9,8 +9,8 @@ from typing import TypedDict, cast
 import sounddevice as sd
 import soundfile as sf
 
-from voicepad.audio.utils import get_recording_path
 from voicepad.config import get_config
+from voicepad.voice.utils import get_recording_path
 
 logger = logging.getLogger(__name__)
 

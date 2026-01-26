@@ -1,20 +1,16 @@
 import typer
 
-from voicepad.audio.cli import audio_app
 from voicepad.config.cli import config_app
-from voicepad.transcription.cli import transcription_app
 from voicepad.ui.cli import start_ui
+from voicepad.voice.cli import voice_app
 
 app = typer.Typer(invoke_without_command=True)
 
-# Register audio sub-commands
-app.add_typer(audio_app, name="audio", help="Audio recording and device commands")
+# Register voice sub-commands
+app.add_typer(voice_app, name="voice", help="Voice recording and transcription commands")
 
 # Register config sub-commands
 app.add_typer(config_app, name="config", help="Configuration management commands")
-
-# Register transcription sub-commands
-app.add_typer(transcription_app, name="transcribe", help="Audio transcription commands")
 
 
 @app.callback()

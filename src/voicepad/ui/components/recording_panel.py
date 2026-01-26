@@ -7,9 +7,8 @@ from textual.app import ComposeResult
 from textual.containers import Container, Horizontal
 from textual.widgets import Button, Label, RichLog, Select, Static
 
-from voicepad.audio.scanner import capture_audio_background, get_input_devices
-from voicepad.audio.utils import get_recording_path
 from voicepad.config import get_config
+from voicepad.voice import capture_audio_background, get_input_devices, get_recording_path
 
 
 class RecordingPanel(Container):
