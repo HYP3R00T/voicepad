@@ -7,15 +7,12 @@ import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from faster_whisper import WhisperModel
 
 logger = logging.getLogger(__name__)
-
-DeviceType = Literal["cuda", "cpu", "auto"]
-ComputeType = Literal["int8", "int8_float16", "int16", "float16", "float32", "auto"]
 
 
 @dataclass
@@ -35,9 +32,6 @@ class TranscriptionPoller:
     def __init__(
         self,
         model_size: str = "base",
-        device: DeviceType = "auto",
-        compute_type: ComputeType = "auto",
-        language: str | None = None,
         poll_interval: float = 30.0,
         min_duration: float = 5.0,
     ) -> None:
@@ -45,19 +39,13 @@ class TranscriptionPoller:
 
         Args:
             model_size: Whisper model size
-            device: Device to use (cuda, cpu, auto)
-            compute_type: Compute type for model inference
-            language: Language code (None for auto-detection)
             poll_interval: Seconds between transcription polls
             min_duration: Minimum audio duration in seconds before first transcription attempt
         """
         self.model_size = model_size
-        self.device = device
-        self.compute_type = compute_type
-        self.language = language
         self.poll_interval = poll_interval
         self.min_duration = min_duration
-        self.transcriber = WhisperTranscriber(model_size, device, compute_type)
+        self.transcriber = WhisperTranscriber(model_size)
         self.last_segment_end: float = 0.0
         self._lock = threading.Lock()
 
@@ -90,7 +78,6 @@ class TranscriptionPoller:
             # Transcribe the file
             result = self.transcriber.transcribe(
                 audio_path,
-                language=self.language,
                 on_segment=None,  # Handle deduplication ourselves
             )
 
@@ -121,41 +108,27 @@ class WhisperTranscriber:
     def __init__(
         self,
         model_size: str = "base",
-        device: DeviceType = "auto",
-        compute_type: ComputeType = "auto",
     ) -> None:
         """Initialize the transcriber."""
         self.model_size = model_size
-        self.device, self.compute_type = self._resolve_device_and_compute(device, compute_type)
+        self.device, self.compute_type = self._resolve_device_and_compute()
         self.model: WhisperModel | None = None
 
         logger.info(
             f"Initializing WhisperTranscriber (model={model_size}, device={self.device}, compute_type={self.compute_type})"
         )
 
-    def _resolve_device_and_compute(self, device: DeviceType, compute_type: ComputeType) -> tuple[str, str]:
-        """Determine device and compute type together."""
-        resolved_device = device
+    def _resolve_device_and_compute(self) -> tuple[str, str]:
+        """Determine device and compute type based on system capabilities."""
+        try:
+            import torch
 
-        if device == "auto":
-            try:
-                import torch
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        except ImportError:
+            device = "cpu"
 
-                resolved_device = "cuda" if torch.cuda.is_available() else "cpu"
-            except ImportError:
-                resolved_device = "cpu"
-        else:
-            resolved_device = device
-
-        if compute_type == "auto":
-            resolved_compute = "float16" if resolved_device == "cuda" else "int8"
-        elif resolved_device == "cpu" and compute_type in ("float16", "int8_float16"):
-            logger.warning(f"Compute type {compute_type} not supported on CPU, using int8")
-            resolved_compute = "int8"
-        else:
-            resolved_compute = compute_type
-
-        return resolved_device, resolved_compute
+        compute_type = "float16" if device == "cuda" else "int8"
+        return device, compute_type
 
     def load_model(self) -> None:
         """Load the Whisper model."""
@@ -183,7 +156,6 @@ class WhisperTranscriber:
     def transcribe(
         self,
         audio_path: Path | str,
-        language: str | None = None,
         beam_size: int = 5,
         vad_filter: bool = True,
         on_segment: Callable[[str], None] | None = None,
@@ -192,7 +164,6 @@ class WhisperTranscriber:
 
         Args:
             audio_path: Path to audio file
-            language: Language code (None for auto-detection)
             beam_size: Beam size for decoding
             vad_filter: Whether to use VAD filtering
             on_segment: Optional callback function called with each segment text as it's transcribed.
@@ -216,7 +187,6 @@ class WhisperTranscriber:
         # Transcribe
         segments, info = self.model.transcribe(
             str(audio_path),
-            language=language,
             beam_size=beam_size,
             vad_filter=vad_filter,
         )
@@ -254,9 +224,6 @@ class WhisperTranscriber:
 def transcribe_audio(
     audio_path: Path | str,
     model_size: str = "base",
-    language: str | None = None,
-    device: DeviceType = "auto",
-    compute_type: ComputeType = "auto",
     on_segment: Callable[[str], None] | None = None,
 ) -> TranscriptionResult:
     """Transcribe audio file using faster-whisper.
@@ -264,18 +231,11 @@ def transcribe_audio(
     Args:
         audio_path: Path to audio file
         model_size: Whisper model size (tiny, base, small, medium, large)
-        language: Language code (None for auto-detection)
-        device: Device to use (cuda, cpu, auto)
-        compute_type: Compute type for model inference (or auto to choose best option)
         on_segment: Optional callback function called with each segment text as it's transcribed.
                    Signature: on_segment(text: str) -> None
 
     Returns:
         TranscriptionResult: Transcription result with text and metadata
     """
-    transcriber = WhisperTranscriber(
-        model_size=model_size,
-        device=device,
-        compute_type=compute_type,
-    )
-    return transcriber.transcribe(audio_path, language=language, on_segment=on_segment)
+    transcriber = WhisperTranscriber(model_size=model_size)
+    return transcriber.transcribe(audio_path, on_segment=on_segment)

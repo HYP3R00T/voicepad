@@ -197,6 +197,21 @@ wheels = [
 ]
 
 [[package]]
+name = "beaupy"
+version = "3.11.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "emoji" },
+    { name = "python-yakh" },
+    { name = "questo" },
+    { name = "rich" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/78/b2/1478a56b9669eda5fc6f9fed9e9aa47fbe73b564c5fb5cd55d719cf5b32e/beaupy-3.11.0.tar.gz", hash = "sha256:c264d13061c5741ceef5462b3752e572a0a7c3b8bd8dac870d10aec8a7d6b2ee", size = 16550, upload-time = "2026-01-08T14:03:33.794Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/56/0e/58181784f84f5944e2539e9605fdb1941bb2156c6382d5d11937a86128ec/beaupy-3.11.0-py3-none-any.whl", hash = "sha256:43dfa75f8a0ebb11c031426b481b27266f8623fbb28d695521ac6dc2c27479f0", size = 14860, upload-time = "2026-01-08T14:03:31.669Z" },
+]
+
+[[package]]
 name = "certifi"
 version = "2026.1.4"
 source = { registry = "https://pypi.org/simple" }
@@ -352,6 +367,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/96/8e/709914eb2b5749865801041647dc7f4e6d00b549cfe88b65ca192995f07c/distlib-0.4.0.tar.gz", hash = "sha256:feec40075be03a04501a973d81f633735b4b69f98b05450592310c0f401a4e0d", size = 614605, upload-time = "2025-07-17T16:52:00.465Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/33/6b/e0547afaf41bf2c42e52430072fa5658766e3d65bd4b03a563d1b6336f57/distlib-0.4.0-py2.py3-none-any.whl", hash = "sha256:9659f7d87e46584a30b5780e43ac7a2143098441670ff0a49d5f9034c54a6c16", size = 469047, upload-time = "2025-07-17T16:51:58.613Z" },
+]
+
+[[package]]
+name = "emoji"
+version = "2.15.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a2/78/0d2db9382c92a163d7095fc08efff7800880f830a152cfced40161e7638d/emoji-2.15.0.tar.gz", hash = "sha256:eae4ab7d86456a70a00a985125a03263a5eac54cd55e51d7e184b1ed3b6757e4", size = 615483, upload-time = "2025-09-21T12:13:02.755Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e1/5e/4b5aaaabddfacfe36ba7768817bd1f71a7a810a43705e531f3ae4c690767/emoji-2.15.0-py3-none-any.whl", hash = "sha256:205296793d66a89d88af4688fa57fd6496732eb48917a87175a023c8138995eb", size = 608433, upload-time = "2025-09-21T12:13:01.197Z" },
 ]
 
 [[package]]
@@ -1383,6 +1407,15 @@ wheels = [
 ]
 
 [[package]]
+name = "python-yakh"
+version = "0.4.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/d2/77/bbff0a1e6fb03b8cc2cc373a44cfbbb4fd22863c657f8630f4a0f5eb207c/python_yakh-0.4.1.tar.gz", hash = "sha256:da03e800b4f2f5d85344f1668e852687c12dc1a99a03c65cf3dc13a3680da49d", size = 3988, upload-time = "2025-01-14T18:08:15.767Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/22/42/72571b24514b5f59c328f12e5294b246958951b889fac2bd5321e08a4bab/python_yakh-0.4.1-py3-none-any.whl", hash = "sha256:d69507e13e03d09cefd88030f74b6d5369b67de004be975a35be28eb286122e4", size = 5826, upload-time = "2025-01-14T18:08:13.618Z" },
+]
+
+[[package]]
 name = "pyyaml"
 version = "6.0.3"
 source = { registry = "https://pypi.org/simple" }
@@ -1426,6 +1459,19 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/da/92/1446574745d74df0c92e6aa4a7b0b3130706a4142b2d1a5869f2eaa423c6/pyyaml-6.0.3-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:16249ee61e95f858e83976573de0f5b2893b3677ba71c9dd36b9cf8be9ac6d65", size = 829923, upload-time = "2025-09-25T21:32:54.537Z" },
     { url = "https://files.pythonhosted.org/packages/f0/7a/1c7270340330e575b92f397352af856a8c06f230aa3e76f86b39d01b416a/pyyaml-6.0.3-cp314-cp314t-win_amd64.whl", hash = "sha256:4ad1906908f2f5ae4e5a8ddfce73c320c2a1429ec52eafd27138b7f1cbe341c9", size = 174062, upload-time = "2025-09-25T21:32:55.767Z" },
     { url = "https://files.pythonhosted.org/packages/f1/12/de94a39c2ef588c7e6455cfbe7343d3b2dc9d6b6b2f40c4c6565744c873d/pyyaml-6.0.3-cp314-cp314t-win_arm64.whl", hash = "sha256:ebc55a14a21cb14062aa4162f906cd962b28e2e9ea38f9b4391244cd8de4ae0b", size = 149341, upload-time = "2025-09-25T21:32:56.828Z" },
+]
+
+[[package]]
+name = "questo"
+version = "0.4.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "python-yakh" },
+    { name = "rich" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a8/e6/4a86ccd5710c2fddae92786f15f2c69637b417905ff239d7424b55e342cb/questo-0.4.2.tar.gz", hash = "sha256:bcc917c2f1a65872e2bd02e79e226a716fd2d68a1ebe0d23c1828aa116aa6da6", size = 10474, upload-time = "2025-11-30T13:08:59.403Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/04/9e/2669ac7d718539a3783c3a6c440b3440b68193b59d763d7f89d33c0b1e8e/questo-0.4.2-py3-none-any.whl", hash = "sha256:1afce34a638601b54fbd697e99e7551813fafb513fe523165394eb12f9607b43", size = 12442, upload-time = "2025-11-30T13:08:57.602Z" },
 ]
 
 [[package]]
@@ -1808,6 +1854,7 @@ name = "voicepad"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "beaupy" },
     { name = "faster-whisper" },
     { name = "silero-vad" },
     { name = "sounddevice" },
@@ -1830,6 +1877,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "beaupy", specifier = ">=3.11.0" },
     { name = "faster-whisper", specifier = ">=1.2.1" },
     { name = "silero-vad", specifier = ">=6.2.0" },
     { name = "sounddevice", specifier = ">=0.4.6" },

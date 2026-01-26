@@ -137,6 +137,10 @@ av==16.1.0 \
     --hash=sha256:f42e1a68ec2aebd21f7eb6895be69efa6aa27eec1670536876399725bbda4b99 \
     --hash=sha256:f49243b1d27c91cd8c66fdba90a674e344eb8eb917264f36117bf2b6879118fd
     # via faster-whisper
+beaupy==3.11.0 \
+    --hash=sha256:43dfa75f8a0ebb11c031426b481b27266f8623fbb28d695521ac6dc2c27479f0 \
+    --hash=sha256:c264d13061c5741ceef5462b3752e572a0a7c3b8bd8dac870d10aec8a7d6b2ee
+    # via voicepad
 certifi==2026.1.4 \
     --hash=sha256:9943707519e4add1115f44c2bc244f782c0249876bf51b6599fee1ffbedd685c \
     --hash=sha256:ac726dd470482006e014ad384921ed6438c457018f4b3d204aea4281258b2120
@@ -246,6 +250,10 @@ distlib==0.4.0 \
     --hash=sha256:9659f7d87e46584a30b5780e43ac7a2143098441670ff0a49d5f9034c54a6c16 \
     --hash=sha256:feec40075be03a04501a973d81f633735b4b69f98b05450592310c0f401a4e0d
     # via virtualenv
+emoji==2.15.0 \
+    --hash=sha256:205296793d66a89d88af4688fa57fd6496732eb48917a87175a023c8138995eb \
+    --hash=sha256:eae4ab7d86456a70a00a985125a03263a5eac54cd55e51d7e184b1ed3b6757e4
+    # via beaupy
 faster-whisper==1.2.1 \
     --hash=sha256:79a66ad50688c0b794dd501dc340a736992a6342f7f95e5811be60b5224a26a7
     # via voicepad
@@ -967,6 +975,12 @@ python-dotenv==1.2.1 \
     --hash=sha256:42667e897e16ab0d66954af0e60a9caa94f0fd4ecf3aaf6d2d260eec1aa36ad6 \
     --hash=sha256:b81ee9561e9ca4004139c6cbba3a238c32b03e4894671e181b671e8cb8425d61
     # via utilityhub-config
+python-yakh==0.4.1 \
+    --hash=sha256:d69507e13e03d09cefd88030f74b6d5369b67de004be975a35be28eb286122e4 \
+    --hash=sha256:da03e800b4f2f5d85344f1668e852687c12dc1a99a03c65cf3dc13a3680da49d
+    # via
+    #   beaupy
+    #   questo
 pyyaml==6.0.3 \
     --hash=sha256:00c4bdeba853cc34e7dd471f16b4114f4162dc03e6b7afcc2128711f0eca823c \
     --hash=sha256:02893d100e99e03eda1c8fd5c441d8c60103fd175728e23e431db1b589cf5ab3 \
@@ -1014,10 +1028,16 @@ pyyaml==6.0.3 \
     #   pymdown-extensions
     #   utilityhub-config
     #   zensical
+questo==0.4.2 \
+    --hash=sha256:1afce34a638601b54fbd697e99e7551813fafb513fe523165394eb12f9607b43 \
+    --hash=sha256:bcc917c2f1a65872e2bd02e79e226a716fd2d68a1ebe0d23c1828aa116aa6da6
+    # via beaupy
 rich==14.2.0 \
     --hash=sha256:73ff50c7c0c1c77c8243079283f4edb376f0f6442433aecb8ce7e6d0b92d1fe4 \
     --hash=sha256:76bc51fe2e57d2b1be1f96c524b890b816e334ab4c1e45888799bfaab0021edd
     # via
+    #   beaupy
+    #   questo
     #   textual
     #   textual-serve
     #   typer

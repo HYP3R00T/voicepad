@@ -110,17 +110,8 @@ def transcribe(
             raise typer.Exit(1)
         typer.echo(f"Using specified model: {model}")
 
-    if device is None:
-        device = config.transcription.device
-
-    if language is None:
-        language = config.transcription.language
-
-    if compute_type is None:
-        compute_type = config.transcription.compute_type
-
     typer.echo(f"Transcribing: {audio_file}")
-    typer.echo(f"Device: {device}, Compute Type: {compute_type}, Language: {language or 'auto-detect'}")
+    typer.echo("\n⏳ Processing audio...")
 
     # Suppress HuggingFace symlinks warning
     os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
@@ -144,9 +135,6 @@ def transcribe(
         result: TranscriptionResult = transcribe_audio(
             audio_path=audio_file,
             model_size=model,
-            language=language,
-            device=device,  # type: ignore[arg-type]
-            compute_type=compute_type,  # type: ignore[arg-type]
             on_segment=on_segment_callback,
         )
 

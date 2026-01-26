@@ -84,21 +84,6 @@ def record_and_transcribe(
             help="Whisper model size. Uses config if not specified.",
         ),
     ] = None,
-    language: Annotated[
-        str | None,
-        typer.Option(
-            "--language",
-            "-l",
-            help="Language code (None for auto-detection)",
-        ),
-    ] = None,
-    device_type: Annotated[
-        str | None,
-        typer.Option(
-            "--compute-device",
-            help="Device for transcription (cuda, cpu, auto). Uses config if not specified.",
-        ),
-    ] = None,
     poll_interval: Annotated[
         float,
         typer.Option(
@@ -114,12 +99,10 @@ def record_and_transcribe(
     """
     config = get_config()
     model = _resolve_model(model, config)
-    device_type = device_type or config.transcription.device
-    language = language or config.transcription.language
 
     typer.echo(f"Recording from device {device_index}...")
     typer.echo("Press Enter to stop recording...")
-    typer.echo(f"Device: {device_type}, Model: {model}, Poll interval: {poll_interval}s")
+    typer.echo(f"Model: {model}, Poll interval: {poll_interval}s")
     typer.echo("")  # Empty line before transcription starts
 
     # Suppress HuggingFace warnings
@@ -133,9 +116,6 @@ def record_and_transcribe(
         # Create transcription poller
         poller = TranscriptionPoller(
             model_size=model,
-            device=device_type,  # type: ignore[arg-type]
-            compute_type=config.transcription.compute_type,  # type: ignore[arg-type]
-            language=language,
             poll_interval=poll_interval,
             min_duration=3.0,
         )

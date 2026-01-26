@@ -6,8 +6,9 @@ from typing import Annotated
 
 import typer
 
+from voicepad.config.init_wizard import run_interactive_init
 from voicepad.config.settings import get_config
-from voicepad.system_utils import check_gpu_capabilities, print_system_status, recommend_faster_whisper_model
+from voicepad.system_utils import check_gpu_capabilities, recommend_faster_whisper_model
 
 logger = logging.getLogger(__name__)
 
@@ -16,8 +17,16 @@ config_app = typer.Typer(help="Configuration management commands")
 
 @config_app.command()
 def init() -> None:
-    """Initialize and verify system capabilities for first-time setup."""
-    print_system_status()
+    """Initialize VoicePad with interactive setup wizard.
+
+    This command will guide you through:
+    - System capability detection
+    - Model selection (recommended or manual)
+    - Path configuration for audio and transcripts
+    - Language preferences (optional)
+    - Configuration verification and saving
+    """
+    run_interactive_init()
 
 
 @config_app.command()
@@ -30,9 +39,6 @@ def show() -> None:
     typer.echo(f"  Markdown path: {config.markdown_path}")
     typer.echo("\nTranscription settings:")
     typer.echo(f"  Model: {config.transcription.model}")
-    typer.echo(f"  Device: {config.transcription.device}")
-    typer.echo(f"  Compute type: {config.transcription.compute_type}")
-    typer.echo(f"  Language: {config.transcription.language or 'auto-detect'}")
 
 
 @config_app.command()

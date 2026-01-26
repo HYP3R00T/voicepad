@@ -1,56 +1,56 @@
 """Configuration management for Voicepad."""
 
 from pathlib import Path
-from typing import Literal
+from typing import Literal, NamedTuple
 
 from pydantic import BaseModel, Field
 from utilityhub_config import load_settings
 
-SUPPORTED_MODEL_SIZES = (
-    "tiny",
-    "tiny.en",
-    "base",
-    "base.en",
-    "small",
-    "small.en",
-    "distil-small.en",
-    "medium",
-    "medium.en",
-    "distil-medium.en",
-    "large-v1",
-    "large-v2",
-    "large-v3",
-    "large",
-    "distil-large-v2",
-    "distil-large-v3",
-    "large-v3-turbo",
-    "turbo",
-    "auto",
+
+class ModelInfo(NamedTuple):
+    """Model metadata with category, name, and VRAM requirement."""
+
+    category: str
+    name: str
+    vram: str
+
+
+# Single source of truth for all model information
+MODEL_INFO = (
+    ModelInfo("Tiny (Fastest, Lower Accuracy)", "tiny", "~1 GB"),
+    ModelInfo("Tiny (Fastest, Lower Accuracy)", "tiny.en", "~1 GB"),
+    ModelInfo("Small (Balanced)", "base", "~1.5 GB"),
+    ModelInfo("Small (Balanced)", "base.en", "~1.5 GB"),
+    ModelInfo("Small (Balanced)", "small", "~2 GB"),
+    ModelInfo("Small (Balanced)", "small.en", "~2 GB"),
+    ModelInfo("Small (Balanced)", "distil-small.en", "~1.5 GB"),
+    ModelInfo("Medium (Accuracy Focus)", "medium", "~3.5 GB"),
+    ModelInfo("Medium (Accuracy Focus)", "medium.en", "~3.5 GB"),
+    ModelInfo("Medium (Accuracy Focus)", "distil-medium.en", "~2.5 GB"),
+    ModelInfo("Large (Best Quality)", "large-v1", "~4.5 GB"),
+    ModelInfo("Large (Best Quality)", "large-v2", "~4.5 GB"),
+    ModelInfo("Large (Best Quality)", "large-v3", "~4.5 GB"),
+    ModelInfo("Large (Best Quality)", "large", "~4.5 GB"),
+    ModelInfo("Large (Best Quality)", "distil-large-v2", "~2 GB"),
+    ModelInfo("Large (Best Quality)", "distil-large-v3", "~2.5 GB"),
+    ModelInfo("Large (Best Quality)", "large-v3-turbo", "~3 GB"),
+    ModelInfo("Large (Best Quality)", "turbo", "~3 GB"),
 )
 
-DeviceType = Literal["cuda", "cpu", "auto"]
-ModelSize = Literal[
-    "tiny",
-    "tiny.en",
-    "base",
-    "base.en",
-    "small",
-    "small.en",
-    "distil-small.en",
-    "medium",
-    "medium.en",
-    "distil-medium.en",
-    "large-v1",
-    "large-v2",
-    "large-v3",
-    "large",
-    "distil-large-v2",
-    "distil-large-v3",
-    "large-v3-turbo",
-    "turbo",
-    "auto",
-]
-ComputeType = Literal["float16", "int8", "int8_float16", "auto"]
+# Derived exports from MODEL_INFO
+MODEL_CATEGORIES = {}
+for info in MODEL_INFO:
+    if info.category not in MODEL_CATEGORIES:
+        MODEL_CATEGORIES[info.category] = []
+    MODEL_CATEGORIES[info.category].append(info.name)
+
+VRAM_ESTIMATES = {info.name: info.vram for info in MODEL_INFO}
+
+_MODEL_NAMES = tuple(info.name for info in MODEL_INFO)
+SUPPORTED_MODEL_SIZES = _MODEL_NAMES + ("auto",)
+
+# Generate ModelSize from SUPPORTED_MODEL_SIZES (derived from MODEL_INFO)
+ModelSize = Literal[*SUPPORTED_MODEL_SIZES]  # type: ignore[misc]
 
 
 class TranscriptionConfig(BaseModel):
@@ -59,18 +59,6 @@ class TranscriptionConfig(BaseModel):
     model: ModelSize = Field(
         default="auto",
         description="Whisper model size to use for transcription",
-    )
-    device: DeviceType = Field(
-        default="auto",
-        description="Device to use for transcription (cuda, cpu, or auto-detect)",
-    )
-    compute_type: ComputeType = Field(
-        default="auto",
-        description="Compute type for transcription (float16, int8, or auto-detect)",
-    )
-    language: str | None = Field(
-        default=None,
-        description="Default language for transcription (None for auto-detection)",
     )
 
 
@@ -94,9 +82,6 @@ def _config_to_dict(config: Config) -> dict:
         "markdown_path": str(config.markdown_path),
         "transcription": {
             "model": config.transcription.model,
-            "device": config.transcription.device,
-            "compute_type": config.transcription.compute_type,
-            "language": config.transcription.language,
         },
     }
 
