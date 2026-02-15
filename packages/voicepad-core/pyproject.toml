@@ -5,7 +5,12 @@ description = "Core audio processing for Voicepad."
 readme = "README.md"
 authors = [{ name = "Rajesh Das", email = "rajesh@hyperoot.dev" }]
 requires-python = ">=3.13"
-dependencies = ["sounddevice>=0.5.5", "soundfile>=0.13.1"]
+dependencies = [
+  "pydantic>=2.0.0",
+  "sounddevice>=0.5.5",
+  "soundfile>=0.13.1",
+  "utilityhub-config>=0.2.0",
+]
 
 [project.scripts]
 voicepad-core = "voicepad_core:main"

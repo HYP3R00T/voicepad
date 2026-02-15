@@ -1,3 +1,4 @@
+from voicepad_core.config import Config, get_config, get_config_with_metadata
 from voicepad_core.voice import (
     AudioDevice,
     capture_audio_background,
@@ -10,6 +11,10 @@ from voicepad_core.voice import (
 )
 
 __all__ = [
+    # Config
+    "Config",
+    "get_config",
+    "get_config_with_metadata",
     # Audio devices
     "AudioDevice",
     "get_input_devices",
