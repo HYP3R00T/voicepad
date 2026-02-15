@@ -22,9 +22,9 @@
       120
     ]
   },
-  "css.lint.unknownAtRules": "ignore",
+  "chat.useAgentsMdFile": true,
   "markdownlint.configFile": ".markdownlint.yaml",
   "python.languageServer": "None",
   "ruff.lint.enable": true,
-  "ruff.nativeServer": true,
+  "ruff.nativeServer": true
 }
