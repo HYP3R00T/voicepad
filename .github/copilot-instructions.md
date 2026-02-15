@@ -44,22 +44,8 @@
 - Prefer `pathlib` over `os.path` for file and path handling.
 - Format code using `ruff format`.
 - Lint code using `ruff`.
+- Type check using `ty`.
 - Organize imports in the order:
   1. Standard library
   2. Third-party libraries
   3. Local modules
-
-## Documentation
-
-- Use Google-style docstrings for all public modules, functions, classes, and methods.
-- Document all parameters, return values, raised exceptions, and side effects.
-- Keep functions and classes small and focused.
-- Split logic into reusable utilities and modules when appropriate.
-
-## Test and CI Guidelines
-
-- Write unit tests for all new features and bug fixes.
-- Use `pytest` for test discovery and execution.
-- Prefer clear, isolated, deterministic tests.
-- Mock external dependencies where needed.
-- All pull requests must pass tests and linters before merging.

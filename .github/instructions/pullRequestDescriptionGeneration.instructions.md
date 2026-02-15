@@ -1,16 +1,36 @@
-# Pull Request Title and Description Generation Instructions
+Generate the pull request description by strictly following the repository pull request template. Do not add, remove, or rename sections.
 
-When generating pull request titles and descriptions, please follow the format and guidelines defined in the project's `.github/PULL_REQUEST_TEMPLATE.md` file.
+Populate only the following sections, in this exact order:
 
-This ensures consistency and keeps PR content aligned with the latest team standards.
+## Summary
 
-If you need guidance on what to include, typically the PR template covers:
+- Write one or two clear sentences
+- State what changed and why
+- Avoid implementation details
+- Use plain, direct language
 
-- A concise title summarizing the change (under 50 characters).
-- A description including problem, solution, and relevant context.
-- A bullet-point list of key changes.
-- Testing information.
-- Links to related issues or documentation.
-- Notes about breaking changes or follow-up actions.
+## Context (optional)
 
-Please always prioritize following the actual PR template content.
+- Include this section only if the reason for the change is not obvious from the diff
+- Provide brief background, constraints, or motivation
+- Omit entirely if unnecessary
+
+## Affected Responsibility
+
+- Select exactly one primary responsibility
+- Mark it with [x]
+- Do not select multiple items unless the change truly spans responsibilities
+
+Available responsibilities:
+
+- Service Logic
+- Runtime Topology
+- Provisioning
+- Change Automation
+
+## General rules:
+
+- Assume the reviewer has no prior context
+- Do not repeat commit messages
+- Do not include commentary, explanations of the template, or placeholders
+- Output valid Markdown only
