@@ -2,6 +2,7 @@
 python = "3.13"
 uv = "latest"
 pre-commit = "latest"
+markdownlint-cli2 = "latest"
 
 [settings]
 experimental = true
@@ -10,9 +11,13 @@ idiomatic_version_file_enable_tools = ["python"]
 
 [hooks]
 enter = [
-    "bash ./scripts/enter_project.sh",
-    "pwsh -File ./scripts/enter_project.ps1",
+  "bash ./scripts/enter_project.sh",
+  "pwsh -File ./scripts/enter_project.ps1",
 ]
 
 [env]
 UV_LINK_MODE = "copy"
+
+[tasks.docs]
+run = "uv run zensical serve"
+description = "Serve the documentation locally"
