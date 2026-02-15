@@ -1,0 +1,17 @@
+[project]
+name = "voicepad-workspace"
+version = "0.1.0"
+description = "Voice recording and GPU-accelerated transcription tool"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = []
+
+[tool.uv.workspace]
+members = ["packages/voicepad-core", "packages/voicepad"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.1",
+    "ty>=0.0.17",
+    "zensical>=0.0.23",
+]
