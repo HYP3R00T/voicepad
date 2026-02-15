@@ -24,17 +24,7 @@
   },
   "css.lint.unknownAtRules": "ignore",
   "markdownlint.configFile": ".markdownlint.yaml",
-  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
   "python.languageServer": "None",
-  "ruff.interpreter": [
-    "${workspaceFolder}/.venv/bin/python"
-  ],
   "ruff.lint.enable": true,
   "ruff.nativeServer": true,
-  "ruff.path": [
-    "${workspaceFolder}/.venv/bin/ruff"
-  ],
-  "ty.path": [
-    "${workspaceFolder}/.venv/bin/ty"
-  ]
 }
