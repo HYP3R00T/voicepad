@@ -1,13 +1,11 @@
 [project]
 name = "voicepad-core"
 version = "0.1.0"
-description = "Add your description here"
+description = "Core audio processing for Voicepad."
 readme = "README.md"
-authors = [
-    { name = "Rajesh Das", email = "rajesh@hyperoot.dev" }
-]
+authors = [{ name = "Rajesh Das", email = "rajesh@hyperoot.dev" }]
 requires-python = ">=3.13"
-dependencies = []
+dependencies = ["sounddevice>=0.5.5", "soundfile>=0.13.1"]
 
 [project.scripts]
 voicepad-core = "voicepad_core:main"
