@@ -1,6 +1,7 @@
 [tools]
 python = "3.13"
 uv = "latest"
+pre-commit = "latest"
 
 [settings]
 experimental = true

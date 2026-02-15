@@ -1,8 +1,7 @@
 #!/bin/bash
 
 if ! command -v cz >/dev/null; then
-  pip install --user pipx
-  pipx install commitizen
+  uv tool install commitizen
 fi
 
 if [ ! -f .git/hooks/pre-commit ]; then
