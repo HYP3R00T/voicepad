@@ -1,14 +1,54 @@
-# Custom Instructions for Commit Message Generation
+# Commit Message Generation
 
-- Use the format: `<type>(<scope>): <subject>`, where scope is optional and used only when it adds clarity.
-- Valid types are: feat, fix, docs, style, refactor, test, chore.
-- Keep the subject line under 50 characters.
-- Start the subject with a verb in the imperative mood (e.g., "fix", "add", "update").
-- Provide a detailed description in the body if the commit introduces significant changes.
-- Reference related issues or pull requests in the footer using `Closes #123` or `Fixes #456`.
+Follow Conventional Commits specification (conventionalcommits.org).
 
-## Examples
+## Structure
 
-- `feat: add support for new authentication method`
-- `fix(api): correct token expiration logic`
-- `docs: update installation instructions`
+```
+<type>(<scope>): <description>
+```
+
+**Type** describes the nature of the change. **Scope** (optional) identifies which component is affected. **Description** explains what changed, in imperative mood, under 72 characters.
+
+## Choosing the Type
+
+The type reflects **what kind of change** this is, not where the change is located:
+
+- `feat` — adds new capability or functionality to the application
+- `fix` — corrects a bug or error in existing functionality
+- `test` — adds, modifies, or fixes tests (no production code changes)
+- `docs` — updates documentation only
+- `refactor` — restructures code without changing behavior
+- `chore` — build process, dependencies, tooling, configuration
+- `style` — formatting, whitespace, linting (no logic changes)
+
+## Choosing the Scope
+
+Scope identifies **which component or module** is affected, not where the files live.
+
+Examples:
+
+- Changes to API service → `(api)` not `(services)`
+- Tests for API → `test(api):` not `test(tests):` or `feat(tests):`
+- Kubernetes manifests → `(kubernetes)` or `(k8s)`
+
+Scope is optional. Omit it when the change spans multiple components or is repository-wide.
+
+## Description Guidelines
+
+- Use imperative mood: "add", "fix", "update" (not "added", "fixed", "updated")
+- Start with lowercase
+- No period at the end
+- Describe intent, not implementation details
+- Keep under 72 characters total
+
+## Valid Examples
+
+```
+feat(api): implement health check endpoint
+fix(api): correct status code for failed health checks
+test(api): add endpoint validation tests
+docs: update API quickstart guide
+refactor(config): simplify environment variable loading
+chore(deps): upgrade fastapi to 0.130.0
+```

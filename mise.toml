@@ -1,6 +1,7 @@
 [tools]
 python = "3.13"
 uv = "latest"
+pre-commit = "latest"
 
 [settings]
 experimental = true
@@ -8,27 +9,10 @@ python.uv_venv_auto = true
 idiomatic_version_file_enable_tools = ["python"]
 
 [hooks]
-enter = "bash ./scripts/setup_project.sh"
+enter = [
+    "bash ./scripts/enter_project.sh",
+    "pwsh -File ./scripts/enter_project.ps1",
+]
 
 [env]
 UV_LINK_MODE = "copy"
-
-[tasks.docs]
-description = "Serve Documentation"
-run = "echo http://localhost:8000 && uv run zensical serve"
-
-[tasks.format]
-description = "Format Python code"
-run = "uv run ruff format ."
-
-[tasks.lint]
-description = "Lint Python code"
-run = "uv run ruff check ."
-
-[tasks.check]
-description = "Python type checker and language server"
-run = "uv run ty check"
-
-[tasks.test]
-description = "Test all packages"
-run = "uv run pytest --cov=. --cov-report=term-missing"

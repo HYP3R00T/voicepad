@@ -1,10 +1,6 @@
 <!--
 This Code of Conduct is the Contributor Covenant version 3.0, available at:
 https://www.contributor-covenant.org/version/3/0/code_of_conduct/
-
-This document outlines expected behavior to foster a welcoming, safe, and equitable community.
-
-Please replace the contact email below with your preferred email address for receiving reports.
 -->
 
 # Contributor Covenant Code of Conduct 3.0
@@ -54,7 +50,7 @@ Tensions can occur between community members even when they are trying their bes
 
 When an incident does occur, it is important to report it promptly. To report a possible violation, please contact the project team at:
 
-**rajesh@hyperoot.dev**
+**<rajesh@hyperoot.dev>**
 
 Community Moderators take reports of violations seriously and will make every effort to respond in a timely manner. They will investigate all reports of code of conduct violations, reviewing messages, logs, and recordings, or interviewing witnesses and other participants. Community Moderators will keep investigation and enforcement actions as transparent as possible while prioritizing safety and confidentiality. In order to honor these values, enforcement actions are carried out in private with the involved parties, but communicating to the whole community may be part of a mutually agreed upon resolution.
 
@@ -96,8 +92,8 @@ This Code of Conduct applies within all community spaces, and also applies when 
 
 ## Attribution
 
-This Code of Conduct is adapted from the Contributor Covenant, version 3.0, permanently available at https://www.contributor-covenant.org/version/3/0/.
+This Code of Conduct is adapted from the Contributor Covenant, version 3.0, permanently available at <https://www.contributor-covenant.org/version/3/0/>.
 
-Contributor Covenant is stewarded by the Organization for Ethical Source and licensed under CC BY-SA 4.0. To view a copy of this license, visit https://creativecommons.org/licenses/by-sa/4.0/
+Contributor Covenant is stewarded by the Organization for Ethical Source and licensed under CC BY-SA 4.0. To view a copy of this license, visit <https://creativecommons.org/licenses/by-sa/4.0/>
 
-For answers to common questions about Contributor Covenant, see the FAQ at https://www.contributor-covenant.org/faq. Translations are provided at https://www.contributor-covenant.org/translations. Additional enforcement and community guideline resources can be found at https://www.contributor-covenant.org/resources. The enforcement ladder was inspired by the work of Mozilla’s code of conduct team.
+For answers to common questions about Contributor Covenant, see the FAQ at <https://www.contributor-covenant.org/faq>. Translations are provided at <https://www.contributor-covenant.org/translations>. Additional enforcement and community guideline resources can be found at <https://www.contributor-covenant.org/resources>. The enforcement ladder was inspired by the work of Mozilla’s code of conduct team.
