@@ -3,11 +3,9 @@ name = "voicepad"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-authors = [
-    { name = "Rajesh Das", email = "rajesh@hyperoot.dev" }
-]
+authors = [{ name = "Rajesh Das", email = "rajesh@hyperoot.dev" }]
 requires-python = ">=3.13"
-dependencies = []
+dependencies = ["voicepad-core>=0.1.0", "typer>=0.23.1", "textual>=7.5.0"]
 
 [project.scripts]
 voicepad = "voicepad:main"
