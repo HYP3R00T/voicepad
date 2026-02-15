@@ -9,7 +9,10 @@ python.uv_venv_auto = true
 idiomatic_version_file_enable_tools = ["python"]
 
 [hooks]
-enter = "bash ./scripts/enter_project.sh"
+enter = [
+    "bash ./scripts/enter_project.sh",
+    "pwsh -File ./scripts/enter_project.ps1",
+]
 
 [env]
 UV_LINK_MODE = "copy"
