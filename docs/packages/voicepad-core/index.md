@@ -1,18 +1,16 @@
 # voicepad-core
 
-Core audio recording library for Python projects. Provides device management, configuration, and background recording capabilities.
+Configuration and GPU diagnostics library for Voicepad. Provides config loading and GPU readiness checks.
 
 ## Overview
 
-`voicepad-core` is a lightweight library that handles low-level audio operations. It can be imported by other Python packages to add voice recording functionality without CLI overhead.
+`voicepad-core` is a lightweight library that handles configuration and GPU diagnostics. It can be imported by other Python packages to reuse config loading or GPU readiness checks without CLI overhead.
 
 **Key Features:**
 
-- List and select audio input devices
-- Record audio in background threads
-- Configure recording and output paths
-- Thread-safe recording with stop signals
-- Type-safe API with Pydantic models
+- Load configuration settings for Voicepad
+- Report GPU readiness for faster-whisper and CTranslate2
+- Provide type-safe models for diagnostics output
 
 ## Installation
 
@@ -22,7 +20,7 @@ pip install voicepad-core
 
 **Requirements:** Python 3.13+
 
-**Dependencies:** `sounddevice`, `soundfile`, `pydantic`, `utilityhub-config`
+**Dependencies:** `faster-whisper`, `pydantic`, `sounddevice`, `soundfile`, `utilityhub-config`
 
 ## Public API
 
@@ -34,40 +32,24 @@ The library exports the following functions and classes from `voicepad_core`:
 - `get_config_with_metadata()` - Get config with source metadata
 - `Config` - Pydantic model for configuration
 
-### Device Management
+### GPU Diagnostics
 
-- `get_input_devices()` - List all available audio input devices
-- `get_device_by_index(index)` - Get device info by OS index
-- `AudioDevice` - TypedDict for device information
-
-### Recording
-
-- `record_voice(device_index, output_dir, prefix)` - Interactive recording with user control
-- `capture_audio_background(device_index, output_dir, prefix, stop_event)` - Background recording with threading
-
-### Path Utilities
-
-- `get_timestamp()` - Generate timestamp string (YYYYMMDD_HHMMSS)
-- `get_recording_path(output_dir, prefix)` - Generate WAV file path
-- `get_transcript_path(output_dir, prefix)` - Generate markdown file path
+- `gpu_diagnostics()` - Run all GPU checks and return a report
+- `check_nvidia_smi()` - Validate NVIDIA driver availability
+- `check_ctranslate2_gpu()` - Detect CUDA devices via CTranslate2
+- `check_faster_whisper_gpu()` - Attempt to load a Whisper model on GPU
+- `GPUDiagnosticsReport` - Pydantic model with GPU diagnostics results
 
 ## Usage Example
 
 ```python
-from voicepad_core import get_input_devices, record_voice
+from voicepad_core import get_config, gpu_diagnostics
 
-# List available devices
-devices = get_input_devices()
-for device in devices:
-    print(f"{device['index']}: {device['name']}")
+config = get_config()
+print(config.recordings_path)
 
-# Record audio interactively
-record_voice(
-    device_index=0,
-    output_dir="recordings",
-    prefix="meeting"
-)
-# Saves to: recordings/meeting_20260216_143022.wav
+report = gpu_diagnostics()
+print(report.model_dump_json(indent=2))
 ```
 
 ## Configuration
@@ -81,13 +63,6 @@ markdown_path: "data/markdown/"
 
 Configuration is loaded automatically. Default paths are used if no config file exists.
 
-???+ note "Thread-Safe Recording"
-    Use `capture_audio_background()` with `threading.Event` for applications that need non-blocking recording. The function returns when the stop event is set.
+## CLI Diagnostics
 
-## Source Code
-
-Implementation details: `packages/voicepad-core/src/voicepad_core/` in the repository
-
-- Configuration: See `voicepad_core/config/settings.py` for Pydantic models
-- Recording engine: See `voicepad_core/voice/recorder.py` for audio capture logic
-- Utilities: See `voicepad_core/voice/utils.py` for path generation
+The package includes a `voicepad-core` console script that prints a JSON GPU diagnostics report.

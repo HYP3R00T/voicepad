@@ -4,7 +4,7 @@ icon: lucide/rocket
 
 # Voicepad
 
-Voice recording and GPU-accelerated transcription tool.
+Configuration and GPU diagnostics toolkit for Voicepad.
 
 ## Getting Started
 

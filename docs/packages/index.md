@@ -6,8 +6,8 @@ Voicepad uses a layered architecture with two separate packages, each serving a 
 
 | Package | Type | Purpose |
 | --- | --- | --- |
-| `voicepad-core` | Library | Core audio recording functionality for Python projects |
-| `voicepad` | CLI Application | Command-line interface for end users |
+| `voicepad-core` | Library | Configuration and GPU diagnostics utilities |
+| `voicepad` | CLI Application | Command-line interface for configuration inspection |
 
 ## Architecture Pattern
 
@@ -21,24 +21,24 @@ graph TD
     CLI -- depends on --> Core
 ```
 
-**voicepad CLI:** End-user interface with Typer commands for voice recording
+**voicepad CLI:** End-user interface with Typer commands for configuration inspection
 
-**voicepad-core Library:** Reusable foundation providing audio recording, device management, and configuration
+**voicepad-core Library:** Reusable foundation providing configuration and GPU diagnostics
 
 ## When to Use Each Package
 
 **Use `voicepad-core` when:**
 
-- Building another Python application that needs audio recording
-- Creating a library that requires audio capture functionality
-- Integrating voice recording into existing Python projects
-- You need programmatic control over recording
+- Building a Python application that needs Voicepad configuration
+- Validating GPU readiness for faster-whisper or CTranslate2
+- Integrating diagnostics into an internal tool or workflow
+- You need programmatic access to config or GPU checks
 
 **Use `voicepad` when:**
 
 - You want a ready-to-use command-line tool
-- Recording voice from the terminal is sufficient
-- You don't need to integrate recording into custom code
+- Checking configuration state is sufficient
+- You don't need to integrate config loading into custom code
 - You prefer a simple CLI over writing Python code
 
 ???+ tip "Benefit of This Design"
