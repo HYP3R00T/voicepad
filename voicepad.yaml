@@ -1,2 +1,3 @@
 recordings_path: data/recordings
 markdown_path: data/markdown
+input_device_index: 1

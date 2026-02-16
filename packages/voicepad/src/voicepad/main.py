@@ -2,7 +2,7 @@ import logging
 
 import typer
 
-from voicepad.cli import doctor_app, voice_app
+from voicepad.cli import config_app, voice_app
 
 logger = logging.getLogger(__name__)
 
@@ -12,7 +12,7 @@ app = typer.Typer(
 )
 
 app.add_typer(voice_app, name="voice", help="Voice recording and audio device commands")
-app.add_typer(doctor_app, name="doctor", help="System health and configuration checks")
+app.add_typer(config_app, name="config", help="Configuration management commands")
 
 
 def main() -> None:

@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from utilityhub_config import load_settings
 
 if TYPE_CHECKING:
@@ -17,6 +17,11 @@ class Config(BaseModel):
 
     recordings_path: Path = Path("data/recordings")
     markdown_path: Path = Path("data/markdown")
+
+    input_device_index: int | None = Field(
+        default=None,
+        description="Default OS audio input device index",
+    )
 
 
 def get_config(cwd: Path | None = None, app_name: str = "voicepad") -> Config:
