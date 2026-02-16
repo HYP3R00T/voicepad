@@ -1,19 +1,55 @@
 """Configuration management commands."""
 
 import logging
+from dataclasses import dataclass
+from typing import TypedDict, cast
 
+import sounddevice as sd
 import typer
-from voicepad_core import get_config, get_config_with_metadata, get_input_devices
+from voicepad_core import get_config, get_config_with_metadata
 
 logger = logging.getLogger(__name__)
 
 config_app = typer.Typer(help="Configuration management commands")
 
 
+@dataclass(frozen=True)
+class AudioDevice:
+    index: int
+    name: str
+    channels: int
+    sample_rate: int
+
+    def __str__(self) -> str:
+        return f"[{self.index}] {self.name} ({self.channels} in, {self.sample_rate}Hz)"
+
+
+def _get_input_devices() -> list[AudioDevice]:
+    class _DeviceInfo(TypedDict, total=False):
+        name: str
+        max_input_channels: int
+        default_samplerate: float
+
+    devices: list[AudioDevice] = []
+    all_devices = cast(list[_DeviceInfo], sd.query_devices())
+
+    for idx, dev in enumerate(all_devices):
+        max_inputs = dev.get("max_input_channels") or 0
+        if max_inputs <= 0:
+            continue
+
+        name = dev.get("name", f"Device {idx}")
+        default_rate = dev.get("default_samplerate", 0.0)
+        rate = int(default_rate) if isinstance(default_rate, (int, float)) and default_rate > 0 else 44100
+        devices.append(AudioDevice(index=idx, name=name, channels=int(max_inputs), sample_rate=rate))
+
+    return devices
+
+
 @config_app.command("input")
 def list_input_devices() -> None:
     """List available audio input devices for configuration."""
-    devices = get_input_devices()
+    devices = _get_input_devices()
     if not devices:
         typer.secho("No audio input devices detected.", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
