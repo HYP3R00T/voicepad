@@ -20,6 +20,11 @@ class Config(BaseModel):
         description="Default OS audio input device index",
     )
 
+    recording_prefix: str = Field(
+        default="recording",
+        description="Prefix for audio recording filenames",
+    )
+
 
 def get_config(cwd: Path | None = None, app_name: str = "voicepad") -> Config:
     """Load configuration using utilityhub_config precedence rules."""

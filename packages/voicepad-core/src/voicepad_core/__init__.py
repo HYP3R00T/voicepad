@@ -9,12 +9,16 @@ from voicepad_core.diagnostics import (
     check_nvidia_smi,
     gpu_diagnostics,
 )
+from voicepad_core.recorder import AudioRecorder, AudioRecorderError
 
 __all__ = [
     # Config
     "Config",
     "get_config",
     "get_config_with_metadata",
+    # Audio recording
+    "AudioRecorder",
+    "AudioRecorderError",
     # GPU diagnostics functions
     "check_nvidia_smi",
     "check_ctranslate2_gpu",
