@@ -1,13 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 from utilityhub_config import load_settings
-
-if TYPE_CHECKING:
-    from typing import Any
 
 
 class Config(BaseModel):
