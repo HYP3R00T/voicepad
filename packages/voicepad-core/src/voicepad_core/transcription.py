@@ -153,8 +153,10 @@ def load_model_with_fallback(
         cuda_available = True
         try:
             # Try to import CUDA libraries
-            import nvidia.cublas.lib  # noqa: F401
-            import nvidia.cudnn.lib  # noqa: F401
+            from nvidia import (
+                cublas,  # noqa: F401
+                cudnn,  # noqa: F401
+            )
 
             logger.info("CUDA libraries detected")
         except ImportError as e:

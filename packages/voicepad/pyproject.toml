@@ -7,6 +7,13 @@ authors = [{ name = "Rajesh Das", email = "rajesh@hyperoot.dev" }]
 requires-python = ">=3.13"
 dependencies = ["voicepad-core>=0.1.0", "typer>=0.23.1", "textual>=7.5.0"]
 
+[project.optional-dependencies]
+gpu = [
+    # Chain to voicepad-core GPU support for NVIDIA acceleration
+    # Users can install with: pip install voicepad[gpu]
+    "voicepad-core[gpu]",
+]
+
 [project.scripts]
 voicepad = "voicepad:main"
 

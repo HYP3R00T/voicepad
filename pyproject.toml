@@ -6,6 +6,13 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = ["voicepad", "voicepad-core"]
 
+[project.optional-dependencies]
+gpu = [
+    # For local development with GPU support
+    # Chains to voicepad[gpu] -> voicepad-core[gpu]
+    "voicepad[gpu]",
+]
+
 [tool.uv.workspace]
 members = ["packages/voicepad-core", "packages/voicepad"]
 
