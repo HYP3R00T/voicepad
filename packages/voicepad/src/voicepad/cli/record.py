@@ -53,10 +53,30 @@ def _transcribe_audio_file(output_file: Path, config) -> None:
         # Transcribe
         stats = transcribe_audio(output_file, md_path, config)
 
-        typer.secho("[OK] Transcription saved!", fg=typer.colors.GREEN)
+        # Check if GPU fallback occurred
+        fallback_info = stats.get("fallback_info", {})
+        if fallback_info.get("fallback_occurred"):
+            typer.echo()
+            typer.secho("[!] GPU requested but CUDA libraries not available", fg=typer.colors.YELLOW)
+
+            # Show what's missing
+            missing = fallback_info.get("missing_components", [])
+            if missing:
+                typer.echo(f"  Missing: {', '.join(missing)}")
+
+            typer.echo()
+            typer.echo("  For 4x faster transcription, install GPU support:")
+            typer.secho("    pip install voicepad-core[gpu]", fg=typer.colors.CYAN)
+            typer.echo()
+            typer.echo("  Using CPU for now...")
+
+        # Success message
+        typer.echo()
+        device = stats.get("device", "cpu")
+        duration = stats.get("duration", 0)
+        typer.secho(f"[OK] Transcription saved! ({duration:.1f}s using {device})", fg=typer.colors.GREEN)
         typer.echo(f"   File: {md_path}")
         typer.echo(f"   Language: {stats['language']} ({stats['language_probability'] * 100:.1f}%)")
-        typer.echo(f"   Duration: {stats['duration']:.1f}s")
         typer.echo(f"   Words: {stats['word_count']}")
         typer.echo(f"   Segments: {stats['segment_count']}")
 

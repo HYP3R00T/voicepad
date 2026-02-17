@@ -72,6 +72,7 @@ def format_transcription_markdown(
     config: Config,
     device: str,
     compute_type: str,
+    fallback_info: dict[str, Any] | None = None,
 ) -> str:
     """Format transcription results as Markdown.
 
@@ -82,6 +83,7 @@ def format_transcription_markdown(
         config: Configuration object.
         device: Device used for transcription.
         compute_type: Compute type used for transcription.
+        fallback_info: Optional fallback information if GPU -> CPU fallback occurred.
 
     Returns:
         Formatted Markdown string.
@@ -96,11 +98,23 @@ def format_transcription_markdown(
         f"**Language:** {info.language} ({info.language_probability * 100:.1f}% confidence)",
         f"**Duration:** {info.duration:.1f} seconds",
         "",
+    ]
+
+    # Add fallback note if applicable
+    if fallback_info and fallback_info.get("fallback_occurred"):
+        lines.extend([
+            "> **Note:** GPU was requested but CUDA libraries not available.",
+            f"> Missing components: {', '.join(fallback_info.get('missing_components', ['CUDA libraries']))}",
+            "> Install with: `pip install voicepad-core[gpu]`",
+            "",
+        ])
+
+    lines.extend([
         "---",
         "",
         "## Text",
         "",
-    ]
+    ])
 
     # Add segments with timestamps
     for segment in segments:
@@ -109,6 +123,100 @@ def format_transcription_markdown(
         lines.append(f"{timestamp} {text}")
 
     return "\n".join(lines)
+
+
+def load_model_with_fallback(
+    model_name: str,
+    device: str,
+    compute_type: str,
+) -> tuple[WhisperModel, str, str, dict[str, Any]]:
+    """Load Whisper model with automatic CPU fallback if GPU unavailable.
+
+    Args:
+        model_name: Name of the Whisper model to load.
+        device: Requested device (cuda/cpu).
+        compute_type: Requested compute type (float16/int8/etc).
+
+    Returns:
+        Tuple of (model, actual_device, actual_compute_type, fallback_info).
+        fallback_info contains diagnostic information about fallback if it occurred.
+    """
+    fallback_info: dict[str, Any] = {
+        "fallback_occurred": False,
+        "requested_device": device,
+        "missing_components": [],
+    }
+
+    if device == "cuda":
+        # Proactively check if CUDA libraries are available
+        # This catches library issues BEFORE model loading
+        cuda_available = True
+        try:
+            # Try to import CUDA libraries
+            import nvidia.cublas.lib  # noqa: F401
+            import nvidia.cudnn.lib  # noqa: F401
+
+            logger.info("CUDA libraries detected")
+        except ImportError as e:
+            cuda_available = False
+            error_str = str(e).lower()
+
+            # Determine what's missing
+            if "cublas" in error_str:
+                fallback_info["missing_components"].append("cuBLAS for CUDA 12")
+            if "cudnn" in error_str:
+                fallback_info["missing_components"].append("cuDNN 9 for CUDA 12")
+            if not fallback_info["missing_components"]:
+                fallback_info["missing_components"].append("CUDA libraries")
+
+            logger.warning(f"CUDA libraries not available: {e}")
+            logger.warning("Falling back to CPU")
+            fallback_info["fallback_occurred"] = True
+            fallback_info["error_message"] = str(e)
+            device = "cpu"
+            compute_type = "int8"
+
+        # If CUDA libs available, try loading the model
+        if cuda_available:
+            try:
+                logger.info(f"Attempting to load model '{model_name}' on GPU")
+                model = WhisperModel(model_name, device="cuda", compute_type=compute_type)
+                logger.info("GPU model loaded successfully")
+                return model, "cuda", compute_type, fallback_info
+
+            except RuntimeError as e:
+                error_str = str(e).lower()
+
+                # Check if it's a CUDA-related error
+                cuda_keywords = ["cublas", "cuda", "cudnn", "cudn", "nvrtc"]
+                if any(keyword in error_str for keyword in cuda_keywords):
+                    logger.warning(f"GPU initialization failed: {e}")
+                    logger.warning("CUDA runtime error - falling back to CPU")
+
+                    # Update fallback info
+                    if "cublas" in error_str and "cuBLAS for CUDA 12" not in fallback_info["missing_components"]:
+                        fallback_info["missing_components"].append("cuBLAS for CUDA 12")
+                    if ("cudnn" in error_str or "cudn" in error_str) and "cuDNN 9 for CUDA 12" not in fallback_info[
+                        "missing_components"
+                    ]:
+                        fallback_info["missing_components"].append("cuDNN 9 for CUDA 12")
+                    if not fallback_info["missing_components"]:
+                        fallback_info["missing_components"].append("CUDA runtime libraries")
+
+                    fallback_info["fallback_occurred"] = True
+                    fallback_info["error_message"] = str(e)
+                    device = "cpu"
+                    compute_type = "int8"
+                else:
+                    # Different error - re-raise
+                    raise
+
+    # Load on CPU (either requested or fallback)
+    logger.info(f"Loading model '{model_name}' on CPU")
+    model = WhisperModel(model_name, device="cpu", compute_type="int8")
+    logger.info("CPU model loaded successfully")
+
+    return model, device, compute_type, fallback_info
 
 
 def transcribe_audio(
@@ -149,17 +257,14 @@ def transcribe_audio(
         device, compute_type = resolve_auto_settings(config)
 
         logger.info(f"Loading Whisper model: {config.transcription_model}")
-        logger.info(f"Device: {device}, Compute Type: {compute_type}")
+        logger.info(f"Requested device: {device}, Compute Type: {compute_type}")
 
-        # Load the Whisper model
-        try:
-            model = WhisperModel(
-                config.transcription_model,
-                device=device,
-                compute_type=compute_type,
-            )
-        except Exception as e:
-            raise TranscriptionError(f"Failed to load model '{config.transcription_model}': {e}") from e
+        # Load the Whisper model with automatic GPU -> CPU fallback
+        model, actual_device, actual_compute_type, fallback_info = load_model_with_fallback(
+            config.transcription_model,
+            device,
+            compute_type,
+        )
 
         # Transcribe the audio
         logger.info(f"Transcribing: {audio_path}")
@@ -179,8 +284,9 @@ def transcribe_audio(
             segments=segments,
             info=info,
             config=config,
-            device=device,
-            compute_type=compute_type,
+            device=actual_device,
+            compute_type=actual_compute_type,
+            fallback_info=fallback_info,
         )
 
         # Save to file
@@ -199,6 +305,9 @@ def transcribe_audio(
             "duration": info.duration,
             "word_count": word_count,
             "segment_count": len(segments),
+            "device": actual_device,
+            "compute_type": actual_compute_type,
+            "fallback_info": fallback_info,
         }
 
     except TranscriptionError:

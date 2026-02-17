@@ -14,6 +14,15 @@ dependencies = [
   "utilityhub-config>=0.2.0",
 ]
 
+[project.optional-dependencies]
+gpu = [
+  # CUDA 12.x libraries for GPU acceleration (NVIDIA only, Windows/Linux)
+  # These are installed in virtual environment, no system conflicts
+  # Compatible with all NVIDIA GPUs from GTX 10-series to RTX 50-series
+  "nvidia-cublas-cu12>=12.0.0,<13.0.0",
+  "nvidia-cudnn-cu12>=9.0.0,<10.0.0",
+]
+
 [project.scripts]
 voicepad-core = "voicepad_core.main:main"
 
