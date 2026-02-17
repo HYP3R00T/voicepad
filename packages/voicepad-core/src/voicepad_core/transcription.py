@@ -14,6 +14,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# Singleton model cache to avoid reloading for each chunk
+# Key: (model_name, device, compute_type), Value: WhisperModel instance
+_model_cache: dict[tuple[str, str, str], WhisperModel] = {}
+
+
 class TranscriptionError(Exception):
     """Base exception for transcription errors."""
 
@@ -317,3 +322,86 @@ def transcribe_audio(
     except Exception as e:
         logger.error(f"Unexpected error during transcription: {e}")
         raise TranscriptionError(f"Unexpected error: {e}") from e
+
+
+def transcribe_chunk_to_markdown(
+    audio_path: Path,
+    chunk_index: int,
+    chunk_start_time: float,
+    config: Config,
+) -> str:
+    """Transcribe a single audio chunk and return markdown content.
+
+    This function is optimized for background chunk transcription by caching
+    the model between calls. It's designed to be called sequentially for each
+    chunk as it completes during recording.
+
+    Args:
+        audio_path: Path to the chunk audio file (temporary).
+        chunk_index: Index of this chunk (0-based).
+        chunk_start_time: Start time of chunk in overall recording (seconds).
+        config: Configuration object with transcription settings.
+
+    Returns:
+        Markdown-formatted transcription for this chunk.
+
+    Raises:
+        TranscriptionError: If transcription fails.
+    """
+    try:
+        # Resolve auto settings
+        device, compute_type = resolve_auto_settings(config)
+
+        # Check if model is already cached
+        cache_key = (config.transcription_model, device, compute_type)
+
+        if cache_key in _model_cache:
+            model = _model_cache[cache_key]
+            logger.debug(f"Using cached model for chunk {chunk_index}")
+        else:
+            # Load model and cache it
+            logger.info(f"Loading model for chunk transcription: {config.transcription_model}")
+            model, actual_device, actual_compute_type, _ = load_model_with_fallback(
+                config.transcription_model,
+                device,
+                compute_type,
+            )
+            # Update cache key with actual values (in case of fallback)
+            cache_key = (config.transcription_model, actual_device, actual_compute_type)
+            _model_cache[cache_key] = model
+            logger.info("Model cached for future chunks")
+
+        # Transcribe the chunk
+        logger.debug(f"Transcribing chunk {chunk_index}: {audio_path}")
+        segments_iter, info = model.transcribe(
+            str(audio_path),
+            language=None,  # Auto-detect
+            beam_size=5,
+            vad_filter=False,  # Already chunked by our VAD
+        )
+        segments = list(segments_iter)
+
+        # Format as markdown with adjusted timestamps
+        markdown = f"## Chunk {chunk_index + 1}\n\n"
+        markdown += f"**Time Range:** {chunk_start_time:.1f}s - {chunk_start_time + info.duration:.1f}s\n"
+        markdown += f"**Duration:** {info.duration:.1f}s\n"
+        markdown += f"**Language:** {info.language} ({info.language_probability * 100:.1f}%)\n\n"
+
+        # Add segments with timestamps adjusted for overall recording
+        if segments:
+            for segment in segments:
+                # Adjust timestamps relative to full recording
+                abs_start = chunk_start_time + segment.start
+                abs_end = chunk_start_time + segment.end
+                text = segment.text.strip()
+                markdown += f"**[{abs_start:.1f}s → {abs_end:.1f}s]** {text}\n\n"
+        else:
+            markdown += "*No speech detected in this chunk*\n\n"
+
+        return markdown
+
+    except Exception as e:
+        logger.error(f"Failed to transcribe chunk {chunk_index}: {e}")
+        # Return error message as markdown instead of raising
+        # This allows other chunks to continue processing
+        return f"## Chunk {chunk_index + 1}\n\n**ERROR:** Transcription failed: {e}\n\n"

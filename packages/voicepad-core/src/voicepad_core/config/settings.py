@@ -41,6 +41,40 @@ class Config(BaseModel):
         description="Compute precision (auto/float16/int8/float32)",
     )
 
+    # VAD chunking settings (using faster-whisper's Silero VAD)
+    vad_enabled: bool = Field(
+        default=False,
+        description="Enable Voice Activity Detection for smart chunking during recording",
+    )
+
+    vad_min_chunk_duration: float = Field(
+        default=60.0,
+        ge=10.0,
+        le=600.0,
+        description="Minimum duration (seconds) before allowing chunk splits",
+    )
+
+    vad_threshold: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Silero VAD speech probability threshold (0.0-1.0, higher = more strict)",
+    )
+
+    vad_min_silence_duration_ms: int = Field(
+        default=1000,
+        ge=100,
+        le=5000,
+        description="Minimum silence duration (ms) required to trigger chunk boundary",
+    )
+
+    vad_speech_pad_ms: int = Field(
+        default=400,
+        ge=0,
+        le=2000,
+        description="Padding (ms) added to each side of detected speech segments",
+    )
+
 
 def get_config(cwd: Path | None = None, app_name: str = "voicepad") -> Config:
     """Load configuration using utilityhub_config precedence rules."""

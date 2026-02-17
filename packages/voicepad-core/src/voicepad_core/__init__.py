@@ -1,3 +1,4 @@
+from voicepad_core.chunking import ChunkMetadata, RealtimeChunker
 from voicepad_core.config import Config, get_config, get_config_with_metadata
 from voicepad_core.diagnostics import (
     CPUInfo,
@@ -21,6 +22,9 @@ from voicepad_core.recorder import AudioRecorder, AudioRecorderError
 from voicepad_core.transcription import TranscriptionError, resolve_auto_settings, transcribe_audio
 
 __all__ = [
+    # Chunking
+    "RealtimeChunker",
+    "ChunkMetadata",
     # Config
     "Config",
     "get_config",

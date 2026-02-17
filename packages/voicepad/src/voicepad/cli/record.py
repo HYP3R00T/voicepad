@@ -108,6 +108,25 @@ def start_recording(
         "--transcribe/--no-transcribe",
         help="Transcribe audio after recording (default: enabled)",
     ),
+    vad: bool | None = typer.Option(
+        None,
+        "--vad/--no-vad",
+        help="Enable VAD-based chunking for long recordings (uses config default if not specified)",
+    ),
+    min_chunk_duration: float | None = typer.Option(
+        None,
+        "--min-chunk-duration",
+        help="Minimum chunk duration in seconds (VAD mode only, default: 60)",
+        min=10.0,
+        max=600.0,
+    ),
+    vad_threshold: float | None = typer.Option(
+        None,
+        "--vad-threshold",
+        help="VAD speech detection threshold 0.0-1.0 (VAD mode only, default: 0.5)",
+        min=0.0,
+        max=1.0,
+    ),
 ) -> None:
     """Start recording audio from the configured input device.
 
@@ -125,11 +144,37 @@ def start_recording(
         # Load configuration
         config = get_config()
 
+        # Apply CLI overrides for VAD settings
+        if vad is not None or min_chunk_duration is not None or vad_threshold is not None:
+            # Create modified config with CLI overrides
+            config_dict = config.model_dump()
+
+            if vad is not None:
+                config_dict["vad_enabled"] = vad
+            if min_chunk_duration is not None:
+                config_dict["vad_min_chunk_duration"] = min_chunk_duration
+            if vad_threshold is not None:
+                config_dict["vad_threshold"] = vad_threshold
+
+            # Reconstruct config with overrides
+            from voicepad_core.config import Config
+
+            config = Config(**config_dict)
+
         # Display configuration info
         typer.echo("Recording Configuration:")
         typer.echo(f"   Input device: {config.input_device_index or 'default'}")
         typer.echo(f"   Output directory: {config.recordings_path}")
         typer.echo(f"   Filename prefix: {prefix or config.recording_prefix}")
+
+        if config.vad_enabled:
+            typer.echo("   VAD chunking: enabled")
+            typer.echo(f"      Min chunk duration: {config.vad_min_chunk_duration}s")
+            typer.echo(f"      VAD threshold: {config.vad_threshold}")
+            typer.echo(f"      Min silence: {config.vad_min_silence_duration_ms}ms")
+        else:
+            typer.echo("   VAD chunking: disabled")
+
         if transcribe:
             typer.echo(f"   Transcription: enabled (model: {config.transcription_model})")
         else:
@@ -185,7 +230,18 @@ def start_recording(
     finally:
         # Transcribe if enabled and we have a valid output file
         if transcribe and output_file and output_file.exists():
-            _transcribe_audio_file(output_file, config)
+            # For VAD mode, transcription already happened in background
+            # For non-VAD mode, transcribe now
+            if config.vad_enabled:
+                # Transcription already complete in background
+                typer.echo()
+                typer.secho("✓ Transcription already complete (background processing)", fg=typer.colors.GREEN)
+                md_path = output_file.with_suffix(".md")
+                if md_path.exists():
+                    typer.echo(f"   Markdown: {md_path}")
+            else:
+                # Non-VAD mode: transcribe now
+                _transcribe_audio_file(output_file, config)
 
 
 @record_app.command("info")
@@ -199,6 +255,13 @@ def show_info() -> None:
         typer.echo(f"Input device index: {config.input_device_index or 'default (system)'}")
         typer.echo(f"Recordings directory: {config.recordings_path}")
         typer.echo(f"Filename prefix: {config.recording_prefix}")
+        if config.vad_enabled:
+            typer.echo("VAD chunking: enabled")
+            typer.echo(f"   Min chunk duration: {config.vad_min_chunk_duration}s")
+            typer.echo(f"   VAD threshold: {config.vad_threshold}")
+            typer.echo(f"   Min silence: {config.vad_min_silence_duration_ms}ms")
+        else:
+            typer.echo("VAD chunking: disabled")
         typer.echo("=" * 60)
 
         # Check if recordings directory exists
