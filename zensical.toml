@@ -5,6 +5,7 @@ repo_name = "HYP3R00T/voicepad"
 repo_url = "https://github.com/HYP3R00T/voicepad"
 site_author = "Rajesh Das"
 copyright = "Copyright &copy; 2026 Rajesh Das"
+dev_addr = "localhost:3000"
 
 nav = [
     { Home = "index.md" },
