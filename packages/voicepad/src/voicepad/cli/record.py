@@ -2,8 +2,8 @@
 
 import logging
 import signal
-import sys
 import time
+from pathlib import Path
 
 import typer
 from voicepad_core import AudioRecorder, AudioRecorderError, get_config
@@ -13,19 +13,59 @@ logger = logging.getLogger(__name__)
 record_app = typer.Typer(help="Audio recording commands")
 
 
-def _handle_interrupt(recorder: AudioRecorder) -> None:
+def _handle_interrupt(recorder: AudioRecorder) -> Path | None:
     """Handle keyboard interrupt during recording.
 
     Args:
         recorder: The AudioRecorder instance to stop.
+
+    Returns:
+        Path to saved audio file, or None if failed.
     """
     typer.echo("\n\n[!] Recording stopped by user")
     try:
         output_file = recorder.stop_recording()
         if output_file:
             typer.secho(f"[OK] Recording saved to: {output_file}", fg=typer.colors.GREEN)
+            return output_file
     except AudioRecorderError as e:
         typer.secho(f"[ERROR] Error stopping recording: {e}", fg=typer.colors.RED, err=True)
+    return None
+
+
+def _transcribe_audio_file(output_file: Path, config) -> None:
+    """Transcribe audio file and display results.
+
+    Args:
+        output_file: Path to the audio file to transcribe.
+        config: Configuration object.
+    """
+    typer.echo()
+    typer.secho("[*] Transcribing audio...", fg=typer.colors.CYAN)
+
+    try:
+        from voicepad_core import TranscriptionError, transcribe_audio
+
+        # Generate output path
+        md_path = config.markdown_path / f"{output_file.stem}.md"
+        config.markdown_path.mkdir(parents=True, exist_ok=True)
+
+        # Transcribe
+        stats = transcribe_audio(output_file, md_path, config)
+
+        typer.secho("[OK] Transcription saved!", fg=typer.colors.GREEN)
+        typer.echo(f"   File: {md_path}")
+        typer.echo(f"   Language: {stats['language']} ({stats['language_probability'] * 100:.1f}%)")
+        typer.echo(f"   Duration: {stats['duration']:.1f}s")
+        typer.echo(f"   Words: {stats['word_count']}")
+        typer.echo(f"   Segments: {stats['segment_count']}")
+
+    except TranscriptionError as e:
+        typer.secho(f"[ERROR] Transcription failed: {e}", fg=typer.colors.RED, err=True)
+        typer.echo("   Recording was saved successfully, but transcription failed.")
+    except Exception as e:
+        logger.exception("Unexpected error during transcription")
+        typer.secho(f"[ERROR] Unexpected transcription error: {e}", fg=typer.colors.RED, err=True)
 
 
 @record_app.command("start")
@@ -43,14 +83,24 @@ def start_recording(
         help="Duration in seconds for fixed-length recording (optional)",
         min=0.1,
     ),
+    transcribe: bool = typer.Option(
+        True,
+        "--transcribe/--no-transcribe",
+        help="Transcribe audio after recording (default: enabled)",
+    ),
 ) -> None:
     """Start recording audio from the configured input device.
 
     The recording will use the configured microphone (input_device_index) and
     save to the configured recordings directory (recordings_path).
 
+    By default, the audio will be automatically transcribed after recording stops.
+    Use --no-transcribe to skip transcription.
+
     Press Ctrl+C to stop recording manually, or use --duration for automatic stop.
     """
+    output_file: Path | None = None
+
     try:
         # Load configuration
         config = get_config()
@@ -60,6 +110,10 @@ def start_recording(
         typer.echo(f"   Input device: {config.input_device_index or 'default'}")
         typer.echo(f"   Output directory: {config.recordings_path}")
         typer.echo(f"   Filename prefix: {prefix or config.recording_prefix}")
+        if transcribe:
+            typer.echo(f"   Transcription: enabled (model: {config.transcription_model})")
+        else:
+            typer.echo("   Transcription: disabled")
         typer.echo()
 
         # Create recorder
@@ -88,8 +142,9 @@ def start_recording(
 
             # Set up signal handler for graceful shutdown
             def signal_handler(sig: int, frame) -> None:
-                _handle_interrupt(recorder)
-                sys.exit(0)
+                nonlocal output_file
+                output_file = _handle_interrupt(recorder)
+                # Don't exit here - let the finally block handle transcription
 
             signal.signal(signal.SIGINT, signal_handler)
 
@@ -98,7 +153,7 @@ def start_recording(
                 while recorder.is_recording():
                     time.sleep(0.1)
             except KeyboardInterrupt:
-                _handle_interrupt(recorder)
+                output_file = _handle_interrupt(recorder)
 
     except AudioRecorderError as e:
         typer.secho(f"[ERROR] Recording error: {e}", fg=typer.colors.RED, err=True)
@@ -107,6 +162,10 @@ def start_recording(
         logger.exception("Unexpected error during recording")
         typer.secho(f"[ERROR] Unexpected error: {e}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from e
+    finally:
+        # Transcribe if enabled and we have a valid output file
+        if transcribe and output_file and output_file.exists():
+            _transcribe_audio_file(output_file, config)
 
 
 @record_app.command("info")

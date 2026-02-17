@@ -18,6 +18,7 @@ from voicepad_core.diagnostics import (
     gpu_diagnostics,
 )
 from voicepad_core.recorder import AudioRecorder, AudioRecorderError
+from voicepad_core.transcription import TranscriptionError, resolve_auto_settings, transcribe_audio
 
 __all__ = [
     # Config
@@ -27,6 +28,10 @@ __all__ = [
     # Audio recording
     "AudioRecorder",
     "AudioRecorderError",
+    # Transcription
+    "transcribe_audio",
+    "resolve_auto_settings",
+    "TranscriptionError",
     # System detection
     "get_ram_info",
     "get_cpu_info",
