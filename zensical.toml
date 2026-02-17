@@ -8,6 +8,29 @@ copyright = "Copyright &copy; 2026 Rajesh Das"
 
 nav = [
     { Home = "index.md" },
+    { "Getting Started" = "getting-started.md" },
+    { Configuration = "configuration.md" },
+
+    { Features = [
+        { Overview = "features/index.md" },
+        { "VAD Chunking" = "features/vad-chunking.md" },
+        { "Background Transcription" = "features/background-transcription.md" },
+    ] },
+
+    { "CLI Reference" = [
+        { Overview = "cli/index.md" },
+        { "record commands" = "cli/record.md" },
+        { "config commands" = "cli/config.md" },
+    ] },
+
+    { "Configuration Reference" = [
+        { Overview = "reference/index.md" },
+    ] },
+
+    { Guides = [
+        { Overview = "guides/index.md" },
+    ] },
+
     { Packages = [
         { Overview = "packages/index.md" },
         { "voicepad CLI" = "packages/voicepad/index.md" },
@@ -21,6 +44,7 @@ nav = [
             ] },
         ] },
     ] },
+
     { Development = "dev/writing-documentation.md" },
 ]
 
