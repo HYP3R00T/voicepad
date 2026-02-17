@@ -1,298 +1,228 @@
 # VoicePad
 
-Voice recording and GPU-accelerated transcription tool. Run anywhere with `uvx voicepad`!
+Voice recording and GPU-accelerated transcription tool. Effortlessly capture and transcribe audio with intelligent defaults and GPU support.
 
 ## Features
 
-- 🎙️ **Voice Activity Detection (VAD)**: Automatic silence detection using Silero VAD
-- 🎯 **Continuous Recording**: Record until you press Enter
-- 🚀 **GPU-Accelerated Transcription**: Fast transcription using faster-whisper with auto-detection
+- 🎙️ **Simple Recording**: Record audio with one command, press Ctrl+C to stop
+- 🚀 **GPU-Accelerated Transcription**: Fast transcription using faster-whisper with optional CUDA support
 - ⚙️ **Smart Configuration**: Set defaults once, use them everywhere
-- 🎬 **Real-Time Streaming**: Watch transcription appear as it processes
-- 📝 **Flexible Output**: Save to configured markdown directory
-- 🖥️ **Terminal UI**: Interactive TUI built with Textual
-- 🔌 **Standalone Tool**: Use with `uvx` - no manual installation required
-- 🎮 **Auto GPU Detection**: Detects GPU and recommends optimal model
+- 📝 **Automatic Output**: Saves both audio and markdown transcriptions to configured directories
+- 🎯 **Auto Model Selection**: System diagnostics recommend optimal model for your hardware
+- 🔧 **System Inspection**: Check GPU availability, supported models, and system capabilities
+
+This is a **two-package architecture**:
+
+- **`voicepad`** - Command-line interface for recording and configuration (in [packages/voicepad/](packages/voicepad/))
+- **`voicepad-core`** - Python library with recording, transcription, and diagnostics (in [packages/voicepad-core/](packages/voicepad-core/))
 
 ## Installation
 
-### Quick Start (Recommended)
+### Using `uvx` (Recommended)
 
-Run VoicePad instantly without installation using `uvx`:
+Run VoicePad instantly without manual installation:
 
 ```bash
-# Check system status and GPU availability
-uvx voicepad config init
+# List audio input devices and set a default
+uvx voicepad config input
 
-# Start the terminal UI
-uvx voicepad
+# Check system capabilities and get model recommendations
+uvx voicepad config system
 
-# Record audio
-uvx voicepad audio record
-
-# Transcribe audio file
-uvx voicepad transcribe transcribe recording.wav
+# Start recording (output directory created automatically)
+uvx voicepad record start
 ```
 
-### Development Installation
+### Local Installation
 
-For development or local modifications:
+For development or local use:
 
 ```bash
 git clone https://github.com/HYP3R00T/voicepad.git
 cd voicepad
 uv sync
+uv run voicepad config input
 ```
 
 ## System Requirements
 
-- Python 3.12+
-- Audio input device
-- NVIDIA GPU (optional, for GPU acceleration)
-- NVIDIA drivers 545+ (for CUDA 12.4 support)
-
-### GPU Support
-
-VoicePad automatically includes PyTorch with CUDA 12.4 support and will use your GPU when available.
-
-If ROCm or Apple MPS is detected, voicepad will fall back to CPU (faster-whisper currently supports CUDA only) and warn you.
-
-Check your system status:
-
-```bash
-uvx voicepad config init
-```
-
-If you have an NVIDIA GPU but it's not detected, ensure your drivers are up to date:
-
-- Windows: Download from [NVIDIA website](https://www.nvidia.com/download/index.aspx)
-- Linux: Use your distribution's driver manager or `nvidia-driver-XXX`
+- **Python**: 3.13+
+- **Audio Device**: Microphone or audio input device
+- **GPU (Optional)**: NVIDIA GPU for 4-5x faster transcription
 
 ## Quick Start
 
 ### Record Audio
 
 ```bash
-# Record audio (stops when you press Enter)
-uvx voicepad audio record --device 0
+# Start recording (press Ctrl+C to stop)
+voicepad record start
 
-# List available audio devices
-uvx voicepad audio devices
+# Display current recording configuration
+voicepad record info
+
+# Record with auto-transcription disabled
+voicepad record start --no-transcribe
+
+# Record for a fixed duration (seconds)
+voicepad record start --duration 30
+
+# Use a custom filename prefix
+voicepad record start --prefix my_recording
 ```
 
-### Record and Transcribe Simultaneously
+### Configure Input Device
 
 ```bash
-# Record and transcribe in real-time (NEW!)
-# Transcription happens every 30 seconds while you're still recording
-uvx voicepad audio record-and-transcribe
+# List available audio input devices
+voicepad config input
 
-# With custom model
-uvx voicepad audio record-and-transcribe --model small
-
-# Change poll interval for transcription (default: 30s)
-uvx voicepad audio record-and-transcribe --poll-interval 15
-
-# Use specific device
-uvx voicepad audio record-and-transcribe --compute-device cuda
+# Edit voicepad.yaml to set a default input device:
+# input_device_index: 2
 ```
 
-### Transcribe Audio
+### Check System Capabilities
 
 ```bash
-# Transcribe with auto-detected settings (recommended)
-uvx voicepad transcribe transcribe recording.wav
+# Display RAM, CPU, and GPU information
+voicepad config system
 
-# Stream transcription output in real-time
-uvx voicepad transcribe transcribe recording.wav --stream
+# Get model recommendations based on your system
+voicepad config recommend
 
-# Use different model sizes
-uvx voicepad transcribe transcribe recording.wav --model tiny    # Fastest
-uvx voicepad transcribe transcribe recording.wav --model small   # Balanced (default)
-uvx voicepad transcribe transcribe recording.wav --model medium  # Better quality
+# View current transcription configuration
+voicepad config transcription
 
-# Specify device
-uvx voicepad transcribe transcribe recording.wav --device cuda  # GPU
-uvx voicepad transcribe transcribe recording.wav --device cpu   # CPU
-
-# Specify compute type (auto chooses float16 on CUDA, int8 on CPU)
-uvx voicepad transcribe transcribe recording.wav --compute-type int8
-
-# Specify language (auto-detect by default)
-uvx voicepad transcribe transcribe recording.wav --language en
-
-# Save to specific file
-uvx voicepad transcribe transcribe recording.wav --output transcript.txt
+# List all available Whisper models
+voicepad config models
 ```
 
-### Launch TUI
+## Configuration
 
-```bash
-# Start the terminal UI
-uvx voicepad
-```
+Configuration is managed through `voicepad.yaml` in the working directory or `~/.config/voicepad/voicepad.yaml` globally.
 
-### Configuration
-
-Set your preferred transcription model and device as defaults:
-
-```bash
-# Show current configuration
-uvx voicepad config show
-
-# Set default model (auto-detect recommended)
-uvx voicepad config set-model auto      # Auto-detect best model for your GPU
-uvx voicepad config set-model small     # Or use specific model
-
-# Set default device
-uvx voicepad config set-device cuda     # Use GPU
-uvx voicepad config set-device auto     # Auto-detect
-
-# Verify configuration and create directories
-uvx voicepad config verify
-
-# Initialize system (check GPU and get recommendations)
-uvx voicepad config init
-```
-
-All transcription commands will use your configured defaults. CLI arguments override config:
-
-```bash
-# Uses your config settings
-uvx voicepad transcribe transcribe audio.wav
-
-# Overrides config with --model large-v3
-uvx voicepad transcribe transcribe audio.wav --model large-v3
-```
-
-## Configuration File
-
-Create or edit `voicepad.yaml` in your project or `~/.config/voicepad/voicepad.yaml` globally:
+### Configuration File Structure
 
 ```yaml
+# Paths for saving recordings and transcriptions
 recordings_path: data/recordings
 markdown_path: data/markdown
 
-transcription:
-  model: auto              # Supported: tiny, tiny.en, base, base.en, small, small.en, distil-small.en, medium, medium.en, distil-medium.en, large-v1, large-v2, large-v3, large, distil-large-v2, distil-large-v3, large-v3-turbo, turbo
-  device: auto             # cuda, cpu, auto
-  compute_type: auto       # float16, int8, int8_float16
-  language: null           # null for auto-detect, or language code like en, es, fr
+# Audio device (null for default system audio input)
+input_device_index: null
+
+# Filename prefix for recordings
+recording_prefix: recording
+
+# Transcription settings
+transcription_model: tiny              # See available models below
+transcription_device: auto             # auto, cuda, or cpu
+transcription_compute_type: auto       # auto, float16, int8, or float32
 ```
 
-Auto compute type picks `float16` on CUDA GPUs and `int8` on CPU (including ROCm/MPS fallback).
+### Configuration Precedence (highest to lowest)
 
-**Precedence** (higher overrides lower):
-
-1. Defaults (in code)
-2. Global config (`~/.config/voicepad/voicepad.yaml`)
+1. CLI command arguments
+2. Environment variables (e.g., `VOICEPAD_TRANSCRIPTION_MODEL=small`)
 3. Project config (`./voicepad.yaml`)
-4. Environment variables (`VOICEPAD_TRANSCRIPTION_MODEL=small`)
-5. CLI arguments (`--model large-v3`)
+4. Global config (`~/.config/voicepad/voicepad.yaml`)
+5. Built-in defaults
 
-## Project Structure
+### GPU Acceleration
 
-```text
-voicepad/
-├── src/voicepad/
-│   ├── audio/           # Audio recording and VAD
-│   │   ├── scanner.py   # Core recording logic
-│   │   ├── utils.py     # Audio utilities
-│   │   ├── cli.py       # Audio CLI commands
-│   │   └── legacy.py    # Historical implementations
-│   ├── config/          # Configuration management
-│   │   ├── settings.py  # Config models
-│   │   └── cli.py       # Config CLI commands
-│   ├── transcription/   # Audio-to-text conversion
-│   │   ├── transcriber.py  # Whisper transcription
-│   │   └── cli.py          # Transcription CLI
-│   ├── ui/              # Terminal UI
-│   │   ├── voicepad_ui.py  # Main TUI
-│   │   └── components/     # UI components
-│   ├── system_utils.py  # GPU and system checks
-│   └── main.py          # CLI entry point
+Install GPU support for 4-5x faster transcription:
+
+```bash
+# Install with GPU support
+pip install voicepad-core[gpu]
+
+# Verify GPU is available
+voicepad config system
 ```
+
+See the [GPU Acceleration Guide](docs/packages/voicepad-core/gpu-acceleration.md) for detailed setup instructions.
+
+## Available Whisper Models
+
+Use `voicepad config models` to list available models. Smaller models are faster but less accurate; larger models are slower but more accurate.
+
+| Model | Size | Speed (CPU) | Accuracy | VRAM (GPU) | Language |
+|-------|------|-------------|----------|-----------|----------|
+| tiny | 39M | ⚡⚡⚡⚡⚡ Very Fast | ⭐ Low | <1 GB | Multi |
+| base | 74M | ⚡⚡⚡⚡ Fast | ⭐⭐ | <1 GB | Multi |
+| small | 244M | ⚡⚡⚡ Moderate | ⭐⭐⭐ | 1-2 GB | Multi |
+| medium | 769M | ⚡⚡ Slow | ⭐⭐⭐⭐ | 2-3 GB | Multi |
+| large-v2 | 1.5B | ⚡ Very Slow | ⭐⭐⭐⭐⭐ Excellent | ~4.7 GB | Multi |
+| large-v3 | 1.5B | ⚡ Very Slow | ⭐⭐⭐⭐⭐ Excellent | ~4.7 GB | Multi |
+| turbo | 809M | ⚡⚡⚡ Moderate | ⭐⭐⭐⭐⭐ | 3-4 GB | Multi |
+| distil-small.en | 134M | ⚡⚡⚡ Moderate | ⭐⭐⭐ | <1 GB | English Only |
+| distil-medium.en | 394M | ⚡⚡ Slow | ⭐⭐⭐⭐ | 1-2 GB | English Only |
+| distil-large-v2 | 756M | ⚡⚡ Slow | ⭐⭐⭐⭐⭐ | 3-4 GB | English Only |
+
+**Tip**: Run `voicepad config recommend` to get a model recommendation based on your system resources.
+
+## Package Documentation
+
+- **[voicepad](docs/packages/voicepad/index.md)** - CLI commands and usage guide
+- **[voicepad-core](docs/packages/voicepad-core/index.md)** - Python library API reference
+- **[GPU Acceleration](docs/packages/voicepad-core/gpu-acceleration.md)** - GPU setup and optimization
 
 ## Development
 
 ### Code Standards
 
-- Follow PEP 8 and project coding standards (see `.github/copilot-instructions.md`)
-- Use `snake_case` for functions/variables, `PascalCase` for classes
-- Type hints required for all functions
-- Use Pydantic for data validation
+Follow the project coding standards:
 
-### Linting and Formatting
+- **Naming**: `snake_case` for functions/variables, `PascalCase` for classes
+- **Type Hints**: Required for all functions and class attributes
+- **Formatting**: [PEP 8](https://peps.python.org/pep-0008/)
+- **Validation**: Use Pydantic for data models
+
+See [.github/copilot-instructions.md](.github/copilot-instructions.md) for complete guidelines.
+
+### Formatting and Linting
 
 ```bash
-# Format code
+# Format all code
 ruff format
 
-# Lint code
+# Check for linting issues
 ruff check
+
+# Type check Python code
+ty check
 ```
 
-## Available Commands
+## Project Structure
 
-### Audio Commands
-
-- `audio record` - Record audio with VAD
-- `audio list-devices` - List audio devices
-
-### Configuration Commands
-
-- `config init` - Check system capabilities and get GPU recommendations
-- `config show` - Display current configuration
-- `config set-model` - Set default transcription model
-- `config set-device` - Set default device (cuda/cpu/auto)
-- `config verify` - Verify configuration and create directories
-
-### Transcription Commands
-
-- `transcribe transcribe` - Transcribe audio file
-  - `--stream` / `-s` - Stream output in real-time
-  - `--model` / `-m` - Override configured model
-  - `--device` / `-d` - Override configured device
-  - `--language` / `-l` - Specify language (auto-detect by default)
-
-## Available Models
-
-| Model | Size | Speed | Accuracy | VRAM (fp16) |
-| --- | --- | --- | --- | --- |
-| tiny | 39M | ⚡⚡⚡⚡⚡ | ⭐ | <1 GB |
-| base | 74M | ⚡⚡⚡⚡ | ⭐⭐ | <1 GB |
-| small | 244M | ⚡⚡⚡ | ⭐⭐⭐ | 1-2 GB |
-| medium | 769M | ⚡⚡ | ⭐⭐⭐⭐ | 2-3 GB |
-| large-v2 | 1550M | ⚡ | ⭐⭐⭐⭐⭐ | ~4.7 GB |
-| large-v3 | 1550M | ⚡ | ⭐⭐⭐⭐⭐ | ~4.7 GB |
-| turbo | 809M | ⚡⚡⚡ | ⭐⭐⭐⭐⭐ | ~3-4 GB |
-| distil-large-v3 | 756M | ⚡⚡⚡ | ⭐⭐⭐⭐⭐ | ~3-4 GB |
-
-Supported model names (no custom paths): tiny, tiny.en, base, base.en, small, small.en, distil-small.en, medium, medium.en, distil-medium.en, large-v1, large-v2, large-v3, large, distil-large-v2, distil-large-v3, large-v3-turbo, turbo.
-
-**Recommendation**: Use `--model auto` (default) to let voicepad choose the best model for your GPU.
-
-## How It Works
-
-1. **Recording**: Uses VAD (Voice Activity Detection) to capture audio continuously
-2. **Processing**: Saves recordings with timestamps to configured directory
-3. **Transcription**: Uses faster-whisper with GPU acceleration (when available)
-4. **Output**: Generates text transcriptions alongside audio files
-
-## Performance
-
-- **GPU Mode**: ~10-50x faster than CPU (depending on GPU)
-- **CPU Mode**: Fully functional, slower but works everywhere
-- **Model Sizes**: Trade-off between speed and accuracy
-
-## Documentation
-
-For more detailed information, see:
-
-- [Configuration Guide](docs/CONFIG.md) - Complete config system documentation
-- [GPU Detection Guide](docs/GPU_DETECTION.md) - How GPU detection works, VRAM requirements
-- [Model Comparison](docs/MODELS.md) - Detailed model information and recommendations
+```text
+voicepad (root)
+├── packages/
+│   ├── voicepad/                      # CLI package (Typer)
+│   │   └── src/voicepad/
+│   │       ├── cli/
+│   │       │   ├── record.py          # record start, record info
+│   │       │   └── config.py          # config input, system, recommend, etc.
+│   │       └── __main__.py            # CLI entry point
+│   │
+│   └── voicepad-core/                 # Core library (Pydantic + faster-whisper)
+│       └── src/voicepad_core/
+│           ├── config/
+│           │   └── settings.py        # Config model and loading
+│           ├── recorder.py            # AudioRecorder class
+│           ├── transcription.py       # transcribe_audio() function
+│           └── diagnostics/
+│               ├── system.py          # System info (RAM, CPU)
+│               ├── gpu.py             # GPU detection and checks
+│               ├── models.py          # Recommendation logic
+│               └── recommendations.py # get_model_recommendation()
+│
+└── docs/
+    ├── packages/voicepad/             # CLI documentation
+    ├── packages/voicepad-core/        # Library documentation
+    └── packages/voicepad-core/gpu-acceleration.md
+```
 
 ## License
 
-See LICENSE file for details.
+See [LICENSE](LICENSE) file for details.
