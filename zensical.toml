@@ -10,13 +10,18 @@ nav = [
     { Home = "index.md" },
     { Packages = [
         { Overview = "packages/index.md" },
+        { "voicepad CLI" = "packages/voicepad/index.md" },
         { "voicepad-core" = [
             { Overview = "packages/voicepad-core/index.md" },
-            { "GPU Acceleration" = "packages/voicepad-core/gpu-acceleration.md" },
+            { "GPU Acceleration" = [
+                { Overview = "packages/voicepad-core/gpu-acceleration/index.md" },
+                { "Quick Start" = "packages/voicepad-core/gpu-acceleration/quick-start.md" },
+                { Troubleshooting = "packages/voicepad-core/gpu-acceleration/troubleshooting.md" },
+                { Advanced = "packages/voicepad-core/gpu-acceleration/advanced.md" },
+            ] },
         ] },
-        { voicepad = "packages/voicepad/index.md" },
     ] },
-    { Documentation = "dev/writing-documentation.md" },
+    { Development = "dev/writing-documentation.md" },
 ]
 
 [project.theme]
