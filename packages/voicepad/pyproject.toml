@@ -1,17 +1,50 @@
 [project]
 name = "voicepad"
 version = "0.1.0"
-description = "Add your description here"
+description = "Command-line interface for voice recording and GPU-accelerated transcription."
 readme = "README.md"
 authors = [{ name = "Rajesh Das", email = "rajesh@hyperoot.dev" }]
 requires-python = ">=3.13"
+license = "MIT"
+keywords = [
+  "cli",
+  "voice",
+  "audio",
+  "transcription",
+  "recording",
+  "speech-to-text",
+  "whisper",
+  "command-line",
+  "gpu-acceleration",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Intended Audience :: End Users/Desktop",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: Multimedia :: Sound/Audio :: Capture/Recording",
+  "Topic :: Multimedia :: Sound/Audio :: Speech",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Typing :: Typed",
+]
 dependencies = ["voicepad-core>=0.1.0", "typer>=0.23.1", "textual>=7.5.0"]
+
+[project.urls]
+HomePage = "https://hyp3r00t.github.io/voicepad/"
+Repository = "https://github.com/HYP3R00T/voicepad"
+Issues = "https://github.com/HYP3R00T/voicepad/issues"
+Documentation = "https://hyp3r00t.github.io/voicepad/"
 
 [project.optional-dependencies]
 gpu = [
-    # Chain to voicepad-core GPU support for NVIDIA acceleration
-    # Users can install with: pip install voicepad[gpu]
-    "voicepad-core[gpu]",
+  # Chain to voicepad-core GPU support for NVIDIA acceleration
+  # Users can install with: pip install voicepad[gpu]
+  "voicepad-core[gpu]",
 ]
 
 [project.scripts]
