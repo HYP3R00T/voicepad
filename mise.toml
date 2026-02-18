@@ -22,3 +22,7 @@ UV_LINK_MODE = "copy"
 [tasks.docs]
 run = "uv run zensical serve"
 description = "Serve the documentation locally"
+
+[tasks.sync]
+run = "uv sync --extra gpu --upgrade"
+description = "Run uv sync"
