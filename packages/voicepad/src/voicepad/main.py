@@ -7,7 +7,6 @@ from voicepad.cli import config_app, record_app
 logger = logging.getLogger(__name__)
 
 app = typer.Typer(
-    invoke_without_command=True,
     help="Voicepad - Voice recording and audio processing application",
 )
 
