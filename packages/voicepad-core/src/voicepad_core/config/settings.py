@@ -3,8 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
-from utilityhub_config import load_settings
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from utilityhub_config import expand_path, load_settings
 
 
 class Config(BaseModel):
@@ -74,6 +74,14 @@ class Config(BaseModel):
         le=2000,
         description="Padding (ms) added to each side of detected speech segments",
     )
+
+    @field_validator("recordings_path", "markdown_path", mode="before")
+    @classmethod
+    def expand_paths(cls, v: Path | str) -> Path:
+        """Expand user home directory (~) and environment variables in path fields."""
+        if isinstance(v, Path):
+            v = str(v)
+        return expand_path(v)
 
 
 def get_config(cwd: Path | None = None, app_name: str = "voicepad") -> Config:
