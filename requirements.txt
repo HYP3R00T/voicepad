@@ -286,9 +286,9 @@ packaging==26.0 \
     # via
     #   huggingface-hub
     #   onnxruntime
-platformdirs==4.9.1 \
-    --hash=sha256:61d8b967d34791c162d30d60737369cbbd77debad5b981c4bfda1842e71e0d66 \
-    --hash=sha256:f310f16e89c4e29117805d8328f7c10876eeff36c94eac879532812110f7d39f
+platformdirs==4.9.2 \
+    --hash=sha256:9170634f126f8efdae22fb58ae8a0eaa86f38365bc57897a6c4f781d1f5875bd \
+    --hash=sha256:9a33809944b9db043ad67ca0db94b14bf452cc6aeaac46a88ea55b26e2e9d291
     # via textual
 protobuf==6.33.5 \
     --hash=sha256:3093804752167bcab3998bec9f1048baae6e29505adaf1afd14a37bddede533c \
@@ -385,9 +385,9 @@ pygments==2.19.2 \
     #   rich
     #   textual
     #   zensical
-pymdown-extensions==10.20.1 \
-    --hash=sha256:24af7feacbca56504b313b7b418c4f5e1317bb5fea60f03d57be7fcc40912aa0 \
-    --hash=sha256:e7e39c865727338d434b55f1dd8da51febcffcaebd6e1a0b9c836243f660740a
+pymdown-extensions==10.21 \
+    --hash=sha256:39f4a020f40773f6b2ff31d2cd2546c2c04d0a6498c31d9c688d2be07e1767d5 \
+    --hash=sha256:91b879f9f864d49794c2d9534372b10150e6141096c3908a455e45ca72ad9d3f
     # via zensical
 python-dotenv==1.2.1 \
     --hash=sha256:42667e897e16ab0d66954af0e60a9caa94f0fd4ecf3aaf6d2d260eec1aa36ad6 \
@@ -486,9 +486,9 @@ sympy==1.14.0 \
     --hash=sha256:d3d3fe8df1e5a0b42f0e7bdf50541697dbe7d23746e894990c030e2b05e72517 \
     --hash=sha256:e091cc3e99d2141a0ba2847328f5479b05d94a6635cb96148ccb3f34671bd8f5
     # via onnxruntime
-textual==7.5.0 \
-    --hash=sha256:849dfee9d705eab3b2d07b33152b7bd74fb1f5056e002873cc448bce500c6374 \
-    --hash=sha256:c730cba1e3d704e8f1ca915b6a3af01451e3bca380114baacf6abf87e9dac8b6
+textual==8.0.0 \
+    --hash=sha256:8908f4ebe93a6b4f77ca7262197784a52162bc88b05f4ecf50ac93a92d49bb8f \
+    --hash=sha256:ce48f83a3d686c0fac0e80bf9136e1f8851c653aa6a4502e43293a151df18809
     # via voicepad
 tokenizers==0.22.2 \
     --hash=sha256:1c774b1276f71e1ef716e5486f21e76333464f47bece56bbd554485982a9e03e \
@@ -532,15 +532,15 @@ ty==0.0.17 \
     --hash=sha256:e6f5b1aba97db9af86517b911674b02f5bc310750485dc47603a105bd0e83ddd \
     --hash=sha256:eb2dbd8acd5c5a55f4af0d479523e7c7265a88542efe73ed3d696eb1ba7b6454 \
     --hash=sha256:f18f5fd927bc628deb9ea2df40f06b5f79c5ccf355db732025a3e8e7152801f6
-typer==0.23.1 \
-    --hash=sha256:2070374e4d31c83e7b61362fd859aa683576432fd5b026b060ad6b4cd3b86134 \
-    --hash=sha256:3291ad0d3c701cbf522012faccfbb29352ff16ad262db2139e6b01f15781f14e
+typer==0.24.0 \
+    --hash=sha256:5fc435a9c8356f6160ed6e85a6301fdd6e3d8b2851da502050d1f92c5e9eddc8 \
+    --hash=sha256:f9373dc4eff901350694f519f783c29b6d7a110fc0dcc11b1d7e353b85ca6504
     # via
     #   typer-slim
     #   voicepad
-typer-slim==0.23.1 \
-    --hash=sha256:8146d5df1eb89f628191c4c604c8464fa841885d0733c58e6e700ff0228adac5 \
-    --hash=sha256:dfe92a6317030ee2380f65bf92e540d7c77fefcc689e10d585b4925b45b5e06a
+typer-slim==0.24.0 \
+    --hash=sha256:d5d7ee1ee2834d5020c7c616ed5e0d0f29b9a4b1dd283bdebae198ec09778d0e \
+    --hash=sha256:f0ed36127183f52ae6ced2ecb2521789995992c521a46083bfcdbb652d22ad34
     # via huggingface-hub
 typing-extensions==4.15.0 \
     --hash=sha256:0cea48d173cc12fa28ecabc3b837ea3cf6f38c6d1136f85cbaaf598984861466 \
@@ -559,9 +559,9 @@ uc-micro-py==1.0.3 \
     --hash=sha256:d321b92cff673ec58027c04015fcaa8bb1e005478643ff4a500882eaab88c48a \
     --hash=sha256:db1dffff340817673d7b466ec86114a9dc0e9d4d9b5ba229d9d60e5c12600cd5
     # via linkify-it-py
-utilityhub-config==0.2.1 \
-    --hash=sha256:5df3670980991e5e90f96327861b11781855376170b6be58d47da11fe0520224 \
-    --hash=sha256:adb2d64a9ba0d17bca61305e36855a88d5945234788b79ed33132bb0478748ef
+utilityhub-config==0.2.2 \
+    --hash=sha256:088641a946e88a75d8276456b05e7d338f739ad4b356f73cd6ce994fb73dfa5b \
+    --hash=sha256:9deab7775509e1c198e39e5209b91494970efc45d591dda19fa6971646e014da
     # via voicepad-core
 zensical==0.0.23 \
     --hash=sha256:35d6d3eb803fe73a67187a1a25443408bd02a8dd50e151f4a4bafd40de3f0928 \
