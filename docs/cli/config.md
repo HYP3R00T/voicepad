@@ -6,6 +6,61 @@ icon: lucide/settings-2
 
 Configuration and system information commands.
 
+## voicepad config show {#show}
+
+Show current configuration and where values are loaded from.
+
+### Synopsis
+
+```bash
+voicepad config show
+```
+
+### Description
+
+Displays all configuration fields with their current values and indicates where each value is loaded from (defaults, environment variables, or configuration files). This is useful for understanding your active configuration and troubleshooting configuration issues.
+
+### Output Example
+
+```text
+                    Voicepad Configuration
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Field                     ┃ Value       ┃ Source                   ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ transcription_model       │ medium      │ file (voicepad.yaml)     │
+│ transcription_device      │ cuda        │ file (voicepad.yaml)     │
+│ transcription_compute_... │ float16     │ file (voicepad.yaml)     │
+│ input_device_index        │ 2           │ file (voicepad.yaml)     │
+│ sample_rate               │ 16000       │ default                  │
+│ chunk_duration            │ 30          │ environment variable     │
+│ output_directory          │ ./output    │ default                  │
+└───────────────────────────┴─────────────┴──────────────────────────┘
+
+Config file: /home/user/.config/voicepad/voicepad.yaml
+Set input_device_index in that file to persist the default.
+```
+
+### Configuration Sources
+
+Values can come from multiple sources, shown in priority order (highest to lowest):
+
+1. **Environment variables** - Settings from `VOICEPAD_*` environment variables
+2. **Configuration file** - Settings from `voicepad.yaml` (project or user config)
+3. **Default** - Built-in default values
+
+### Use Cases
+
+- **Configuration audit** - See all active settings at a glance
+- **Troubleshooting** - Identify which config file or environment variable is being used
+- **Debugging** - Verify that configuration changes are being loaded correctly
+- **Documentation** - Understand which values have been customized vs defaults
+
+### Exit Codes
+
+- `0` - Always succeeds
+
+---
+
 ## voicepad config input {#input}
 
 List available audio input devices and show the configured default.
@@ -299,6 +354,7 @@ voicepad config input
 # 4. Edit voicepad.yaml with recommended settings
 
 # 5. Verify configuration
+voicepad config show
 voicepad config transcription
 voicepad record info
 ```
@@ -313,6 +369,7 @@ voicepad config system
 voicepad config recommend
 
 # 3. Check current settings
+voicepad config show
 voicepad config transcription
 
 # 4. Try a smaller model
