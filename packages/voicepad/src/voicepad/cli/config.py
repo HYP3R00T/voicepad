@@ -13,6 +13,69 @@ logger = logging.getLogger(__name__)
 config_app = typer.Typer(help="Configuration management commands")
 
 
+@config_app.command("show")
+def show_config() -> None:
+    """Show current configuration and where values are loaded from."""
+    from rich.console import Console
+    from rich.table import Table
+
+    # Load config with metadata to track sources
+    config, metadata = get_config_with_metadata()
+
+    console = Console()
+    table = Table(title="Voicepad Configuration")
+
+    table.add_column("Field", style="cyan")
+    table.add_column("Value", style="green")
+    table.add_column("Source", style="yellow")
+
+    # Iterate over all fields defined in the Config model
+    for field_name in config.model_fields:
+        # Get current value
+        value = getattr(config, field_name)
+
+        # Get source info
+        source_desc = "default"
+        if metadata.per_field and field_name in metadata.per_field:
+            source_info = metadata.per_field[field_name]
+
+            # Format source description
+            if source_info.source == "defaults":
+                source_desc = "default"
+            elif source_info.source == "env":
+                source_desc = "environment variable"
+            else:
+                # For file sources, show the source type and file path
+                src_type = source_info.source
+                path = source_info.source_path
+                if path:
+                    # Try to make path relative to CWD if possible for shorter output
+                    try:
+                        from pathlib import Path
+
+                        cwd = Path.cwd()
+                        if Path(path).is_absolute() and str(path).startswith(str(cwd)):
+                            path = Path(path).relative_to(cwd)
+                    except (ValueError, Exception):
+                        pass
+                    source_desc = f"{src_type} ({path})"
+                else:
+                    source_desc = src_type
+
+        # Format value for display
+        value_str = str(value)
+
+        # Truncate very long values if necessary (though config values are usually short)
+        if len(value_str) > 50:
+            value_str = value_str[:47] + "..."
+
+        table.add_row(field_name, value_str, source_desc)
+
+    console.print(table)
+    console.print()
+    _show_config_hint()
+
+
 @dataclass(frozen=True)
 class AudioDevice:
     index: int
