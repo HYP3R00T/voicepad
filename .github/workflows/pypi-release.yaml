@@ -1,0 +1,109 @@
+name: Release Packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: "Package"
+        required: true
+        type: choice
+        options:
+          - voicepad-core
+          - voicepad
+      bump:
+        description: "Version bump type"
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+          - stable
+          - alpha
+          - beta
+          - rc
+          - post
+          - dev
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0 # Fetch all history for changelog generation
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install mise
+        uses: jdx/mise-action@v3
+        with:
+          install: true
+
+      - name: Validate package exists
+        run: |
+          test -d "packages/${{ inputs.package }}" || {
+            echo "Package packages/${{ inputs.package }} not found"
+            exit 1
+          }
+
+      - name: Sync dependencies
+        run: uv sync --all-extras --all-groups --locked
+
+      - name: Bump version
+        id: version
+        working-directory: packages/${{ inputs.package }}
+        run: |
+          uv version --bump ${{ inputs.bump }}
+          VERSION=$(uv version --short)
+          echo "new_version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Generate changelog
+        run: |
+          git cliff \
+            --include-path "packages/${{ inputs.package }}/**" \
+            --tag-pattern "${{ inputs.package }}-v*" \
+            --unreleased \
+            --tag "${{ inputs.package }}-v${{ steps.version.outputs.new_version }}" \
+            --output "packages/${{ inputs.package }}/CHANGELOG.md"
+
+      - name: Build package
+        run: uv build packages/${{ inputs.package }}/
+
+      - name: Publish to PyPI
+        env:
+          UV_PUBLISH_TOKEN: ${{ secrets.UV_PUBLISH_TOKEN }}
+        run: uv publish
+
+      - name: Generate requirements.txt
+        run: uv export --frozen --output-file=requirements.txt
+
+      - name: Commit version bump and changelog
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add packages/${{ inputs.package }}/pyproject.toml
+          git add packages/${{ inputs.package }}/CHANGELOG.md
+          git add uv.lock
+          git add requirements.txt
+          git commit -m "chore(release): ${{ inputs.package }} v${{ steps.version.outputs.new_version }}"
+          git push
+
+      - name: Create git tag
+        run: |
+          git tag "${{ inputs.package }}-v${{ steps.version.outputs.new_version }}"
+          git push origin "${{ inputs.package }}-v${{ steps.version.outputs.new_version }}"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "${{ inputs.package }}-v${{ steps.version.outputs.new_version }}"
+          name: "${{ inputs.package }} v${{ steps.version.outputs.new_version }}"
+          body_path: packages/${{ inputs.package }}/CHANGELOG.md
+          draft: false
+          prerelease: false
