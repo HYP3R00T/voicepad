@@ -1,7 +1,8 @@
 """Audio recording CLI commands for voicepad."""
 
 import logging
-import signal
+import sys
+import threading
 import time
 from pathlib import Path
 
@@ -13,8 +14,8 @@ logger = logging.getLogger(__name__)
 record_app = typer.Typer(help="Audio recording commands")
 
 
-def _handle_interrupt(recorder: AudioRecorder) -> Path | None:
-    """Handle keyboard interrupt during recording.
+def _stop_recording(recorder: AudioRecorder) -> Path | None:
+    """Stop the active recording and report the result.
 
     Args:
         recorder: The AudioRecorder instance to stop.
@@ -22,7 +23,7 @@ def _handle_interrupt(recorder: AudioRecorder) -> Path | None:
     Returns:
         Path to saved audio file, or None if failed.
     """
-    typer.echo("\n\n[!] Recording stopped by user")
+    typer.echo("\n[!] Stopping recording...")
     try:
         output_file = recorder.stop_recording()
         if output_file:
@@ -31,6 +32,32 @@ def _handle_interrupt(recorder: AudioRecorder) -> Path | None:
     except AudioRecorderError as e:
         typer.secho(f"[ERROR] Error stopping recording: {e}", fg=typer.colors.RED, err=True)
     return None
+
+
+def _wait_for_quit_key(stop_event: threading.Event) -> None:
+    """Block until the user types 'q' and presses Enter.
+
+    Runs in a daemon thread. Sets stop_event when 'q' is received.
+    Any other input is silently ignored, so accidental Enter presses
+    do not stop the recording.
+
+    The stop_event is a plain threading.Event — future frontends (TUI,
+    web) can set it from a button handler or API call without touching
+    this function or voicepad-core.
+
+    Args:
+        stop_event: Event to set when the user requests a stop.
+    """
+    while not stop_event.is_set():
+        try:
+            line = sys.stdin.readline().strip().lower()
+            if line == "q":
+                stop_event.set()
+                break
+        except (EOFError, OSError):
+            # stdin closed (e.g. piped input or UV tool wrapper edge case)
+            stop_event.set()
+            break
 
 
 def _transcribe_audio_file(output_file: Path, config) -> None:
@@ -136,7 +163,7 @@ def start_recording(
     By default, the audio will be automatically transcribed after recording stops.
     Use --no-transcribe to skip transcription.
 
-    Press Ctrl+C to stop recording manually, or use --duration for automatic stop.
+    Type q and press Enter to stop recording manually, or use --duration for automatic stop.
     """
     output_file: Path | None = None
 
@@ -203,22 +230,26 @@ def start_recording(
             typer.secho("[REC] Recording in progress...", fg=typer.colors.YELLOW)
             typer.echo(f"   Output: {output_file}")
             typer.echo()
-            typer.echo("Press Ctrl+C to stop recording")
+            typer.echo("Type q and press Enter to stop recording")
 
-            # Set up signal handler for graceful shutdown
-            def signal_handler(sig: int, frame) -> None:
-                nonlocal output_file
-                output_file = _handle_interrupt(recorder)
-                # Don't exit here - let the finally block handle transcription
+            # stop_event is the loose-coupling bridge:
+            # the CLI sets it via stdin; a TUI or web frontend can set it
+            # from a button handler or API call — no core changes needed.
+            stop_event = threading.Event()
 
-            signal.signal(signal.SIGINT, signal_handler)
+            listener = threading.Thread(
+                target=_wait_for_quit_key,
+                args=(stop_event,),
+                daemon=True,
+            )
+            listener.start()
 
-            # Keep the main thread alive while recording
-            try:
-                while recorder.is_recording():
-                    time.sleep(0.1)
-            except KeyboardInterrupt:
-                output_file = _handle_interrupt(recorder)
+            # Block main thread until q is typed or recording ends externally
+            while recorder.is_recording() and not stop_event.is_set():
+                time.sleep(0.05)
+
+            if stop_event.is_set():
+                output_file = _stop_recording(recorder)
 
     except AudioRecorderError as e:
         typer.secho(f"[ERROR] Recording error: {e}", fg=typer.colors.RED, err=True)
