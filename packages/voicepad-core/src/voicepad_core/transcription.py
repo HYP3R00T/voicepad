@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -157,11 +158,10 @@ def load_model_with_fallback(
         # This catches library issues BEFORE model loading
         cuda_available = True
         try:
-            # Try to import CUDA libraries
-            from nvidia import (
-                cublas,  # noqa: F401
-                cudnn,  # noqa: F401
-            )
+            # Try to import optional CUDA Python packages dynamically.
+            # Using importlib keeps static type checks green in CPU-only CI.
+            importlib.import_module("nvidia.cublas")
+            importlib.import_module("nvidia.cudnn")
 
             logger.info("CUDA libraries detected")
         except ImportError as e:
