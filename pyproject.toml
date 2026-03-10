@@ -8,9 +8,9 @@ dependencies = ["voicepad", "voicepad-core"]
 
 [project.optional-dependencies]
 gpu = [
-    # For local development with GPU support
-    # Chains to voicepad[gpu] -> voicepad-core[gpu]
-    "voicepad[gpu]",
+  # For local development with GPU support
+  # Chains to voicepad[gpu] -> voicepad-core[gpu]
+  "voicepad[gpu]",
 ]
 
 [tool.uv.workspace]
@@ -21,4 +21,10 @@ voicepad = { workspace = true }
 voicepad-core = { workspace = true }
 
 [dependency-groups]
-dev = ["ruff>=0.15.1", "ty>=0.0.17", "zensical>=0.0.23"]
+dev = [
+  "pytest>=9.0.2",
+  "pytest-cov>=7.0.0",
+  "ruff>=0.15.1",
+  "ty>=0.0.17",
+  "zensical>=0.0.23",
+]

@@ -17,6 +17,9 @@ record_app = typer.Typer(help="Audio recording commands")
 def _stop_recording(recorder: AudioRecorder) -> Path | None:
     """Stop the active recording and report the result.
 
+    For VAD mode: Returns immediately after audio is saved, with transcription
+    continuing in the background. User can safely exit or start a new recording.
+
     Args:
         recorder: The AudioRecorder instance to stop.
 
@@ -26,9 +29,21 @@ def _stop_recording(recorder: AudioRecorder) -> Path | None:
     typer.echo("\n[!] Stopping recording...")
     try:
         output_file = recorder.stop_recording()
-        if output_file:
+        if output_file and output_file.exists():
             typer.secho(f"[OK] Recording saved to: {output_file}", fg=typer.colors.GREEN)
+
+            # Check if VAD transcription is ongoing
+            markdown_path = recorder.get_markdown_path()
+            if markdown_path is not None:
+                typer.echo()
+                typer.secho(
+                    "[*] Transcription ongoing in the background...",
+                    fg=typer.colors.CYAN,
+                )
+                typer.echo(f"    Check markdown for progress: {markdown_path}")
+
             return output_file
+        typer.secho("[ERROR] Recording stopped, but no audio file was saved.", fg=typer.colors.RED, err=True)
     except AudioRecorderError as e:
         typer.secho(f"[ERROR] Error stopping recording: {e}", fg=typer.colors.RED, err=True)
     return None
@@ -221,9 +236,7 @@ def start_recording(
 
             # Wait for recording to complete
             time.sleep(duration + 0.5)  # Add small buffer for processing
-
-            typer.secho("[OK] Recording completed!", fg=typer.colors.GREEN)
-            typer.echo(f"   Saved to: {output_file}")
+            output_file = _stop_recording(recorder)
 
         else:
             # Manual stop recording
@@ -264,12 +277,22 @@ def start_recording(
             # For VAD mode, transcription already happened in background
             # For non-VAD mode, transcribe now
             if config.vad_enabled:
-                # Transcription already complete in background
+                transcription_state = recorder.get_last_transcription_state()
+                markdown_path = recorder.get_markdown_path()
                 typer.echo()
-                typer.secho("✓ Transcription already complete (background processing)", fg=typer.colors.GREEN)
-                md_path = output_file.with_suffix(".md")
-                if md_path.exists():
-                    typer.echo(f"   Markdown: {md_path}")
+                if transcription_state == "complete":
+                    typer.secho("✓ Transcription complete (background processing)", fg=typer.colors.GREEN)
+                elif transcription_state == "incomplete":
+                    typer.secho("[!] Audio saved, but transcription is incomplete", fg=typer.colors.YELLOW)
+                elif transcription_state == "unavailable":
+                    typer.secho("[!] Audio saved, but no transcription chunks were produced", fg=typer.colors.YELLOW)
+                elif transcription_state == "failed":
+                    typer.secho(
+                        "[ERROR] Recording failed before transcription completed", fg=typer.colors.RED, err=True
+                    )
+
+                if markdown_path and markdown_path.exists():
+                    typer.echo(f"   Markdown: {markdown_path}")
             else:
                 # Non-VAD mode: transcribe now
                 _transcribe_audio_file(output_file, config)
