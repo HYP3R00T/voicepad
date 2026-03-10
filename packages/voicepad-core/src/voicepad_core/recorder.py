@@ -56,6 +56,8 @@ class AudioRecorder:
         self._chunk_worker_running = False
         self._chunk_worker_finished = False
         self._last_transcription_state: str | None = None
+        self._finalization_thread: threading.Thread | None = None
+        self._finalized_output_file: Path | None = None  # Captured for async finalization
 
         # Validate configuration
         self._validate_config()
@@ -167,6 +169,55 @@ class AudioRecorder:
                 logger.error(f"Error draining queue: {e}", exc_info=True)
 
         return drained
+
+    def _finalize_worker(self) -> None:
+        """Background worker for async finalization after stop_recording returns.
+
+        This method:
+        1. Waits for the chunk worker to complete (or timeout)
+        2. Performs emergency queue drain if needed
+        3. Updates markdown with final status
+        """
+        if self._chunker is None:
+            return
+
+        logger.info("Async finalization started")
+        worker_timed_out = False
+
+        # Stop chunk worker
+        self._chunk_worker_running = False
+        if self._chunk_worker_thread and self._chunk_worker_thread.is_alive():
+            logger.info(f"Chunk worker stop requested with queue size {self._audio_queue.qsize()}")
+            logger.info("Waiting for chunk worker to complete (up to 5 minutes)...")
+            self._chunk_worker_thread.join(timeout=300.0)  # 5 minute timeout for finalization
+            if self._chunk_worker_thread.is_alive():
+                logger.warning("Chunk worker did not finish in time")
+                worker_timed_out = True
+                # Emergency drain one more time
+                logger.info("Attempting emergency queue drain before finalization...")
+                queued_frames_remaining = self._audio_queue.qsize()
+                if queued_frames_remaining > 0:
+                    drained_on_timeout = self._drain_audio_queue()
+                    if drained_on_timeout > 0:
+                        logger.info(f"Emergency drain recovered {drained_on_timeout} frames")
+
+        if not self._accumulated_chunks:
+            logger.warning("No chunks were accumulated")
+
+        queued_frames_remaining = self._audio_queue.qsize()
+        if queued_frames_remaining > 0:
+            logger.warning(f"Audio queue has {queued_frames_remaining} unprocessed items!")
+
+        # Determine if audio was actually saved (check captured file path)
+        audio_saved = self._finalized_output_file is not None and self._finalized_output_file.exists()
+
+        self._finalize_markdown_status(
+            audio_saved=audio_saved,
+            worker_timed_out=worker_timed_out,
+            queued_frames_remaining=queued_frames_remaining,
+        )
+
+        logger.info("Async finalization completed")
 
     def _update_markdown_status(self, status: str, note: str | None = None) -> None:
         """Update markdown file to reflect the latest recording/transcription state."""
@@ -651,6 +702,11 @@ class AudioRecorder:
     def stop_recording(self) -> Path | None:
         """Stop the current recording and save to file.
 
+        For VAD mode: Returns immediately after saving audio. Worker finalization
+        (chunk processing, markdown updates) happens asynchronously in background.
+
+        For non-VAD mode: Waits for recording thread and returns immediately.
+
         Returns:
             Path to the saved recording file, or None if no recording was active.
 
@@ -687,36 +743,18 @@ class AudioRecorder:
             else:
                 logger.warning("No raw audio frames were captured")
 
-            # Stop chunk worker
-            self._chunk_worker_running = False
-            worker_timed_out = False
-            if self._chunk_worker_thread and self._chunk_worker_thread.is_alive():
-                logger.info(f"Chunk worker stop requested with queue size {self._audio_queue.qsize()}")
-                logger.info("Waiting for chunk worker to complete...")
-                self._chunk_worker_thread.join(timeout=10.0)
-                if self._chunk_worker_thread.is_alive():
-                    logger.warning("Chunk worker did not finish in time")
-                    worker_timed_out = True
-                    # Phase 4: Deterministic finalization fallback - try draining one more time
-                    logger.info("Attempting emergency queue drain before finalization...")
-                    queued_frames_remaining = self._audio_queue.qsize()
-                    if queued_frames_remaining > 0:
-                        drained_on_timeout = self._drain_audio_queue()
-                        if drained_on_timeout > 0:
-                            logger.info(f"Emergency drain recovered {drained_on_timeout} frames")
-
-            if not self._accumulated_chunks:
-                logger.warning("No chunks were accumulated")
-
-            queued_frames_remaining = self._audio_queue.qsize()
-            if queued_frames_remaining > 0:
-                logger.warning(f"Audio queue has {queued_frames_remaining} unprocessed items!")
-
-            self._finalize_markdown_status(
-                audio_saved=saved_output_file is not None,
-                worker_timed_out=worker_timed_out,
-                queued_frames_remaining=queued_frames_remaining,
+            # ASYNC FINALIZATION: Spawn background worker to handle chunk processing
+            # This allows stop_recording() to return immediately instead of blocking
+            # for 10+ seconds while transcription happens
+            self._finalized_output_file = saved_output_file  # Capture for async finalization
+            self._finalization_thread = threading.Thread(
+                target=self._finalize_worker,
+                daemon=True,
+                name="AudioFinalizationWorker",
             )
+            self._finalization_thread.start()
+            logger.info("Finalization worker started asynchronously")
+
         elif self._output_file and self._output_file.exists():
             saved_output_file = self._output_file
 
@@ -733,6 +771,29 @@ class AudioRecorder:
     def get_markdown_path(self) -> Path | None:
         """Return the markdown path for the active or most recent VAD recording."""
         return self._markdown_file
+
+    def wait_for_finalization(self, timeout: float = 30.0) -> bool:
+        """Wait for background finalization to complete.
+
+        Useful for testing and debugging to ensure all async work is done.
+
+        Args:
+            timeout: Maximum time to wait in seconds.
+
+        Returns:
+            True if finalization completed, False if timeout.
+        """
+        if self._finalization_thread is None or not self._finalization_thread.is_alive():
+            return True
+
+        logger.info(f"Waiting for finalization to complete (timeout={timeout}s)...")
+        self._finalization_thread.join(timeout=timeout)
+        if self._finalization_thread.is_alive():
+            logger.warning("Finalization thread did not complete before timeout")
+            return False
+
+        logger.info("Finalization completed")
+        return True
 
     def is_recording(self) -> bool:
         """Check if recording is currently in progress.

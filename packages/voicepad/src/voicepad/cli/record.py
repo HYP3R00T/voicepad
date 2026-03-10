@@ -17,6 +17,9 @@ record_app = typer.Typer(help="Audio recording commands")
 def _stop_recording(recorder: AudioRecorder) -> Path | None:
     """Stop the active recording and report the result.
 
+    For VAD mode: Returns immediately after audio is saved, with transcription
+    continuing in the background. User can safely exit or start a new recording.
+
     Args:
         recorder: The AudioRecorder instance to stop.
 
@@ -28,6 +31,17 @@ def _stop_recording(recorder: AudioRecorder) -> Path | None:
         output_file = recorder.stop_recording()
         if output_file and output_file.exists():
             typer.secho(f"[OK] Recording saved to: {output_file}", fg=typer.colors.GREEN)
+
+            # Check if VAD transcription is ongoing
+            markdown_path = recorder.get_markdown_path()
+            if markdown_path is not None:
+                typer.echo()
+                typer.secho(
+                    "[*] Transcription ongoing in the background...",
+                    fg=typer.colors.CYAN,
+                )
+                typer.echo(f"    Check markdown for progress: {markdown_path}")
+
             return output_file
         typer.secho("[ERROR] Recording stopped, but no audio file was saved.", fg=typer.colors.RED, err=True)
     except AudioRecorderError as e:
