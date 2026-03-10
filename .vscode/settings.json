@@ -17,10 +17,7 @@
       "source.fixAll.ruff": "explicit",
       "source.organizeImports.ruff": "explicit"
     },
-    "editor.defaultFormatter": "charliermarsh.ruff",
-    "editor.rulers": [
-      120
-    ]
+    "editor.defaultFormatter": "charliermarsh.ruff"
   },
   "chat.useAgentsMdFile": true,
   "markdownlint.configFile": ".markdownlint.yaml",
