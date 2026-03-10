@@ -26,3 +26,7 @@ description = "Serve the documentation locally"
 [tasks.sync]
 run = "uv sync --extra gpu --upgrade"
 description = "Run uv sync"
+
+[tasks.test]
+run = "uv run pytest packages --cov=packages/voicepad-core/src/voicepad_core --cov=packages/voicepad/src/voicepad"
+description = "Run pytest with simple coverage summary"
