@@ -41,7 +41,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
 
       - name: Install mise
-        uses: jdx/mise-action@v3
+        uses: jdx/mise-action@v4
         with:
           install: true
 
@@ -100,7 +100,7 @@ jobs:
           git push origin "${{ inputs.package }}-v${{ steps.version.outputs.new_version }}"
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: "${{ inputs.package }}-v${{ steps.version.outputs.new_version }}"
           name: "${{ inputs.package }} v${{ steps.version.outputs.new_version }}"
