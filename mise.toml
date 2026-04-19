@@ -1,7 +1,7 @@
 [tools]
 python = "3.13"
 uv = "latest"
-pre-commit = "latest"
+prek = "latest"
 markdownlint-cli2 = "latest"
 git-cliff = "latest"
 
@@ -17,6 +17,7 @@ enter = [
 ]
 
 [env]
+_.file = '.env'       # for sensitive data
 UV_LINK_MODE = "copy"
 
 [tasks.docs]
@@ -28,9 +29,9 @@ run = "uv sync --extra gpu --upgrade"
 description = "Run uv sync"
 
 [tasks.test]
-run = "uv run pytest packages --cov=packages/voicepad-core/src/voicepad_core --cov=packages/voicepad/src/voicepad --cov-fail-under=80"
+run = "uv run pytest packages --cov=packages/* --cov-fail-under=80"
 description = "Run pytest with >=80% full package coverage gate"
 
 [tasks.test-all]
-run = "uv run pytest packages --cov=packages/voicepad-core/src/voicepad_core --cov=packages/voicepad/src/voicepad"
+run = "uv run pytest packages --cov=packages/*"
 description = "Run pytest with full package coverage summary"
