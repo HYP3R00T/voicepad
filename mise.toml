@@ -21,7 +21,7 @@ _.file = '.env'       # for sensitive data
 UV_LINK_MODE = "copy"
 
 [tasks.docs]
-run = "uv run zensical serve"
+run = "zensical serve"
 description = "Serve the documentation locally"
 
 [tasks.sync]
@@ -29,9 +29,5 @@ run = "uv sync --extra gpu --upgrade"
 description = "Run uv sync"
 
 [tasks.test]
-run = "uv run pytest packages --cov=packages/* --cov-fail-under=80"
+run = "pytest packages --cov=packages/* --cov-fail-under=80"
 description = "Run pytest with >=80% full package coverage gate"
-
-[tasks.test-all]
-run = "uv run pytest packages --cov=packages/*"
-description = "Run pytest with full package coverage summary"
