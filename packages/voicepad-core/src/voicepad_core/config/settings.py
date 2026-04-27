@@ -1,3 +1,5 @@
+"""Core configuration for voicepad."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -8,85 +10,45 @@ from utilityhub_config import expand_path, load_settings
 
 
 class Config(BaseModel):
-    """Core configuration for voicepad."""
+    """Voicepad configuration.
+
+    Loaded from voicepad.yaml with precedence:
+    env vars (VOICEPAD_*) > ./voicepad.yaml > ~/.config/voicepad/voicepad.yaml > defaults
+    """
 
     model_config = ConfigDict(frozen=True)
 
-    recordings_path: Path = Path("data/recordings")
-    markdown_path: Path = Path("data/markdown")
-
+    recordings_path: Path = Field(
+        default=Path("data/recordings"),
+        description="Directory where WAV recordings are saved",
+    )
+    markdown_path: Path = Field(
+        default=Path("data/markdown"),
+        description="Directory where markdown transcriptions are saved",
+    )
     input_device_index: int | None = Field(
         default=None,
-        description="Default OS audio input device index",
+        description="Audio input device index (None = system default)",
     )
-
     recording_prefix: str = Field(
         default="recording",
-        description="Prefix for audio recording filenames",
+        description="Filename prefix for recordings",
     )
-
-    # Transcription settings
     transcription_model: str = Field(
-        default="tiny",
-        description="Whisper model name (use 'voicepad config models' to see available models)",
-    )
-
-    transcription_device: str = Field(
-        default="auto",
-        description="Device for transcription (auto/cuda/cpu)",
-    )
-
-    transcription_compute_type: str = Field(
-        default="auto",
-        description="Compute precision (auto/float16/int8/float32)",
-    )
-
-    # VAD chunking settings (using faster-whisper's Silero VAD)
-    vad_enabled: bool = Field(
-        default=False,
-        description="Enable Voice Activity Detection for smart chunking during recording",
-    )
-
-    vad_min_chunk_duration: float = Field(
-        default=60.0,
-        ge=10.0,
-        le=600.0,
-        description="Minimum duration (seconds) before allowing chunk splits",
-    )
-
-    vad_threshold: float = Field(
-        default=0.5,
-        ge=0.0,
-        le=1.0,
-        description="Silero VAD speech probability threshold (0.0-1.0, higher = more strict)",
-    )
-
-    vad_min_silence_duration_ms: int = Field(
-        default=1000,
-        ge=100,
-        le=5000,
-        description="Minimum silence duration (ms) required to trigger chunk boundary",
-    )
-
-    vad_speech_pad_ms: int = Field(
-        default=400,
-        ge=0,
-        le=2000,
-        description="Padding (ms) added to each side of detected speech segments",
+        default="small",
+        description="Whisper model: tiny, base, small, medium, large-v3, turbo",
     )
 
     @field_validator("recordings_path", "markdown_path", mode="before")
     @classmethod
     def expand_paths(cls, v: Path | str) -> Path:
-        """Expand user home directory (~) and environment variables in path fields."""
-        if isinstance(v, Path):
-            v = str(v)
-        return expand_path(v)
+        """Expand ~ and environment variables in path fields."""
+        return expand_path(str(v) if isinstance(v, Path) else v)
 
 
 def get_config(cwd: Path | None = None, app_name: str = "voicepad") -> Config:
     """Load configuration using utilityhub_config precedence rules."""
-    settings, _metadata = load_settings(Config, app_name=app_name, cwd=cwd)
+    settings, _ = load_settings(Config, app_name=app_name, cwd=cwd)
     return settings
 
 
@@ -94,6 +56,5 @@ def get_config_with_metadata(
     cwd: Path | None = None,
     app_name: str = "voicepad",
 ) -> tuple[Config, Any]:
-    """Load configuration and return metadata for source tracking."""
-    settings, metadata = load_settings(Config, app_name=app_name, cwd=cwd)
-    return settings, metadata
+    """Load configuration and return source metadata for each field."""
+    return load_settings(Config, app_name=app_name, cwd=cwd)

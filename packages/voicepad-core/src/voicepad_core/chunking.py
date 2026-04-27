@@ -64,10 +64,10 @@ class RealtimeChunker:
 
     def __init__(
         self,
-        min_chunk_duration: float = 60.0,
+        min_chunk_duration: float = 30.0,
         vad_threshold: float = 0.5,
-        min_silence_duration_ms: int = 1000,
-        speech_pad_ms: int = 400,
+        min_silence_duration_ms: int = 800,
+        speech_pad_ms: int = 300,
         sample_rate: int = 16000,
     ) -> None:
         """Initialize the real-time chunker.
@@ -84,8 +84,8 @@ class RealtimeChunker:
             sample_rate: Audio sample rate in Hz.
         """
         # Validate parameters
-        if min_chunk_duration < 10.0:
-            msg = f"min_chunk_duration must be >= 10 seconds, got {min_chunk_duration}"
+        if min_chunk_duration < 1.0:
+            msg = f"min_chunk_duration must be >= 1 second, got {min_chunk_duration}"
             raise ValueError(msg)
         if not 0.0 <= vad_threshold <= 1.0:
             msg = f"vad_threshold must be between 0.0 and 1.0, got {vad_threshold}"
