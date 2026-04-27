@@ -30,4 +30,8 @@ description = "Sync dependencies"
 
 [tasks.test]
 run = "pytest packages --cov=voicepad --cov=voicepad_core --cov-fail-under=80"
-description = "Run pytest with >=80% full package coverage gate"
+description = "Run pytest with >=80% full package coverage gate (includes GPU tests)"
+
+[tasks.test-fast]
+run = "pytest packages -m 'not gpu' --cov=voicepad --cov=voicepad_core --cov-fail-under=80"
+description = "Run pytest skipping GPU tests — safe for CI without a GPU"
