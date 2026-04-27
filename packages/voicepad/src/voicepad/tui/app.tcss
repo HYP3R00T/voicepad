@@ -1,0 +1,144 @@
+/* VoicePad — minimal layout stylesheet */
+
+Screen {
+    layout: vertical;
+}
+
+/* ── header bar ── */
+#header {
+    height: 1;
+    background: $panel;
+    layout: horizontal;
+    padding: 0 2;
+}
+
+#header-title {
+    width: 1fr;
+    content-align: left middle;
+    color: $primary;
+    text-style: bold;
+}
+
+#header-model {
+    width: auto;
+    content-align: right middle;
+    color: $text-muted;
+}
+
+/* ── body ── */
+#body {
+    layout: vertical;
+    padding: 1 2;
+    height: 1fr;
+}
+
+/* ── status ── */
+#status {
+    height: 1;
+    color: $text-muted;
+    margin-bottom: 1;
+}
+
+#status.ready        { color: $text-success; }
+#status.recording    { color: $text-error; }
+#status.transcribing { color: $text-warning; }
+#status.error        { color: $text-error; }
+
+/* ── record button ── */
+#record-btn {
+    width: 36;
+    height: 3;
+    margin: 0 0 1 0;
+    border: none;
+    background: transparent;
+    color: $text-success;
+    text-style: bold;
+}
+
+#controls {
+    align: center middle;
+    height: auto;
+}
+
+#record-btn:hover {
+    background: $success-muted;
+}
+
+#record-btn.recording {
+    color: $text-error;
+}
+
+#record-btn.recording:hover {
+    background: $error-muted;
+}
+
+#record-btn.transcribing {
+    color: $text-warning;
+}
+
+#record-btn:disabled {
+    color: $text-disabled;
+}
+
+/* ── timer ── */
+#timer {
+    height: 1;
+    text-align: center;
+    color: $text-error;
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+/* ── transcription panel ── */
+#transcription {
+    border: round $border-blurred;
+    border-title-color: $primary;
+    padding: 1 2;
+    height: auto;
+    min-height: 5;
+    margin-bottom: 1;
+    background: $surface;
+}
+
+#tx-text {
+    color: $foreground;
+}
+
+#tx-text.placeholder {
+    color: $text-disabled;
+    text-style: italic;
+}
+
+#tx-meta {
+    height: 1;
+    color: $text-muted;
+    margin-top: 1;
+}
+
+/* ── history panel ── */
+#history {
+    border: round $border-blurred;
+    border-title-color: $text-muted;
+    height: 1fr;
+    background: $surface;
+}
+
+#history-list {
+    background: transparent;
+    padding: 0 1;
+}
+
+#history-list > ListItem {
+    background: transparent;
+    padding: 0 0 1 0;
+}
+
+#history-list > ListItem:hover {
+    background: $boost;
+}
+
+#empty-hint {
+    color: $text-disabled;
+    text-style: italic;
+    padding: 1 2;
+}

@@ -12,13 +12,40 @@ import numpy as np
 from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical
 from textual.reactive import reactive
-from textual.widgets import Button, Footer, Header, Label, ListItem, ListView, Static
+from textual.theme import Theme
+from textual.widgets import Button, Footer, Label, ListItem, ListView, Static
 from voicepad_core import AudioRecorder, AudioRecorderError, get_config
 from voicepad_core.config import Config
 
 from voicepad.tui.workers import ModelWarmResult, RecordingSession, TranscriptionJob
+
+# ---------------------------------------------------------------------------
+# Theme — registered on mount, uses Textual's semantic variable system
+# ---------------------------------------------------------------------------
+
+VOICEPAD_THEME = Theme(
+    name="voicepad",
+    primary="#58a6ff",
+    secondary="#bc8cff",
+    accent="#58a6ff",
+    foreground="#e6edf3",
+    background="#0d1117",
+    surface="#161b22",
+    panel="#21262d",
+    success="#3fb950",
+    warning="#d29922",
+    error="#f85149",
+    dark=True,
+    variables={
+        "border-blurred": "#30363d",
+        "footer-key-foreground": "#58a6ff",
+        "footer-background": "#161b22",
+        "footer-foreground": "#7d8590",
+        "block-cursor-text-style": "none",
+    },
+)
+
 
 # ---------------------------------------------------------------------------
 # Data
@@ -27,8 +54,6 @@ from voicepad.tui.workers import ModelWarmResult, RecordingSession, Transcriptio
 
 @dataclass
 class SessionEntry:
-    """One completed recording + transcription in the session history."""
-
     index: int
     wav_path: Path | None
     duration_s: float
@@ -39,82 +64,7 @@ class SessionEntry:
 
 
 # ---------------------------------------------------------------------------
-# Custom widgets
-# ---------------------------------------------------------------------------
-
-
-class StatusBar(Static):
-    """Top status line showing model, device, and current state."""
-
-    DEFAULT_CSS = """
-    StatusBar {
-        background: $panel;
-        color: $text-muted;
-        padding: 0 2;
-        height: 1;
-    }
-    StatusBar.ready   { color: $success; }
-    StatusBar.loading { color: $warning; }
-    StatusBar.error   { color: $error; }
-    """
-
-    def update_status(self, text: str, state: str = "") -> None:
-        self.remove_class("ready", "loading", "error")
-        if state:
-            self.add_class(state)
-        self.update(text)
-
-
-class TranscriptionView(Static):
-    """Displays the most recent transcription result."""
-
-    DEFAULT_CSS = """
-    TranscriptionView {
-        border: round $primary;
-        padding: 1 2;
-        height: auto;
-        min-height: 5;
-        margin: 1 0;
-    }
-    TranscriptionView .placeholder {
-        color: $text-disabled;
-    }
-    """
-
-    def compose(self) -> ComposeResult:
-        yield Label("No transcription yet", classes="placeholder", id="transcription-text")
-
-    def show(self, text: str, latency_ms: float, device: str) -> None:
-        label = self.query_one("#transcription-text", Label)
-        label.remove_class("placeholder")
-        label.update(text or "(no speech detected)")
-        self.border_subtitle = f"{device}  ·  {latency_ms:.0f}ms"
-
-
-class HistoryList(ListView):
-    """Scrollable list of past session entries."""
-
-    DEFAULT_CSS = """
-    HistoryList {
-        height: 1fr;
-        border: round $surface;
-    }
-    HistoryList > ListItem {
-        padding: 0 1;
-    }
-    """
-
-    def add_entry(self, entry: SessionEntry) -> None:
-        duration = f"{entry.duration_s:.1f}s"
-        name = entry.wav_path.stem if entry.wav_path else f"clip-{entry.index}"
-        preview = entry.text[:60] + "…" if len(entry.text) > 60 else entry.text
-        label = f"[dim]{entry.timestamp}[/]  {name}  [dim]{duration}[/]\n  {preview or '(empty)'}"
-        self.append(ListItem(Label(label)))
-        self.scroll_end(animate=False)
-
-
-# ---------------------------------------------------------------------------
-# Main app
+# App
 # ---------------------------------------------------------------------------
 
 
@@ -122,43 +72,13 @@ class VoicePadApp(App[None]):
     """VoicePad — local dictation with Whisper."""
 
     TITLE = "VoicePad"
-    CSS = """
-    Screen {
-        layout: vertical;
-    }
-    #main {
-        layout: vertical;
-        padding: 0 1;
-    }
-    #record-btn {
-        width: 100%;
-        margin: 1 0;
-    }
-    #record-btn.recording {
-        background: $error;
-        color: $text;
-    }
-    #record-btn.transcribing {
-        background: $warning;
-        color: $text;
-    }
-    #timer {
-        text-align: center;
-        color: $text-muted;
-        height: 1;
-    }
-    #history-label {
-        color: $text-muted;
-        margin-top: 1;
-    }
-    """
+    CSS_PATH = "app.tcss"
 
     BINDINGS = [
-        Binding("space", "toggle_recording", "Record", show=True),
+        Binding("space", "toggle_recording", "Record / Stop", show=True),
         Binding("q", "quit", "Quit", show=True),
     ]
 
-    # Reactive state
     _model_ready: reactive[bool] = reactive(False)
     _recording: reactive[bool] = reactive(False)
     _transcribing: reactive[bool] = reactive(False)
@@ -177,23 +97,46 @@ class VoicePadApp(App[None]):
     # ------------------------------------------------------------------
 
     def compose(self) -> ComposeResult:
-        yield Header()
-        with Vertical(id="main"):
-            yield StatusBar("Loading model…", id="status")
-            yield Button("● START RECORDING  [Space]", id="record-btn", variant="success")
-            yield Label("", id="timer")
-            yield TranscriptionView(id="transcription")
-            yield Label("Session history", id="history-label")
-            yield HistoryList(id="history")
+        # Minimal custom header — one line, no chrome
+        with Static(id="header"):
+            yield Label("voicepad", id="header-title")
+            yield Label("loading…", id="header-model")
+
+        with Static(id="body"):
+            yield Label("○  initialising", id="status")
+            with Static(id="controls"):
+                yield Button("○  start recording", id="record-btn", disabled=True)
+                yield Label("", id="timer")
+
+            # Transcription panel
+            tx = Static(id="transcription")
+            tx.border_title = "transcription"
+            yield tx
+
+            # History panel
+            hist = Static(id="history")
+            hist.border_title = "history"
+            yield hist
+
         yield Footer()
 
-    # ------------------------------------------------------------------
-    # Startup — warm model in background
-    # ------------------------------------------------------------------
-
     def on_mount(self) -> None:
-        self.query_one("#record-btn", Button).disabled = True
+        # Add children to panels after mount (Static doesn't support compose)
+        tx = self.query_one("#transcription", Static)
+        tx.mount(Label("speak and press space to begin…", id="tx-text", classes="placeholder"))
+        tx.mount(Label("", id="tx-meta"))
+
+        hist = self.query_one("#history", Static)
+        hist.mount(Label("no recordings yet this session", id="empty-hint"))
+        hist.mount(ListView(id="history-list"))
+
+        self.register_theme(VOICEPAD_THEME)
+        self.theme = "voicepad"
         self._warm_model_worker()
+
+    # ------------------------------------------------------------------
+    # Model warm-up
+    # ------------------------------------------------------------------
 
     @work(thread=True, exclusive=True, name="model-warm")
     def _warm_model_worker(self) -> None:
@@ -204,33 +147,29 @@ class VoicePadApp(App[None]):
 
     def _on_model_ready(self, result: ModelWarmResult) -> None:
         self._warm_result = result
-        status = self.query_one("#status", StatusBar)
         btn = self.query_one("#record-btn", Button)
+        model_label = self.query_one("#header-model", Label)
 
         if result.error:
-            status.update_status(
-                f"Model error: {result.error}",
-                state="error",
-            )
+            self._set_status("error", f"model error: {result.error}")
             return
 
-        device_label = f"{result.device} ({result.compute_type})"
-        fallback_note = "  [CPU fallback]" if result.fallback else ""
-        status.update_status(
-            f"Model: {self.config.transcription_model}  ·  {device_label}{fallback_note}  ·  Ready",
-            state="ready",
+        fallback = "  cpu fallback" if result.fallback else ""
+        model_label.update(
+            f"[dim]{self.config.transcription_model}[/]  "
+            f"[bold]{result.device}[/] [dim]{result.compute_type}{fallback}[/]"
         )
+        self._set_status("ready", "ready")
+        btn.label = "●  start recording"
         btn.disabled = False
         self._model_ready = True
 
     # ------------------------------------------------------------------
-    # Record / stop toggle
+    # Record / stop
     # ------------------------------------------------------------------
 
     def action_toggle_recording(self) -> None:
-        if not self._model_ready:
-            return
-        if self._transcribing:
+        if not self._model_ready or self._transcribing:
             return
         if self._recording:
             self._stop_recording()
@@ -243,21 +182,18 @@ class VoicePadApp(App[None]):
 
     def _start_recording(self) -> None:
         self._session = RecordingSession(config=self.config)
-        btn = self.query_one("#record-btn", Button)
-        status = self.query_one("#status", StatusBar)
-
         try:
             self._session.start()
         except AudioRecorderError as e:
-            status.update_status(f"Mic error: {e}", state="error")
+            self._set_status("error", f"mic error: {e}")
             return
 
         self._recording = True
         self._record_start = time.monotonic()
-        btn.label = "■ STOP RECORDING  [Space]"
+        btn = self.query_one("#record-btn", Button)
+        btn.label = "■  stop recording"
         btn.add_class("recording")
-        btn.variant = "error"
-        status.update_status("Recording…", state="loading")
+        self._set_status("recording", "recording…")
         self._start_timer()
 
     def _stop_recording(self) -> None:
@@ -268,19 +204,16 @@ class VoicePadApp(App[None]):
         self._stop_timer()
 
         btn = self.query_one("#record-btn", Button)
-        btn.disabled = True
+        btn.label = "◌  transcribing…"
         btn.remove_class("recording")
-        btn.label = "⟳ Transcribing…"
         btn.add_class("transcribing")
-        btn.variant = "warning"
-
-        status = self.query_one("#status", StatusBar)
-        status.update_status("Transcribing…", state="loading")
+        btn.disabled = True
+        self._set_status("transcribing", "transcribing…")
 
         try:
             audio = self._session.stop()
         except AudioRecorderError as e:
-            status.update_status(f"Stop error: {e}", state="error")
+            self._set_status("error", f"stop error: {e}")
             self._reset_button()
             return
 
@@ -288,7 +221,7 @@ class VoicePadApp(App[None]):
         self._transcribe_worker(audio)
 
     # ------------------------------------------------------------------
-    # Transcription worker
+    # Transcription
     # ------------------------------------------------------------------
 
     @work(thread=True, name="transcribe")
@@ -304,12 +237,9 @@ class VoicePadApp(App[None]):
         error: str | None,
     ) -> None:
         self._transcribing = False
-        status = self.query_one("#status", StatusBar)
-        transcription_view = self.query_one("#transcription", TranscriptionView)
-        history = self.query_one("#history", HistoryList)
 
         if error:
-            status.update_status(f"Error: {error}", state="error")
+            self._set_status("error", error)
             self._reset_button()
             return
 
@@ -321,26 +251,24 @@ class VoicePadApp(App[None]):
                 wav_path = recorder_ref.make_wav_path()
                 try:
                     recorder_ref.save_wav(audio, wav_path)
-                    # Save markdown
                     md_path = self.config.markdown_path / f"{wav_path.stem}.md"
                     self.config.markdown_path.mkdir(parents=True, exist_ok=True)
-                    md_path.write_text(
-                        _format_markdown(wav_path, result),
-                        encoding="utf-8",
-                    )
+                    md_path.write_text(_format_markdown(wav_path, result), encoding="utf-8")
                 except Exception:
                     wav_path = None
 
-        # Update UI
         if result:
-            transcription_view.show(result.text, result.latency_ms, result.device)
-            device_label = f"{result.device} ({result.compute_type})"
-            fallback_note = "  [CPU fallback]" if result.fallback_to_cpu else ""
-            status.update_status(
-                f"Model: {self.config.transcription_model}  ·  {device_label}{fallback_note}  ·  Ready",
-                state="ready",
+            # Update transcription panel
+            tx_text = self.query_one("#tx-text", Label)
+            tx_text.remove_class("placeholder")
+            tx_text.update(result.text or "(no speech detected)")
+            self.query_one("#tx-meta", Label).update(
+                f"[dim]{result.duration_s:.1f}s  ·  {result.latency_ms:.0f}ms  ·  {result.device}[/]"
             )
 
+            self._set_status("ready", "ready")
+
+            # Add history entry
             entry = SessionEntry(
                 index=len(self._entries),
                 wav_path=wav_path,
@@ -350,9 +278,24 @@ class VoicePadApp(App[None]):
                 device=result.device,
             )
             self._entries.append(entry)
-            history.add_entry(entry)
+            self._add_history_entry(entry)
 
         self._reset_button()
+
+    def _add_history_entry(self, entry: SessionEntry) -> None:
+        with contextlib.suppress(Exception):
+            self.query_one("#empty-hint", Label).display = False
+
+        lv = self.query_one("#history-list", ListView)
+        name = entry.wav_path.stem if entry.wav_path else f"clip-{entry.index + 1}"
+        preview = (entry.text[:70] + "…") if len(entry.text) > 70 else entry.text
+        content = (
+            f"[dim]{entry.timestamp}[/]  [bold]{name}[/]  "
+            f"[dim]{entry.duration_s:.1f}s · {entry.latency_ms:.0f}ms[/]\n"
+            f"  [dim italic]{preview or '(empty)'}[/]"
+        )
+        lv.append(ListItem(Label(content)))
+        lv.scroll_end(animate=False)
 
     # ------------------------------------------------------------------
     # Timer
@@ -364,36 +307,40 @@ class VoicePadApp(App[None]):
 
     def _stop_timer(self) -> None:
         self._timer_thread = None
-        self.call_from_thread_safe(self.query_one("#timer", Label).update, "")
+        with contextlib.suppress(Exception):
+            self.call_from_thread(self.query_one("#timer", Label).update, "")
 
     def _timer_loop(self) -> None:
         while self._recording:
             elapsed = time.monotonic() - self._record_start
-            self.call_from_thread(
-                self.query_one("#timer", Label).update,
-                f"⏱  {elapsed:.1f}s",
-            )
+            mins, secs = divmod(int(elapsed), 60)
+            display = f"⏱  {mins:02d}:{secs:02d}" if mins else f"⏱  {elapsed:.1f}s"
+            with contextlib.suppress(Exception):
+                self.call_from_thread(self.query_one("#timer", Label).update, display)
             time.sleep(0.1)
-
-    def call_from_thread_safe(self, fn, *args) -> None:  # noqa: ANN001
-        """No-op wrapper — timer stop is best-effort."""
-        with contextlib.suppress(Exception):
-            self.call_from_thread(fn, *args)
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 
+    def _set_status(self, state: str, message: str) -> None:
+        dots = {"ready": "●", "recording": "◉", "transcribing": "◌", "error": "✕"}
+        dot = dots.get(state, "○")
+        label = self.query_one("#status", Label)
+        label.remove_class("ready", "recording", "transcribing", "error")
+        if state:
+            label.add_class(state)
+        label.update(f"{dot}  {message}")
+
     def _reset_button(self) -> None:
         btn = self.query_one("#record-btn", Button)
         btn.remove_class("recording", "transcribing")
-        btn.variant = "success"
-        btn.label = "● START RECORDING  [Space]"
+        btn.label = "●  start recording"
         btn.disabled = not self._model_ready
 
 
 # ---------------------------------------------------------------------------
-# Markdown formatter (reused from CLI)
+# Markdown formatter
 # ---------------------------------------------------------------------------
 
 
