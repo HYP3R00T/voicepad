@@ -55,8 +55,9 @@ LANGUAGE: str | None = None
 # Recordings shorter than this are almost certainly silence or noise.
 MIN_AUDIO_DURATION_S: float = 0.5
 
-# Soft upper bound. Transcription still runs but a warning is logged.
-MAX_AUDIO_DURATION_S: float = 30.0
+# Soft upper bound — just log, no warning raised to the caller.
+# Long-form dictation (10–15 min) is valid. This is only a performance note.
+MAX_AUDIO_DURATION_S: float = 900.0
 
 # Hugging Face repo prefix for faster-whisper models
 _HF_REPO_PREFIX = "Systran/faster-whisper-"
@@ -263,7 +264,6 @@ def transcribe_buffer(audio: np.ndarray, config: Config) -> TranscriptionResult:
         AudioTooShortError: If audio is shorter than MIN_AUDIO_DURATION_S.
         TranscriptionError: If transcription fails.
     """
-    import warnings
 
     call_start = time.perf_counter()
 
@@ -277,11 +277,7 @@ def transcribe_buffer(audio: np.ndarray, config: Config) -> TranscriptionResult:
         raise AudioTooShortError(f"Audio is {duration_s:.2f}s — below minimum {MIN_AUDIO_DURATION_S}s")
 
     if duration_s > MAX_AUDIO_DURATION_S:
-        warnings.warn(
-            f"Audio is {duration_s:.1f}s — exceeds {MAX_AUDIO_DURATION_S}s, transcription may be slow",
-            AudioTooLongWarning,
-            stacklevel=2,
-        )
+        logger.info(f"Long recording: {duration_s:.1f}s — transcription will take a moment")
 
     model, device, compute, fallback = get_or_load_model(config)
 
