@@ -9,6 +9,7 @@ from typing import TypedDict, cast
 import sounddevice as sd
 import typer
 from voicepad_core import get_config, get_config_with_metadata
+from voicepad_core.config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,7 @@ def show_config() -> None:
     table.add_column("Value", style="green")
     table.add_column("Source", style="yellow")
 
-    for field_name in config.model_fields:
+    for field_name in Config.model_fields:
         value = getattr(config, field_name)
         source_desc = "default"
 

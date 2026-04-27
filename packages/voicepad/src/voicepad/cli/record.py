@@ -14,7 +14,11 @@ from voicepad_core import (
     AudioRecorderError,
     AudioTooShortError,
     TranscriptionError,
+    ensure_model_downloaded,
     get_config,
+    get_or_load_model,
+    model_downloaded,
+    transcribe_buffer,
     transcribe_file,
 )
 from voicepad_core.transcription import BEAM_SIZE, COMPUTE_TYPE, DEVICE, LANGUAGE
@@ -24,17 +28,9 @@ logger = logging.getLogger(__name__)
 record_app = typer.Typer(help="Audio recording commands")
 
 
-def _wait_for_quit(stop_event: threading.Event) -> None:
-    """Block until the user types 'q' + Enter. Sets stop_event when triggered."""
-    while not stop_event.is_set():
-        try:
-            line = sys.stdin.readline().strip().lower()
-            if line == "q":
-                stop_event.set()
-                break
-        except (EOFError, OSError):
-            stop_event.set()
-            break
+# ---------------------------------------------------------------------------
+# record start
+# ---------------------------------------------------------------------------
 
 
 @record_app.command("start")
@@ -52,165 +48,239 @@ def start_recording(
         help="Fixed recording duration in seconds",
         min=0.1,
     ),
-    transcribe: bool = typer.Option(
-        True,
-        "--transcribe/--no-transcribe",
-        help="Transcribe after recording (default: on)",
+    no_transcribe: bool = typer.Option(
+        False,
+        "--no-transcribe",
+        help="Skip transcription after recording",
     ),
-    save: bool = typer.Option(
-        True,
-        "--save/--no-save",
-        help="Save WAV file to disk (default: on)",
+    no_save: bool = typer.Option(
+        False,
+        "--no-save",
+        help="Do not save WAV to disk (transcribe from memory only)",
     ),
 ) -> None:
-    """Record audio and optionally transcribe it.
+    """Record audio from your microphone and transcribe it.
 
-    Press q + Enter to stop, or use --duration for a fixed-length recording.
+    \b
+    Stop options:
+      - Fixed duration:  --duration 10
+      - Manual stop:     type  q  then press Enter
+
+    \b
+    Examples:
+      voicepad record start
+      voicepad record start --duration 5
+      voicepad record start --no-save
     """
     config = get_config()
-    recorder = AudioRecorder(config)
 
-    # --- Start ---
+    # --- Step 1: Ensure model is downloaded ---
+    # Check before opening the mic so the user knows what's happening.
+    # On first run this downloads the model (~500MB–1.5GB depending on size).
+    # On subsequent runs the cache check is instant.
+    if not no_transcribe:
+        model_name = config.transcription_model
+        if not model_downloaded(model_name):
+            typer.echo()
+            typer.secho(
+                f"[↓] Model '{model_name}' not found locally — downloading now.",
+                fg=typer.colors.CYAN,
+            )
+            typer.echo("    This only happens once. Subsequent runs start immediately.")
+            typer.echo()
+            try:
+                ensure_model_downloaded(model_name)
+                typer.secho(f"    [OK] '{model_name}' downloaded.", fg=typer.colors.GREEN)
+            except TranscriptionError as e:
+                typer.secho(f"[ERROR] Download failed: {e}", fg=typer.colors.RED, err=True)
+                raise typer.Exit(1) from e
+
+        # --- Step 2: Load model into VRAM ---
+        # Model is local — load it now so transcription is instant after recording.
+        typer.echo(f"[~] Loading '{model_name}' into memory...")
+        try:
+            _, actual_device, actual_compute, fallback = get_or_load_model(config)
+            if fallback:
+                typer.secho(
+                    f"    [!] CUDA not available — using CPU ({actual_compute})",
+                    fg=typer.colors.YELLOW,
+                )
+            else:
+                typer.secho(
+                    f"    [OK] Ready on {actual_device} ({actual_compute})",
+                    fg=typer.colors.GREEN,
+                )
+        except TranscriptionError as e:
+            typer.secho(f"[ERROR] Could not load model: {e}", fg=typer.colors.RED, err=True)
+            raise typer.Exit(1) from e
+
+    # --- Start recording ---
+    recorder = AudioRecorder(config)
     try:
         recorder.start()
     except AudioRecorderError as e:
         typer.secho(f"[ERROR] {e}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from e
 
-    wav_path = recorder.generate_wav_path(prefix)
-    typer.secho("[REC] Recording...", fg=typer.colors.YELLOW)
-    typer.echo(f"      device : {config.input_device_index or 'default'}")
-    typer.echo(f"      output : {wav_path}")
+    typer.echo()
+    typer.secho("[REC] Recording...", fg=typer.colors.YELLOW, bold=True)
+    typer.echo(
+        f"      device : {config.input_device_index if config.input_device_index is not None else 'system default'}"
+    )
     typer.echo()
 
-    # --- Wait ---
+    # --- Wait for stop ---
     if duration is not None:
-        typer.echo(f"      stopping in {duration:.1f}s")
+        typer.echo(f"      recording for {duration:.1f}s...")
         time.sleep(duration)
     else:
-        typer.echo("      type q + Enter to stop")
+        typer.echo("      speak now — type  q  then Enter to stop")
         stop_event = threading.Event()
-        t = threading.Thread(target=_wait_for_quit, args=(stop_event,), daemon=True)
-        t.start()
-        while recorder.is_recording() and not stop_event.is_set():
+        listener = threading.Thread(
+            target=_wait_for_quit,
+            args=(stop_event,),
+            daemon=True,
+        )
+        listener.start()
+        while not stop_event.is_set():
             time.sleep(0.05)
 
-    # --- Stop ---
-    typer.echo("\n[!] Stopping...")
+    # --- Stop and collect audio ---
+    typer.echo()
     try:
         audio = recorder.stop()
     except AudioRecorderError as e:
         typer.secho(f"[ERROR] {e}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from e
 
-    duration_s = len(audio) / 16000
-    typer.secho(f"[OK] Captured {duration_s:.2f}s of audio", fg=typer.colors.GREEN)
+    captured_s = len(audio) / 16000
+    typer.secho(f"[OK] Captured {captured_s:.2f}s", fg=typer.colors.GREEN)
 
-    # --- Save WAV ---
-    if save:
-        try:
-            recorder.save_wav(audio, wav_path)
-            typer.echo(f"     saved  : {wav_path}")
-        except Exception as e:
-            typer.secho(f"[WARN] Could not save WAV: {e}", fg=typer.colors.YELLOW)
-
-    # --- Transcribe ---
-    if not transcribe:
+    if captured_s < 0.5:
+        typer.secho("[SKIP] Too short to transcribe (< 0.5s)", fg=typer.colors.YELLOW)
         return
 
-    if not save:
-        # Transcribe from buffer directly
-        _transcribe_buffer(audio, config)
-    else:
-        # Transcribe from saved file (consistent path for markdown output)
-        _transcribe_wav(wav_path, config)
+    # --- Save WAV ---
+    wav_path: Path | None = None
+    if not no_save:
+        wav_path = recorder.make_wav_path(prefix)
+        try:
+            recorder.save_wav(audio, wav_path)
+            typer.echo(f"      saved  : {wav_path}")
+        except Exception as e:
+            typer.secho(f"[WARN] Could not save WAV: {e}", fg=typer.colors.YELLOW)
+            wav_path = None
 
-
-def _transcribe_buffer(audio, config) -> None:
-    """Transcribe audio from a numpy array and print the result."""
-    from voicepad_core import transcribe_buffer
+    # --- Transcribe ---
+    if no_transcribe:
+        return
 
     typer.echo()
     typer.secho("[*] Transcribing...", fg=typer.colors.CYAN)
+
     try:
-        result = transcribe_buffer(audio, config)
-        _print_result(result)
+        # Model is already in cache — this call returns immediately from cache
+        if wav_path and wav_path.exists():
+            result = transcribe_file(wav_path, config)
+        else:
+            result = transcribe_buffer(audio, config)
     except AudioTooShortError as e:
         typer.secho(f"[SKIP] {e}", fg=typer.colors.YELLOW)
+        return
     except TranscriptionError as e:
-        typer.secho(f"[ERROR] Transcription failed: {e}", fg=typer.colors.RED, err=True)
+        typer.secho(f"[ERROR] {e}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from e
 
+    _print_result(result)
 
-def _transcribe_wav(wav_path: Path, config) -> None:
-    """Transcribe a WAV file and save markdown alongside it."""
-    typer.echo()
-    typer.secho("[*] Transcribing...", fg=typer.colors.CYAN)
-    try:
-        result = transcribe_file(wav_path, config)
-        _print_result(result)
-
-        # Save markdown
+    # Save markdown alongside the WAV
+    if wav_path and wav_path.exists():
         md_path = config.markdown_path / f"{wav_path.stem}.md"
-        config.markdown_path.mkdir(parents=True, exist_ok=True)
-        md_path.write_text(_format_markdown(wav_path, result), encoding="utf-8")
-        typer.echo(f"     markdown: {md_path}")
-
-    except AudioTooShortError as e:
-        typer.secho(f"[SKIP] {e}", fg=typer.colors.YELLOW)
-    except TranscriptionError as e:
-        typer.secho(f"[ERROR] Transcription failed: {e}", fg=typer.colors.RED, err=True)
+        try:
+            config.markdown_path.mkdir(parents=True, exist_ok=True)
+            md_path.write_text(_format_markdown(wav_path, result), encoding="utf-8")
+            typer.echo(f"      markdown: {md_path}")
+        except Exception as e:
+            typer.secho(f"[WARN] Could not save markdown: {e}", fg=typer.colors.YELLOW)
 
 
-def _print_result(result) -> None:
-    """Print a TranscriptionResult to the terminal."""
-    typer.secho("[OK] Transcription complete", fg=typer.colors.GREEN)
-    typer.echo(f"     device  : {result.device} ({result.compute_type})")
-    typer.echo(f"     language: {result.language} ({result.language_probability * 100:.0f}%)")
-    typer.echo(f"     duration: {result.duration_s:.1f}s")
-    typer.echo(f"     latency : {result.latency_ms:.0f}ms")
-    if result.fallback_to_cpu:
-        typer.secho("     [!] CUDA requested but fell back to CPU", fg=typer.colors.YELLOW)
-    typer.echo()
-    typer.secho("--- Transcription ---", fg=typer.colors.CYAN)
-    typer.echo(result.text or "(no speech detected)")
-    typer.secho("---------------------", fg=typer.colors.CYAN)
-
-
-def _format_markdown(wav_path: Path, result) -> str:
-    """Format a TranscriptionResult as a markdown document."""
-    lines = [
-        "# Transcription",
-        "",
-        f"**File:** {wav_path.name}",
-        f"**Model:** {result.device} / {result.compute_type}",
-        f"**Language:** {result.language} ({result.language_probability * 100:.1f}%)",
-        f"**Duration:** {result.duration_s:.1f}s",
-        f"**Latency:** {result.latency_ms:.0f}ms",
-        "",
-    ]
-    if result.fallback_to_cpu:
-        lines += ["> **Note:** CUDA requested but fell back to CPU.", ""]
-
-    lines += ["---", "", "## Text", ""]
-    for seg in result.segments:
-        lines.append(f"[{seg.start:.1f}s → {seg.end:.1f}s] {seg.text}")
-
-    return "\n".join(lines) + "\n"
+# ---------------------------------------------------------------------------
+# record info
+# ---------------------------------------------------------------------------
 
 
 @record_app.command("info")
 def show_info() -> None:
-    """Show current recording configuration."""
+    """Show current recording and transcription configuration."""
     config = get_config()
-    typer.echo("Recording configuration")
-    typer.echo("=" * 50)
-    typer.echo(f"  input device : {config.input_device_index or 'system default'}")
+    typer.echo()
+    typer.echo("  Recording")
+    typer.echo("  " + "─" * 40)
+    typer.echo(
+        f"  input device : {config.input_device_index if config.input_device_index is not None else 'system default'}"
+    )
     typer.echo(f"  recordings   : {config.recordings_path}")
     typer.echo(f"  markdown     : {config.markdown_path}")
     typer.echo(f"  prefix       : {config.recording_prefix}")
+    typer.echo()
+    typer.echo("  Transcription  (hardcoded constants)")
+    typer.echo("  " + "─" * 40)
     typer.echo(f"  model        : {config.transcription_model}")
-    typer.echo(f"  device       : {DEVICE}  (constant)")
-    typer.echo(f"  compute type : {COMPUTE_TYPE}  (constant)")
-    typer.echo(f"  beam size    : {BEAM_SIZE}  (constant)")
-    typer.echo(f"  language     : {LANGUAGE or 'auto-detect'}  (constant)")
-    typer.echo("=" * 50)
+    typer.echo(f"  device       : {DEVICE}")
+    typer.echo(f"  compute type : {COMPUTE_TYPE}")
+    typer.echo(f"  beam size    : {BEAM_SIZE}")
+    typer.echo(f"  language     : {LANGUAGE or 'auto-detect'}")
+    typer.echo()
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _wait_for_quit(stop_event: threading.Event) -> None:
+    """Block until the user types 'q' + Enter."""
+    while not stop_event.is_set():
+        try:
+            line = sys.stdin.readline().strip().lower()
+            if line == "q":
+                stop_event.set()
+                break
+        except (EOFError, OSError):
+            stop_event.set()
+            break
+
+
+def _print_result(result) -> None:
+    typer.echo()
+    typer.secho("┌─ Transcription " + "─" * 34, fg=typer.colors.CYAN)
+    typer.echo(result.text or "(no speech detected)")
+    typer.secho("└" + "─" * 50, fg=typer.colors.CYAN)
+    typer.echo()
+    typer.echo(f"  device   : {result.device} ({result.compute_type})")
+    typer.echo(f"  language : {result.language} ({result.language_probability * 100:.0f}% confidence)")
+    typer.echo(f"  audio    : {result.duration_s:.1f}s")
+    typer.echo(f"  latency  : {result.latency_ms:.0f}ms")
+    if result.fallback_to_cpu:
+        typer.secho("  [!] CUDA not available — ran on CPU", fg=typer.colors.YELLOW)
+
+
+def _format_markdown(wav_path: Path, result) -> str:
+    lines = [
+        "# Transcription",
+        "",
+        f"**File:** `{wav_path.name}`",
+        f"**Model:** {result.device} / {result.compute_type}",
+        f"**Language:** {result.language} ({result.language_probability * 100:.1f}% confidence)",
+        f"**Audio duration:** {result.duration_s:.1f}s",
+        f"**Transcription latency:** {result.latency_ms:.0f}ms",
+        "",
+    ]
+    if result.fallback_to_cpu:
+        lines += ["> ⚠️ CUDA requested but fell back to CPU.", ""]
+    lines += ["---", "", "## Text", "", result.text or "*(no speech detected)*", ""]
+    if result.segments:
+        lines += ["## Segments", ""]
+        for seg in result.segments:
+            lines.append(f"- `[{seg.start:.1f}s → {seg.end:.1f}s]` {seg.text}")
+    return "\n".join(lines) + "\n"

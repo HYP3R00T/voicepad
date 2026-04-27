@@ -1,34 +1,29 @@
-"""voicepad-core — audio recording and transcription engine.
+"""voicepad-core — audio capture and transcription engine.
 
 Public API:
 
-    Audio recording:
-        AudioRecorder       — captures microphone input as numpy arrays
-        AudioRecorderError  — raised on device or recording errors
-        SAMPLE_RATE         — 16000 (fixed for Whisper compatibility)
+    Recording:
+        AudioRecorder       — open mic → collect samples → return np.ndarray
+        AudioRecorderError  — raised on device errors
+        SAMPLE_RATE         — 16000 Hz (fixed for Whisper)
 
     Transcription:
-        transcribe_buffer   — primary function: np.ndarray → TranscriptionResult
-        transcribe_file     — convenience: Path → TranscriptionResult
-        get_or_load_model   — cached model loader (useful for pre-warming)
-        TranscriptionResult — dataclass with text, segments, timing, device info
-        Segment             — individual timed segment (start, end, text)
-        TranscriptionError  — base transcription exception
-        AudioTooShortError  — audio below min_audio_duration_s
-        AudioTooLongWarning — audio above max_audio_duration_s
-
-    VAD chunking (long-form recording):
-        RealtimeChunker     — splits long audio at natural speech boundaries
-        ChunkMetadata       — timing info for each chunk
+        transcribe_buffer   — np.ndarray → TranscriptionResult  (primary)
+        transcribe_file     — Path → TranscriptionResult         (convenience)
+        get_or_load_model   — pre-warm the model cache
+        TranscriptionResult — text, segments, latency, device info
+        Segment             — (start, end, text)
+        TranscriptionError  — base exception
+        AudioTooShortError  — audio below MIN_AUDIO_DURATION_S
+        AudioTooLongWarning — audio above MAX_AUDIO_DURATION_S
 
     Configuration:
-        Config              — Pydantic settings model
-        get_config          — load config from YAML / env / defaults
-        get_config_with_metadata — load config + source metadata per field
+        Config              — 5-field Pydantic model
+        get_config          — load from YAML / env / defaults
+        get_config_with_metadata — load + per-field source info
 """
 
 from voicepad_core.audio import SAMPLE_RATE, AudioRecorder, AudioRecorderError
-from voicepad_core.chunking import ChunkMetadata, RealtimeChunker
 from voicepad_core.config import Config, get_config, get_config_with_metadata
 from voicepad_core.transcription import (
     AudioTooLongWarning,
@@ -36,13 +31,15 @@ from voicepad_core.transcription import (
     Segment,
     TranscriptionError,
     TranscriptionResult,
+    ensure_model_downloaded,
     get_or_load_model,
+    model_downloaded,
     transcribe_buffer,
     transcribe_file,
 )
 
 __all__ = [
-    # Audio
+    # Recording
     "AudioRecorder",
     "AudioRecorderError",
     "SAMPLE_RATE",
@@ -50,14 +47,13 @@ __all__ = [
     "transcribe_buffer",
     "transcribe_file",
     "get_or_load_model",
+    "model_downloaded",
+    "ensure_model_downloaded",
     "TranscriptionResult",
     "Segment",
     "TranscriptionError",
     "AudioTooShortError",
     "AudioTooLongWarning",
-    # VAD chunking
-    "RealtimeChunker",
-    "ChunkMetadata",
     # Config
     "Config",
     "get_config",
