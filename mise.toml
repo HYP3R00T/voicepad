@@ -25,8 +25,8 @@ run = "zensical serve"
 description = "Serve the documentation locally"
 
 [tasks.sync]
-run = "uv sync --extra gpu --upgrade"
-description = "Run uv sync"
+run = "uv sync --upgrade"
+description = "Sync dependencies"
 
 [tasks.test]
 run = "pytest packages --cov=packages/* --cov-fail-under=80"
