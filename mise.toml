@@ -29,5 +29,5 @@ run = "uv sync --upgrade"
 description = "Sync dependencies"
 
 [tasks.test]
-run = "pytest packages --cov=packages/* --cov-fail-under=80"
+run = "pytest packages --cov=voicepad --cov=voicepad_core --cov-fail-under=80"
 description = "Run pytest with >=80% full package coverage gate"
