@@ -242,8 +242,12 @@ def _wait_for_quit(stop_event: threading.Event) -> None:
     """Block until the user types 'q' + Enter."""
     while not stop_event.is_set():
         try:
-            line = sys.stdin.readline().strip().lower()
-            if line == "q":
+            line = sys.stdin.readline()
+            if line == "":
+                # EOF reached (e.g. stdin closed or redirected)
+                stop_event.set()
+                break
+            if line.strip().lower() == "q":
                 stop_event.set()
                 break
         except (EOFError, OSError):
