@@ -8,6 +8,11 @@ GPU support:
     CUDA DLLs are bundled with the torch package — no system CUDA installation required.
     faster-whisper (CTranslate2) finds them automatically when torch is installed.
     If CUDA is unavailable for any reason, falls back to CPU transparently.
+
+Performance:
+    GPU inference uses BatchedInferencePipeline which processes multiple 30s chunks
+    in parallel, giving ~2x speedup over standard WhisperModel.transcribe().
+    CPU fallback uses standard mode (batched pipeline requires CUDA).
 """
 
 from __future__ import annotations
@@ -20,7 +25,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import soundfile as sf
-from faster_whisper import WhisperModel
+from faster_whisper import BatchedInferencePipeline, WhisperModel
 from huggingface_hub import snapshot_download
 from huggingface_hub.utils import HfHubHTTPError
 
@@ -50,6 +55,10 @@ BEAM_SIZE: int = 3
 # Language passed to Whisper. None = auto-detect per utterance.
 # Set to "en" to skip language detection and save ~200ms per call.
 LANGUAGE: str | None = None
+
+# Batch size for BatchedInferencePipeline (GPU only).
+# 8 is optimal for RTX 3050 4GB with medium/int8. Reduce to 4 if you see OOM.
+BATCH_SIZE: int = 8
 
 # Initial prompt to prime Whisper toward punctuated, well-formatted output.
 # This is a soft hint — Whisper may still omit punctuation on very short clips.
@@ -129,10 +138,11 @@ class AudioTooLongWarning(UserWarning):
 
 
 # ---------------------------------------------------------------------------
-# Model cache — one instance per (model, device, compute_type) combination
+# Model cache — one WhisperModel + one BatchedInferencePipeline per key
 # ---------------------------------------------------------------------------
 
 _model_cache: dict[tuple[str, str, str], WhisperModel] = {}
+_batched_cache: dict[tuple[str, str, str], BatchedInferencePipeline] = {}
 
 
 def _is_cuda_error(e: Exception) -> bool:
@@ -151,7 +161,17 @@ def _load_cpu_fallback(model_name: str) -> tuple[WhisperModel, str, str]:
     return model, "cpu", "int8"
 
 
+def _get_batched_pipeline(model: WhisperModel, cache_key: tuple[str, str, str]) -> BatchedInferencePipeline:
+    """Return a cached BatchedInferencePipeline for the given model."""
+    if cache_key not in _batched_cache:
+        logger.debug(f"Creating BatchedInferencePipeline for {cache_key}")
+        _batched_cache[cache_key] = BatchedInferencePipeline(model=model)
+    return _batched_cache[cache_key]
+
+
 # ---------------------------------------------------------------------------
+
+
 # Model download helpers
 # ---------------------------------------------------------------------------
 
@@ -286,22 +306,36 @@ def transcribe_buffer(audio: np.ndarray, config: Config) -> TranscriptionResult:
     model, device, compute, fallback = get_or_load_model(config)
 
     try:
-        segments_iter, info = model.transcribe(
-            audio,
-            language=LANGUAGE,
-            beam_size=BEAM_SIZE,
-            vad_filter=False,
-            initial_prompt=INITIAL_PROMPT,
-            condition_on_previous_text=True,
-        )
+        if device == "cuda":
+            # BatchedInferencePipeline processes chunks in parallel — ~2x faster on GPU.
+            # CPU fallback uses standard mode (batched pipeline requires CUDA).
+            pipeline = _get_batched_pipeline(model, (config.transcription_model, device, compute))
+            segments_iter, info = pipeline.transcribe(
+                audio,
+                language=LANGUAGE,
+                beam_size=BEAM_SIZE,
+                batch_size=BATCH_SIZE,
+                initial_prompt=INITIAL_PROMPT,
+                condition_on_previous_text=True,
+            )
+        else:
+            segments_iter, info = model.transcribe(
+                audio,
+                language=LANGUAGE,
+                beam_size=BEAM_SIZE,
+                vad_filter=False,
+                initial_prompt=INITIAL_PROMPT,
+                condition_on_previous_text=True,
+            )
         segments = [Segment(start=s.start, end=s.end, text=s.text.strip()) for s in segments_iter]
 
     except RuntimeError as e:
         if _is_cuda_error(e):
-            # CUDA failed during inference (e.g. DLL found but GPU OOM or driver issue).
-            # Evict the bad GPU entry, retry on CPU.
+            # CUDA failed during inference — evict GPU entries, retry on CPU.
             logger.warning(f"CUDA inference error: {e} — retrying on CPU")
-            _model_cache.pop((config.transcription_model, device, compute), None)
+            cache_key = (config.transcription_model, device, compute)
+            _model_cache.pop(cache_key, None)
+            _batched_cache.pop(cache_key, None)
             cpu_model, device, compute = _load_cpu_fallback(config.transcription_model)
             fallback = True
             segments_iter, info = cpu_model.transcribe(
