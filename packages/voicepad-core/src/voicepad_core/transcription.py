@@ -64,6 +64,13 @@ LANGUAGE: str = "en"
 # 8 is optimal for RTX 3050 4GB with medium/int8. Reduce to 4 if you see OOM.
 BATCH_SIZE: int = 8
 
+# Audio duration threshold (seconds) above which BatchedInferencePipeline is used.
+# Below this threshold, standard model.transcribe with vad_filter=True is used —
+# it splits at natural speech pauses and avoids hallucinated ellipses at chunk
+# boundaries that BatchedInferencePipeline can produce on mid-sentence cuts.
+# Above this threshold, batched mode's parallelism gives meaningful speedup.
+BATCHED_THRESHOLD_S: float = 120.0
+
 # Initial prompt to prime Whisper toward punctuated, well-formatted output.
 # This is a soft hint — Whisper may still omit punctuation on very short clips.
 INITIAL_PROMPT: str = "Hello. This is a transcription with proper punctuation, capitalization, and grammar."
@@ -333,9 +340,10 @@ def transcribe_buffer(audio: np.ndarray, config: Config) -> TranscriptionResult:
     prompt = None if is_distil else INITIAL_PROMPT
 
     try:
-        if device == "cuda":
-            # BatchedInferencePipeline processes chunks in parallel — ~2x faster on GPU.
-            # CPU fallback uses standard mode (batched pipeline requires CUDA).
+        if device == "cuda" and duration_s >= BATCHED_THRESHOLD_S:
+            # BatchedInferencePipeline for long audio (2+ min) — parallel chunk processing.
+            # Not used for shorter clips: VAD-based standard mode avoids hallucinated
+            # ellipses that batched mode can produce at fixed 30s chunk boundaries.
             pipeline = _get_batched_pipeline(model, (config.transcription_model, device, compute))
             segments_iter, info = pipeline.transcribe(
                 audio,
@@ -344,13 +352,18 @@ def transcribe_buffer(audio: np.ndarray, config: Config) -> TranscriptionResult:
                 batch_size=BATCH_SIZE,
                 initial_prompt=prompt,
                 condition_on_previous_text=condition_on_prev,
+                vad_filter=True,
+                hallucination_silence_threshold=0.5,
             )
         else:
+            # Standard mode with VAD — splits at natural speech pauses, no chunk
+            # boundary hallucinations. Fast enough for clips under ~2 minutes.
             segments_iter, info = model.transcribe(
                 audio,
                 language=LANGUAGE,
                 beam_size=BEAM_SIZE,
-                vad_filter=False,
+                vad_filter=True,
+                hallucination_silence_threshold=0.5,
                 initial_prompt=prompt,
                 condition_on_previous_text=condition_on_prev,
             )
@@ -369,7 +382,8 @@ def transcribe_buffer(audio: np.ndarray, config: Config) -> TranscriptionResult:
                 audio,
                 language=LANGUAGE,
                 beam_size=BEAM_SIZE,
-                vad_filter=False,
+                vad_filter=True,
+                hallucination_silence_threshold=0.5,
                 initial_prompt=prompt,
                 condition_on_previous_text=condition_on_prev,
             )
