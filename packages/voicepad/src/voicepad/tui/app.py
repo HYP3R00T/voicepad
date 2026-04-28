@@ -24,12 +24,20 @@ from textual.widgets import (
     Label,
     MarkdownViewer,
     OptionList,
+    Select,
     Static,
     TabbedContent,
     TabPane,
 )
 from textual.widgets.option_list import Option
-from voicepad_core import AudioRecorder, AudioRecorderError, ChunkResult, StreamingTranscriber, get_config
+from voicepad_core import (
+    VALID_TRANSCRIPTION_MODELS,
+    AudioRecorder,
+    AudioRecorderError,
+    ChunkResult,
+    StreamingTranscriber,
+    get_config,
+)
 from voicepad_core.config import Config
 from voicepad_core.config.settings import get_config_with_metadata
 
@@ -231,14 +239,10 @@ class VoicePadApp(App[None]):
         """Build the settings form — only user-facing fields shown."""
         from voicepad_core.config import Config as _Config
 
-        # Fields shown in the TUI — technical knobs stay in voicepad.yaml only
         user_fields = {
             "recordings_path": "Where your WAV recordings are saved",
             "markdown_path": "Where your transcription files are saved",
-            "transcription_model": (
-                "Whisper model to use. Options: tiny, base, small, medium, "
-                "large-v3, turbo (recommended), large-v3-turbo"
-            ),
+            "transcription_model": "Whisper model to use for transcription",
             "input_device_index": "Microphone device index. Leave blank for system default",
         }
 
@@ -258,16 +262,29 @@ class VoicePadApp(App[None]):
                 classes="settings-key",
             )
             hint_label = Label(f"[dim]{hint}[/]", classes="settings-hint")
-            inp = Input(
-                value=str(current_val) if current_val is not None else "",
-                placeholder=str(field_info.default) if field_info.default is not None else "",
-                id=f"setting-{field_name}",
-                classes="settings-input",
-            )
+
+            if field_name == "transcription_model":
+                # Dropdown — only valid model names accepted
+                options = [(m, m) for m in VALID_TRANSCRIPTION_MODELS]
+                current_str = str(current_val) if current_val is not None else "turbo"
+                widget = Select(
+                    options=options,
+                    value=current_str if current_str in VALID_TRANSCRIPTION_MODELS else "turbo",
+                    id="setting-transcription_model",
+                    classes="settings-input",
+                    allow_blank=False,
+                )
+            else:
+                widget = Input(
+                    value=str(current_val) if current_val is not None else "",
+                    placeholder=str(field_info.default) if field_info.default is not None else "",
+                    id=f"setting-{field_name}",
+                    classes="settings-input",
+                )
 
             row = Static(classes="settings-row")
             container.mount(row)
-            row.mount(key_label, hint_label, inp)
+            row.mount(key_label, hint_label, widget)
 
     @on(Button.Pressed, "#settings-save-btn")
     def on_settings_save(self) -> None:
@@ -288,18 +305,22 @@ class VoicePadApp(App[None]):
             if field_info is None:
                 continue
             with contextlib.suppress(Exception):
-                inp = self.query_one(f"#setting-{field_name}", Input)
-                val_str = inp.value.strip()
-                annotation = field_info.annotation
-                if val_str == "" or val_str.lower() == "none":
-                    raw[field_name] = None
-                elif annotation in (int, "int") or "int" in str(annotation):
-                    try:
-                        raw[field_name] = int(val_str)
-                    except ValueError:
-                        errors.append(f"{field_name}: expected a number")
+                if field_name == "transcription_model":
+                    sel = self.query_one("#setting-transcription_model", Select)
+                    raw[field_name] = str(sel.value) if sel.value is not Select.BLANK else raw[field_name]
                 else:
-                    raw[field_name] = val_str
+                    inp = self.query_one(f"#setting-{field_name}", Input)
+                    val_str = inp.value.strip()
+                    annotation = field_info.annotation
+                    if val_str == "" or val_str.lower() == "none":
+                        raw[field_name] = None
+                    elif annotation in (int, "int") or "int" in str(annotation):
+                        try:
+                            raw[field_name] = int(val_str)
+                        except ValueError:
+                            errors.append(f"{field_name}: expected a number")
+                    else:
+                        raw[field_name] = val_str
 
         if errors:
             status.update(f"[red]✕  {'; '.join(errors)}[/]")

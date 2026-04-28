@@ -25,6 +25,7 @@ Public API:
 
 from voicepad_core.audio import SAMPLE_RATE, AudioRecorder, AudioRecorderError
 from voicepad_core.config import Config, get_config, get_config_with_metadata
+from voicepad_core.config.settings import VALID_TRANSCRIPTION_MODELS
 from voicepad_core.streaming import ChunkResult, StreamingTranscriber
 from voicepad_core.transcription import (
     AudioTooLongWarning,
@@ -62,4 +63,5 @@ __all__ = [
     "Config",
     "get_config",
     "get_config_with_metadata",
+    "VALID_TRANSCRIPTION_MODELS",
 ]

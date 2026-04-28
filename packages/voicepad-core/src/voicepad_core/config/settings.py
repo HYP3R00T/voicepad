@@ -8,6 +8,32 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from utilityhub_config import expand_path, load_settings
 
+# ---------------------------------------------------------------------------
+# Valid model names — sourced from faster_whisper.utils.available_models()
+# ---------------------------------------------------------------------------
+
+VALID_TRANSCRIPTION_MODELS: tuple[str, ...] = (
+    "tiny",
+    "tiny.en",
+    "base",
+    "base.en",
+    "small",
+    "small.en",
+    "medium",
+    "medium.en",
+    "large-v1",
+    "large-v2",
+    "large-v3",
+    "large",
+    "distil-large-v2",
+    "distil-medium.en",
+    "distil-small.en",
+    "distil-large-v3",
+    "distil-large-v3.5",
+    "large-v3-turbo",
+    "turbo",
+)
+
 
 class Config(BaseModel):
     """Voicepad configuration.
@@ -52,14 +78,21 @@ class Config(BaseModel):
     transcription_model: str = Field(
         default="turbo",
         description=(
-            "Whisper model for transcription. Any faster-whisper compatible model name is accepted — "
-            "models are auto-downloaded from HuggingFace on first use. "
-            "You may also pass any HuggingFace repo ID (e.g. 'username/my-whisper-model'). "
-            "Official models: tiny, tiny.en, base, base.en, small, small.en, medium, medium.en, "
-            "large-v1, large-v2, large-v3, large, large-v3-turbo, turbo, "
-            "distil-small.en, distil-medium.en, distil-large-v2, distil-large-v3, distil-large-v3.5."
+            "Whisper model for transcription. Must be one of the supported faster-whisper models. "
+            "Models are auto-downloaded from HuggingFace on first use. "
+            f"Valid values: {', '.join(VALID_TRANSCRIPTION_MODELS)}."
         ),
     )
+
+    @field_validator("transcription_model")
+    @classmethod
+    def validate_transcription_model(cls, v: str) -> str:
+        """Reject unknown model names before any download or inference attempt."""
+        if v not in VALID_TRANSCRIPTION_MODELS:
+            valid = ", ".join(VALID_TRANSCRIPTION_MODELS)
+            raise ValueError(f"Unknown transcription model '{v}'. Valid models: {valid}.")
+        return v
+
     transcription_device: Literal["auto", "cuda", "cpu"] = Field(
         default="auto",
         description=(
