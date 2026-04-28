@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 from voicepad_core.config import Config
+from voicepad_core.streaming import StreamingTranscriber
 from voicepad_core.transcription import (
     COMPUTE_TYPE,
     DEVICE,
@@ -313,6 +314,25 @@ class TestTranscribeBuffer:
             assert result.text == "hello"
             assert len(result.segments) == 1
 
+    def test_transcribe_buffer_disables_previous_text_conditioning(self, tmp_path: Path) -> None:
+        """When transcribing, the model is not conditioned on previous text."""
+        config = Config(recordings_path=tmp_path, markdown_path=tmp_path)
+        audio = np.zeros(16000, dtype=np.float32)
+
+        mock_model = MagicMock()
+        mock_model.transcribe.return_value = (
+            [],
+            MagicMock(language="en", language_probability=0.9),
+        )
+
+        with patch("voicepad_core.transcription.get_or_load_model") as mock_get_model:
+            mock_get_model.return_value = (mock_model, DEVICE, COMPUTE_TYPE, False)
+
+            transcribe_buffer(audio, config)
+
+            assert mock_model.transcribe.call_args.kwargs["beam_size"] == 3
+            assert mock_model.transcribe.call_args.kwargs["condition_on_previous_text"] is False
+
     def test_transcribe_buffer_retries_on_cuda_inference_error(self, tmp_path: Path) -> None:
         """When CUDA fails during inference, the model retries on CPU."""
         config = Config(recordings_path=tmp_path, markdown_path=tmp_path)
@@ -491,3 +511,44 @@ class TestTranscribeFile:
     def teardown_method(self) -> None:
         """Clear the model cache after each test."""
         _model_cache.clear()
+
+
+class _FakeRecorder:
+    def __init__(self) -> None:
+        import threading
+
+        self._lock = threading.Lock()
+        self._frames: list[np.ndarray] = []
+
+
+class TestStreamingTranscriber:
+    def test_dispatch_chunk_only_seeds_first_chunk_with_prompt(self, tmp_path: Path) -> None:
+        """When streaming chunks are transcribed, only the first chunk gets the initial prompt."""
+        config = Config(recordings_path=tmp_path, markdown_path=tmp_path)
+        transcriber = StreamingTranscriber(
+            recorder=_FakeRecorder(),
+            config=config,
+            on_chunk=lambda _chunk: None,
+            on_error=lambda _error: None,
+        )
+
+        mock_model = MagicMock()
+        mock_model.transcribe.return_value = (
+            [],
+            MagicMock(language="en", language_probability=0.9),
+        )
+
+        with patch("voicepad_core.transcription.get_or_load_model") as mock_get_model:
+            mock_get_model.return_value = (mock_model, DEVICE, COMPUTE_TYPE, False)
+
+            transcriber._dispatch_chunk(np.zeros(16000 * 11, dtype=np.float32), is_final=False)
+            transcriber._dispatch_chunk(np.zeros(16000 * 11, dtype=np.float32), is_final=True)
+
+        first_call = mock_model.transcribe.call_args_list[0].kwargs
+        second_call = mock_model.transcribe.call_args_list[1].kwargs
+
+        assert first_call["beam_size"] == 3
+        assert first_call["condition_on_previous_text"] is False
+        assert first_call["initial_prompt"] is not None
+        assert second_call["condition_on_previous_text"] is False
+        assert second_call["initial_prompt"] is None

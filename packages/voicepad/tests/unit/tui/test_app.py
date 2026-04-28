@@ -8,9 +8,9 @@ from types import SimpleNamespace
 
 import numpy as np
 from textual.widgets import Button, Label
-from voicepad.tui.app import VoicePadApp, _format_markdown
+from voicepad.tui.app import VoicePadApp, _format_markdown, _format_markdown_streaming
 from voicepad.tui.workers import ModelWarmResult
-from voicepad_core import Config
+from voicepad_core import ChunkResult, Config, Segment
 
 
 @dataclass
@@ -107,6 +107,31 @@ class TestVoicePadApp:
         )
 
         assert "## Segments" not in _format_markdown(wav_path, result)
+
+    def test_format_markdown_streaming_includes_chunk_structure(self, tmp_path: Path) -> None:
+        """When streaming chunks are present, the markdown keeps the same section layout."""
+        wav_path = tmp_path / "clip.wav"
+        chunks = [
+            ChunkResult(
+                index=1,
+                text="hello world",
+                segments=[Segment(start=0.0, end=1.0, text="hello world")],
+                start_s=0.0,
+                end_s=1.0,
+                latency_ms=12.0,
+                device="cuda",
+                language="en",
+                language_probability=0.98,
+                is_final=True,
+            )
+        ]
+
+        markdown = _format_markdown_streaming(wav_path, "hello world", 1.0, chunks)
+
+        assert "**Mode:** streaming" in markdown
+        assert "**Model:** cuda / live" in markdown
+        assert "## Segments" in markdown
+        assert "hello world" in markdown
 
 
 class TestVoicePadAppExtended:

@@ -29,11 +29,11 @@ from textual.widgets import (
     TabPane,
 )
 from textual.widgets.option_list import Option
-from voicepad_core import AudioRecorder, AudioRecorderError, get_config
+from voicepad_core import AudioRecorder, AudioRecorderError, ChunkResult, StreamingTranscriber, get_config
 from voicepad_core.config import Config
 from voicepad_core.config.settings import get_config_with_metadata
 
-from voicepad.tui.workers import ModelWarmResult, RecordingSession, TranscriptionJob
+from voicepad.tui.workers import ModelWarmResult, RecordingSession
 
 logger = logging.getLogger(__name__)
 
@@ -122,12 +122,13 @@ class VoicePadApp(App[None]):
         super().__init__()
         self.config = config
         self._session: RecordingSession | None = None
+        self._streamer: StreamingTranscriber | None = None
+        self._stream_chunks: list[ChunkResult] = []  # accumulated chunks in order
         self._entries: list[SessionEntry] = []
         self._record_start: float = 0.0
         self._timer_thread: threading.Thread | None = None
         self._warm_result: ModelWarmResult | None = None
         self._current_text: str = ""
-        # history tab: currently selected entry index
         self._selected_entry_idx: int | None = None
 
     # ------------------------------------------------------------------
@@ -316,10 +317,9 @@ class VoicePadApp(App[None]):
             object.__setattr__(self, "config", new_config)
 
             if model_changed and not self._recording and not self._transcribing:
-                from voicepad_core.transcription import _batched_cache, _model_cache
+                from voicepad_core.transcription import _model_cache
 
                 _model_cache.clear()
-                _batched_cache.clear()
                 self._model_ready = False
                 self._set_status("transcribing", "loading model…")
                 self.query_one("#header-model", Label).update("loading…")
@@ -388,8 +388,18 @@ class VoicePadApp(App[None]):
 
         self._recording = True
         self._record_start = time.monotonic()
+        self._stream_chunks = []
         self._set_status("recording", "recording…")
         self._start_timer()
+
+        # Start streaming transcriber — transcribes chunks during recording
+        self._streamer = StreamingTranscriber(
+            recorder=self._session._recorder,
+            config=self.config,
+            on_chunk=lambda chunk: self.call_from_thread(self._on_stream_chunk, chunk),
+            on_error=lambda err: self.call_from_thread(self._set_status, "error", err),
+        )
+        self._streamer.start()
 
     def _stop_recording(self) -> None:
         if self._session is None:
@@ -403,72 +413,88 @@ class VoicePadApp(App[None]):
             audio = self._session.stop()
         except AudioRecorderError as e:
             self._set_status("error", f"stop error: {e}")
+            if self._streamer:
+                self._streamer._stop_event.set()
             return
 
         self._transcribing = True
-        self._transcribe_worker(audio)
+        # Stop the streamer in a thread — it will transcribe the tail and call on_chunk(is_final=True)
+        self._finalize_worker(audio)
+
+    # ------------------------------------------------------------------
+    # Streaming transcription
+    # ------------------------------------------------------------------
+
+    @work(thread=True, name="finalize")
+    def _finalize_worker(self, audio: np.ndarray) -> None:
+        """Stop the streamer (transcribes tail) then save the full recording."""
+        if self._streamer:
+            self._streamer.stop()  # blocks until final chunk callback fires
+        self.call_from_thread(self._save_recording, audio)
+
+    def _on_stream_chunk(self, chunk: ChunkResult) -> None:
+        """Called from the streaming thread for each transcribed chunk."""
+        if chunk.text:
+            self._stream_chunks.append(chunk)
+
+        # Update transcription panel with all accumulated text so far
+        full_text = " ".join(c.text for c in self._stream_chunks).strip()
+        if full_text:
+            tx_text = self.query_one("#tx-text", Label)
+            tx_text.remove_class("placeholder")
+            tx_text.update(full_text)
+            self.query_one("#transcription", Static).scroll_end(animate=False)
+
+        if chunk.is_final:
+            self._transcribing = False
+            elapsed = time.monotonic() - self._record_start
+            self.query_one("#tx-meta", Label).update(f"[dim]{elapsed:.1f}s  ·  streaming[/]")
+            self._set_status("ready", "ready")
+
+    def _save_recording(self, audio: np.ndarray) -> None:
+        """Save WAV + markdown and add history entry after streaming completes."""
+        full_text = " ".join(c.text for c in self._stream_chunks).strip()
+        if not full_text:
+            return
+
+        self._current_text = full_text
+        self.query_one("#tx-copy-btn", Button).disabled = False
+
+        # Save WAV
+        wav_path: Path | None = None
+        md_path: Path | None = None
+        recorder_ref: AudioRecorder | None = self._session._recorder if self._session else None
+        if recorder_ref is not None:
+            wav_path = recorder_ref.make_wav_path()
+            try:
+                recorder_ref.save_wav(audio, wav_path)
+                # Build a synthetic TranscriptionResult-like object for _format_markdown
+                md_path = self.config.markdown_path / f"{wav_path.stem}.md"
+                self.config.markdown_path.mkdir(parents=True, exist_ok=True)
+                duration_s = len(audio) / 16000
+                md_path.write_text(
+                    _format_markdown_streaming(wav_path, full_text, duration_s, self._stream_chunks),
+                    encoding="utf-8",
+                )
+            except Exception:
+                wav_path = None
+                md_path = None
+
+        entry = SessionEntry(
+            index=len(self._entries),
+            wav_path=wav_path,
+            md_path=md_path,
+            duration_s=len(audio) / 16000,
+            text=full_text,
+            latency_ms=0.0,
+            device=self._stream_chunks[-1].device if self._stream_chunks else "cuda",
+        )
+        self._entries.append(entry)
+        self._add_history_entry(entry)
 
     # ------------------------------------------------------------------
     # Live transcription (record tab)
     # ------------------------------------------------------------------
-
-    @work(thread=True, name="transcribe")
-    def _transcribe_worker(self, audio: np.ndarray) -> None:
-        job = TranscriptionJob(audio=audio, config=self.config)
-        result = job.run()
-        self.call_from_thread(self._on_transcription_done, audio, result, job.error)
-
-    def _on_transcription_done(
-        self,
-        audio: np.ndarray,
-        result,
-        error: str | None,
-    ) -> None:
-        self._transcribing = False
-
-        if error:
-            self._set_status("error", error)
-            return
-
-        wav_path: Path | None = None
-        md_path: Path | None = None
-        if self._session and result:
-            recorder_ref: AudioRecorder | None = self._session._recorder
-            if recorder_ref is not None:
-                wav_path = recorder_ref.make_wav_path()
-                try:
-                    recorder_ref.save_wav(audio, wav_path)
-                    md_path = self.config.markdown_path / f"{wav_path.stem}.md"
-                    self.config.markdown_path.mkdir(parents=True, exist_ok=True)
-                    md_path.write_text(_format_markdown(wav_path, result), encoding="utf-8")
-                except Exception:
-                    wav_path = None
-                    md_path = None
-
-        if result:
-            tx_text = self.query_one("#tx-text", Label)
-            tx_text.remove_class("placeholder")
-            tx_text.update(result.text or "(no speech detected)")
-            self.query_one("#tx-meta", Label).update(
-                f"[dim]{result.duration_s:.1f}s  ·  {result.latency_ms:.0f}ms  ·  {result.device}[/]"
-            )
-            self.query_one("#transcription", Static).scroll_end(animate=False)
-            self._set_status("ready", "ready")
-
-            self._current_text = result.text or ""
-            self.query_one("#tx-copy-btn", Button).disabled = not bool(self._current_text)
-
-            entry = SessionEntry(
-                index=len(self._entries),
-                wav_path=wav_path,
-                md_path=md_path,
-                duration_s=result.duration_s,
-                text=result.text,
-                latency_ms=result.latency_ms,
-                device=result.device,
-            )
-            self._entries.append(entry)
-            self._add_history_entry(entry)
 
     def _add_history_entry(self, entry: SessionEntry) -> None:
         ol = self.query_one("#history-options", OptionList)
@@ -711,6 +737,46 @@ def _format_markdown(audio_path: Path, result) -> str:
         lines += ["## Segments", ""]
         for seg in result.segments:
             lines.append(f"- `[{seg.start:.1f}s → {seg.end:.1f}s]` {seg.text}")
+    return "\n".join(lines) + "\n"
+
+
+def _format_markdown_streaming(
+    wav_path: Path,
+    text: str,
+    duration_s: float,
+    chunks: list[ChunkResult],
+) -> str:
+    """Format a markdown file for a streaming transcription."""
+    latest_chunk = next((chunk for chunk in reversed(chunks) if chunk.text), None)
+    device = latest_chunk.device if latest_chunk else "unknown"
+    language = latest_chunk.language if latest_chunk else "en"
+    language_probability = latest_chunk.language_probability if latest_chunk else 0.0
+    latency_ms = sum(chunk.latency_ms for chunk in chunks)
+
+    lines = [
+        "# Transcription",
+        "",
+        f"**File:** `{wav_path.name}`",
+        f"**Model:** {device} / live",
+        f"**Language:** {language} ({language_probability * 100:.1f}%)",
+        f"**Duration:** {duration_s:.1f}s",
+        f"**Latency:** {latency_ms:.0f}ms",
+        "**Mode:** streaming",
+        "",
+        "---",
+        "",
+        "## Text",
+        "",
+        text or "*(no speech detected)*",
+        "",
+    ]
+
+    segments = [segment for chunk in chunks for segment in chunk.segments if segment.text]
+    if segments:
+        lines += ["## Segments", ""]
+        for segment in segments:
+            lines.append(f"- `[{segment.start:.1f}s → {segment.end:.1f}s]` {segment.text}")
+
     return "\n".join(lines) + "\n"
 
 

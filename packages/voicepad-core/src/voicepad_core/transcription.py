@@ -9,10 +9,11 @@ GPU support:
     faster-whisper (CTranslate2) finds them automatically when torch is installed.
     If CUDA is unavailable for any reason, falls back to CPU transparently.
 
-Performance:
-    GPU inference uses BatchedInferencePipeline which processes multiple 30s chunks
-    in parallel, giving ~2x speedup over standard WhisperModel.transcribe().
-    CPU fallback uses standard mode (batched pipeline requires CUDA).
+Accuracy:
+    Uses standard model.transcribe with vad_filter=True for all durations.
+    VAD splits audio at natural speech pauses, avoiding the hallucinated ellipses
+    that BatchedInferencePipeline produces at fixed 30s chunk boundaries.
+    On turbo/RTX 3050, standard+VAD is also faster than batched mode.
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import soundfile as sf
-from faster_whisper import BatchedInferencePipeline, WhisperModel
+from faster_whisper import WhisperModel
 from huggingface_hub import snapshot_download
 from huggingface_hub.utils import HfHubHTTPError
 
@@ -50,26 +51,22 @@ DEVICE: str = "cuda"
 COMPUTE_TYPE: str = "int8"
 
 # Beam search width.
-# 1 = greedy decoding — fastest, minimal quality loss for clear speech.
-# 3 = balanced (previous default).
+# 3 = balanced. 1 is fastest but more likely to repeat or drift on longer clips.
 # 5 = most accurate, ~25% slower.
-BEAM_SIZE: int = 1
+BEAM_SIZE: int = 3
 
 # Language passed to Whisper.
 # Fixed to "en" — skips language detection (~300ms saved per call).
 # Change to None to re-enable auto-detection for multilingual use.
 LANGUAGE: str = "en"
 
-# Batch size for BatchedInferencePipeline (GPU only).
-# 8 is optimal for RTX 3050 4GB with medium/int8. Reduce to 4 if you see OOM.
-BATCH_SIZE: int = 8
+# Suppress hallucinated segments at silence boundaries.
+HALLUCINATION_SILENCE_THRESHOLD: float = 0.5
 
-# Audio duration threshold (seconds) above which BatchedInferencePipeline is used.
-# Below this threshold, standard model.transcribe with vad_filter=True is used —
-# it splits at natural speech pauses and avoids hallucinated ellipses at chunk
-# boundaries that BatchedInferencePipeline can produce on mid-sentence cuts.
-# Above this threshold, batched mode's parallelism gives meaningful speedup.
-BATCHED_THRESHOLD_S: float = 120.0
+# Suppress segments where speech probability is below this threshold.
+# Higher = more aggressive suppression of noise/silence hallucinations.
+# Default faster-whisper value is 0.6; 0.8 better suppresses tail noise.
+NO_SPEECH_THRESHOLD: float = 0.8
 
 # Initial prompt to prime Whisper toward punctuated, well-formatted output.
 # This is a soft hint — Whisper may still omit punctuation on very short clips.
@@ -161,16 +158,42 @@ class AudioTooLongWarning(UserWarning):
 
 
 # ---------------------------------------------------------------------------
-# Model cache — one WhisperModel + one BatchedInferencePipeline per key
+# Model cache — one WhisperModel per (model, device, compute_type) combination
 # ---------------------------------------------------------------------------
 
 _model_cache: dict[tuple[str, str, str], WhisperModel] = {}
-_batched_cache: dict[tuple[str, str, str], BatchedInferencePipeline] = {}
 
 
 def _is_cuda_error(e: Exception) -> bool:
     """Return True if the exception looks like a CUDA runtime failure."""
     return any(kw in str(e).lower() for kw in _CUDA_ERROR_KEYWORDS)
+
+
+def _trim_trailing_silence(
+    audio: np.ndarray, sr: int = 16000, threshold: float = 0.005, window_s: float = 0.3
+) -> np.ndarray:
+    """Remove trailing silence/noise from audio.
+
+    Whisper hallucinates on trailing noise — it creates phantom segments that
+    extend beyond the actual speech and fills them with invented text.
+    Trimming the tail prevents this entirely.
+
+    Args:
+        threshold: RMS below this is considered silence (default 0.005 ≈ -46dBFS).
+        window_s:  Step size for the scan (default 0.3s).
+    """
+    window = int(window_s * sr)
+    if len(audio) <= window:
+        return audio
+    end = len(audio)
+    while end > window:
+        rms = float(np.sqrt(np.mean(audio[end - window : end] ** 2)))
+        if rms > threshold:
+            # Add a small pad so we don't cut off the very end of speech
+            end = min(len(audio), end + window)
+            break
+        end -= window // 2
+    return audio[:end]
 
 
 def _load_cpu_fallback(model_name: str) -> tuple[WhisperModel, str, str]:
@@ -182,14 +205,6 @@ def _load_cpu_fallback(model_name: str) -> tuple[WhisperModel, str, str]:
     model = WhisperModel(model_name, device="cpu", compute_type="int8")
     _model_cache[cache_key] = model
     return model, "cpu", "int8"
-
-
-def _get_batched_pipeline(model: WhisperModel, cache_key: tuple[str, str, str]) -> BatchedInferencePipeline:
-    """Return a cached BatchedInferencePipeline for the given model."""
-    if cache_key not in _batched_cache:
-        logger.debug(f"Creating BatchedInferencePipeline for {cache_key}")
-        _batched_cache[cache_key] = BatchedInferencePipeline(model=model)
-    return _batched_cache[cache_key]
 
 
 # ---------------------------------------------------------------------------
@@ -324,6 +339,9 @@ def transcribe_buffer(audio: np.ndarray, config: Config) -> TranscriptionResult:
     if audio.ndim > 1:
         audio = audio.flatten()
 
+    # Trim trailing silence/noise to prevent Whisper hallucinating on the tail
+    audio = _trim_trailing_silence(audio)
+
     duration_s = len(audio) / 16000
 
     if duration_s < MIN_AUDIO_DURATION_S:
@@ -334,48 +352,34 @@ def transcribe_buffer(audio: np.ndarray, config: Config) -> TranscriptionResult:
 
     model, device, compute, fallback = get_or_load_model(config)
 
-    # distil-whisper models (turbo, distil-*) work best without conditioning on previous text
+    # Distil models do not benefit from previous-text conditioning.
+    # For all other models, we disable it here as well because VAD already
+    # provides chunk boundaries and re-conditioning tends to amplify repeats.
     is_distil = config.transcription_model in _DISTIL_MODELS
-    condition_on_prev = not is_distil
+    condition_on_prev = False
     prompt = None if is_distil else INITIAL_PROMPT
 
     try:
-        if device == "cuda" and duration_s >= BATCHED_THRESHOLD_S:
-            # BatchedInferencePipeline for long audio (2+ min) — parallel chunk processing.
-            # Not used for shorter clips: VAD-based standard mode avoids hallucinated
-            # ellipses that batched mode can produce at fixed 30s chunk boundaries.
-            pipeline = _get_batched_pipeline(model, (config.transcription_model, device, compute))
-            segments_iter, info = pipeline.transcribe(
-                audio,
-                language=LANGUAGE,
-                beam_size=BEAM_SIZE,
-                batch_size=BATCH_SIZE,
-                initial_prompt=prompt,
-                condition_on_previous_text=condition_on_prev,
-                vad_filter=True,
-                hallucination_silence_threshold=0.5,
-            )
-        else:
-            # Standard mode with VAD — splits at natural speech pauses, no chunk
-            # boundary hallucinations. Fast enough for clips under ~2 minutes.
-            segments_iter, info = model.transcribe(
-                audio,
-                language=LANGUAGE,
-                beam_size=BEAM_SIZE,
-                vad_filter=True,
-                hallucination_silence_threshold=0.5,
-                initial_prompt=prompt,
-                condition_on_previous_text=condition_on_prev,
-            )
+        # Standard mode with VAD — splits at natural speech pauses.
+        # Avoids hallucinated ellipses that BatchedInferencePipeline produces
+        # at fixed 30s chunk boundaries. On turbo/RTX 3050, also faster than batched.
+        segments_iter, info = model.transcribe(
+            audio,
+            language=LANGUAGE,
+            beam_size=BEAM_SIZE,
+            vad_filter=True,
+            hallucination_silence_threshold=HALLUCINATION_SILENCE_THRESHOLD,
+            no_speech_threshold=NO_SPEECH_THRESHOLD,
+            initial_prompt=prompt,
+            condition_on_previous_text=condition_on_prev,
+        )
         segments = [Segment(start=s.start, end=s.end, text=s.text.strip()) for s in segments_iter]
 
     except RuntimeError as e:
         if _is_cuda_error(e):
-            # CUDA failed during inference — evict GPU entries, retry on CPU.
+            # CUDA failed during inference — evict GPU entry, retry on CPU.
             logger.warning(f"CUDA inference error: {e} — retrying on CPU")
-            cache_key = (config.transcription_model, device, compute)
-            _model_cache.pop(cache_key, None)
-            _batched_cache.pop(cache_key, None)
+            _model_cache.pop((config.transcription_model, device, compute), None)
             cpu_model, device, compute = _load_cpu_fallback(config.transcription_model)
             fallback = True
             segments_iter, info = cpu_model.transcribe(
@@ -383,7 +387,8 @@ def transcribe_buffer(audio: np.ndarray, config: Config) -> TranscriptionResult:
                 language=LANGUAGE,
                 beam_size=BEAM_SIZE,
                 vad_filter=True,
-                hallucination_silence_threshold=0.5,
+                hallucination_silence_threshold=HALLUCINATION_SILENCE_THRESHOLD,
+                no_speech_threshold=NO_SPEECH_THRESHOLD,
                 initial_prompt=prompt,
                 condition_on_previous_text=condition_on_prev,
             )
