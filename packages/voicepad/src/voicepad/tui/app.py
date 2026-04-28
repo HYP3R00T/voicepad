@@ -14,7 +14,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.reactive import reactive
 from textual.theme import Theme
-from textual.widgets import Button, Footer, Label, MarkdownViewer, OptionList, Static
+from textual.widgets import Footer, Label, MarkdownViewer, OptionList, Static
 from textual.widgets.option_list import Option
 from voicepad_core import AudioRecorder, AudioRecorderError, get_config
 from voicepad_core.config import Config
@@ -22,7 +22,7 @@ from voicepad_core.config import Config
 from voicepad.tui.workers import ModelWarmResult, RecordingSession, TranscriptionJob
 
 # ---------------------------------------------------------------------------
-# Theme — registered on mount, uses Textual's semantic variable system
+# Theme
 # ---------------------------------------------------------------------------
 
 VOICEPAD_THEME = Theme(
@@ -63,12 +63,11 @@ Select a recording from the list on the left to view its full transcription here
 class SessionEntry:
     index: int
     wav_path: Path | None
-    md_path: Path | None  # path to the markdown file for this entry
+    md_path: Path | None
     duration_s: float
     text: str
     latency_ms: float
     device: str
-    # Full datetime string, e.g. "2026-04-28 09:44"
     timestamp: str = field(default_factory=lambda: time.strftime("%Y-%m-%d %H:%M"))
 
 
@@ -106,22 +105,17 @@ class VoicePadApp(App[None]):
     # ------------------------------------------------------------------
 
     def compose(self) -> ComposeResult:
+        # Header: title | status+timer (center, fixed) | model info
         with Static(id="header"):
             yield Label("voicepad", id="header-title")
+            yield Label("○  initialising", id="status")
             yield Label("loading…", id="header-model")
 
         with Static(id="body"):
-            yield Label("○  initialising", id="status")
-            with Static(id="controls"):
-                yield Button("○  start recording", id="record-btn", disabled=True)
-                yield Label("", id="timer")
-
-            # Live transcription output
             tx = Static(id="transcription")
             tx.border_title = "transcription"
             yield tx
 
-            # History: list on left, markdown viewer on right
             with Static(id="history-section"):
                 hist_list = Static(id="history-list-pane")
                 hist_list.border_title = "history"
@@ -134,16 +128,13 @@ class VoicePadApp(App[None]):
         yield Footer()
 
     def on_mount(self) -> None:
-        # Transcription panel
         tx = self.query_one("#transcription", Static)
         tx.mount(Label("speak and press space to begin…", id="tx-text", classes="placeholder"))
         tx.mount(Label("", id="tx-meta"))
 
-        # History list (OptionList — fires OptionSelected on single click)
         hist_list = self.query_one("#history-list-pane", Static)
         hist_list.mount(OptionList(id="history-options"))
 
-        # Markdown viewer (right pane)
         hist_view = self.query_one("#history-view-pane", Static)
         hist_view.mount(
             MarkdownViewer(
@@ -159,11 +150,10 @@ class VoicePadApp(App[None]):
         self._warm_model_worker()
 
     # ------------------------------------------------------------------
-    # History — pre-populate from existing markdown files on disk
+    # History — pre-populate from disk
     # ------------------------------------------------------------------
 
     def _load_history_from_disk(self) -> None:
-        """Load existing transcription markdown files into the history list."""
         md_dir = self.config.markdown_path
         if not md_dir.exists():
             return
@@ -186,7 +176,6 @@ class VoicePadApp(App[None]):
 
     def _on_model_ready(self, result: ModelWarmResult) -> None:
         self._warm_result = result
-        btn = self.query_one("#record-btn", Button)
         model_label = self.query_one("#header-model", Label)
 
         if result.error:
@@ -199,8 +188,6 @@ class VoicePadApp(App[None]):
             f"[bold]{result.device}[/] [dim]{result.compute_type}{fallback}[/]"
         )
         self._set_status("ready", "ready")
-        btn.label = "●  start recording"
-        btn.disabled = False
         self._model_ready = True
 
     # ------------------------------------------------------------------
@@ -215,10 +202,6 @@ class VoicePadApp(App[None]):
         else:
             self._start_recording()
 
-    @on(Button.Pressed, "#record-btn")
-    def on_record_btn(self) -> None:
-        self.action_toggle_recording()
-
     def _start_recording(self) -> None:
         self._session = RecordingSession(config=self.config)
         try:
@@ -229,9 +212,6 @@ class VoicePadApp(App[None]):
 
         self._recording = True
         self._record_start = time.monotonic()
-        btn = self.query_one("#record-btn", Button)
-        btn.label = "■  stop recording"
-        btn.add_class("recording")
         self._set_status("recording", "recording…")
         self._start_timer()
 
@@ -241,19 +221,12 @@ class VoicePadApp(App[None]):
 
         self._recording = False
         self._stop_timer()
-
-        btn = self.query_one("#record-btn", Button)
-        btn.label = "◌  transcribing…"
-        btn.remove_class("recording")
-        btn.add_class("transcribing")
-        btn.disabled = True
         self._set_status("transcribing", "transcribing…")
 
         try:
             audio = self._session.stop()
         except AudioRecorderError as e:
             self._set_status("error", f"stop error: {e}")
-            self._reset_button()
             return
 
         self._transcribing = True
@@ -279,7 +252,6 @@ class VoicePadApp(App[None]):
 
         if error:
             self._set_status("error", error)
-            self._reset_button()
             return
 
         wav_path: Path | None = None
@@ -319,12 +291,9 @@ class VoicePadApp(App[None]):
             self._entries.append(entry)
             self._add_history_entry(entry)
 
-        self._reset_button()
-
     def _add_history_entry(self, entry: SessionEntry) -> None:
         ol = self.query_one("#history-options", OptionList)
         name = entry.wav_path.stem if entry.wav_path else f"clip-{entry.index + 1}"
-        # Two-line option: timestamp + filename on line 1, stats on line 2
         label = (
             f"[bold]{entry.timestamp}[/]  [dim]{name}[/]\n"
             f"  [dim]{entry.duration_s:.1f}s · {entry.latency_ms:.0f}ms · {entry.device}[/]"
@@ -334,7 +303,6 @@ class VoicePadApp(App[None]):
 
     @on(OptionList.OptionSelected, "#history-options")
     def on_history_option_selected(self, event: OptionList.OptionSelected) -> None:
-        """Load the selected entry's markdown file into the viewer. Fires on click or Enter."""
         with contextlib.suppress(Exception):
             idx = int(event.option.id)  # type: ignore[arg-type]
             if 0 <= idx < len(self._entries):
@@ -344,12 +312,11 @@ class VoicePadApp(App[None]):
 
     @work(name="md-view")
     async def _load_markdown_viewer(self, md_path: Path) -> None:
-        """Load a markdown file into the viewer pane."""
         viewer = self.query_one("#history-viewer", MarkdownViewer)
         await viewer.go(md_path.resolve())
 
     # ------------------------------------------------------------------
-    # Timer
+    # Timer — updates #header-timer in the header bar
     # ------------------------------------------------------------------
 
     def _start_timer(self) -> None:
@@ -358,17 +325,31 @@ class VoicePadApp(App[None]):
 
     def _stop_timer(self) -> None:
         self._timer_thread = None
+        # Clear timer from status — just show the state dot + message
         with contextlib.suppress(Exception):
-            self.call_from_thread(self.query_one("#timer", Label).update, "")
+            self.call_from_thread(self._refresh_status_label)
 
     def _timer_loop(self) -> None:
         while self._recording:
             elapsed = time.monotonic() - self._record_start
             mins, secs = divmod(int(elapsed), 60)
-            display = f"⏱  {mins:02d}:{secs:02d}" if mins else f"⏱  {elapsed:.1f}s"
+            timer_str = f"{mins:02d}:{secs:02d}" if mins else f"{elapsed:.1f}s"
             with contextlib.suppress(Exception):
-                self.call_from_thread(self.query_one("#timer", Label).update, display)
+                self.call_from_thread(self._update_status_with_timer, timer_str)
             time.sleep(0.1)
+
+    def _update_status_with_timer(self, timer_str: str) -> None:
+        label = self.query_one("#status", Label)
+        label.update(f"◉  recording…  ⏱ {timer_str}")
+
+    def _refresh_status_label(self) -> None:
+        """Re-render status label without timer (called after recording stops)."""
+        label = self.query_one("#status", Label)
+        # The label text will be overwritten by the next _set_status call;
+        # this just clears the timer portion immediately.
+        current = label.renderable
+        if "⏱" in str(current):
+            label.update("◌  transcribing…")
 
     # ------------------------------------------------------------------
     # Helpers
@@ -382,12 +363,6 @@ class VoicePadApp(App[None]):
         if state:
             label.add_class(state)
         label.update(f"{dot}  {message}")
-
-    def _reset_button(self) -> None:
-        btn = self.query_one("#record-btn", Button)
-        btn.remove_class("recording", "transcribing")
-        btn.label = "●  start recording"
-        btn.disabled = not self._model_ready
 
 
 # ---------------------------------------------------------------------------
