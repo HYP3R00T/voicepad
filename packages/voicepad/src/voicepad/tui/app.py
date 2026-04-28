@@ -215,7 +215,9 @@ class VoicePadApp(App[None]):
         if not md_dir.exists():
             return
         for md_path in sorted(md_dir.glob("*.md")):
-            entry = _parse_markdown_entry(md_path, index=len(self._entries))
+            entry = _parse_markdown_entry(
+                md_path, index=len(self._entries), recordings_path=self.config.recordings_path
+            )
             if entry is not None:
                 self._entries.append(entry)
                 self._add_history_entry(entry)
@@ -225,25 +227,36 @@ class VoicePadApp(App[None]):
     # ------------------------------------------------------------------
 
     def _populate_settings(self) -> None:
-        """Build the settings form from Config fields + current values."""
+        """Build the settings form — only user-facing fields shown."""
         from voicepad_core.config import Config as _Config
+
+        # Fields shown in the TUI — technical knobs stay in voicepad.yaml only
+        user_fields = {
+            "recordings_path": "Where your WAV recordings are saved",
+            "markdown_path": "Where your transcription files are saved",
+            "transcription_model": (
+                "Whisper model to use. Options: tiny, base, small, medium, "
+                "large-v3, turbo (recommended), large-v3-turbo"
+            ),
+            "input_device_index": "Microphone device index. Leave blank for system default",
+        }
 
         container = self.query_one("#settings-fields", Static)
         _, meta = get_config_with_metadata()
 
-        for field_name, field_info in _Config.model_fields.items():
+        for field_name, hint in user_fields.items():
+            field_info = _Config.model_fields.get(field_name)
+            if field_info is None:
+                continue
             current_val = getattr(self.config, field_name)
             src = meta.get_source(field_name)
             source_label = src.source if src else "default"
 
-            description = field_info.description or ""
-            hint = description.split(".")[0] if description else ""
-
-            # Build children list — mount row first, then children into it
             key_label = Label(
                 f"[bold]{field_name}[/]  [dim]({source_label})[/]",
                 classes="settings-key",
             )
+            hint_label = Label(f"[dim]{hint}[/]", classes="settings-hint")
             inp = Input(
                 value=str(current_val) if current_val is not None else "",
                 placeholder=str(field_info.default) if field_info.default is not None else "",
@@ -251,46 +264,39 @@ class VoicePadApp(App[None]):
                 classes="settings-input",
             )
 
-            children = [key_label]
-            if hint:
-                children.append(Label(f"[dim]{hint}[/]", classes="settings-hint"))
-            children.append(inp)
-
             row = Static(classes="settings-row")
-            # Mount row into DOM first, then mount children into the attached row
             container.mount(row)
-            row.mount(*children)
+            row.mount(key_label, hint_label, inp)
 
     @on(Button.Pressed, "#settings-save-btn")
     def on_settings_save(self) -> None:
-        """Read all setting inputs and write to voicepad.yaml."""
+        """Read user-facing inputs, merge with existing config, write to voicepad.yaml."""
         from utilityhub_config import write_config
         from voicepad_core.config import Config as _Config
 
+        user_fields = ["recordings_path", "markdown_path", "transcription_model", "input_device_index"]
+
         status = self.query_one("#settings-status", Label)
         errors: list[str] = []
-        raw: dict[str, object] = {}
 
-        for field_name, field_info in _Config.model_fields.items():
+        # Start from current config values (preserves hidden fields)
+        raw = self.config.model_dump(mode="json")
+
+        for field_name in user_fields:
+            field_info = _Config.model_fields.get(field_name)
+            if field_info is None:
+                continue
             with contextlib.suppress(Exception):
                 inp = self.query_one(f"#setting-{field_name}", Input)
                 val_str = inp.value.strip()
-                # Coerce to the right type
                 annotation = field_info.annotation
                 if val_str == "" or val_str.lower() == "none":
                     raw[field_name] = None
-                elif annotation in (int, "int") or str(annotation) in ("<class 'int'>",):
+                elif annotation in (int, "int") or "int" in str(annotation):
                     try:
                         raw[field_name] = int(val_str)
                     except ValueError:
-                        errors.append(f"{field_name}: expected int")
-                elif annotation in (float, "float") or str(annotation) in ("<class 'float'>",):
-                    try:
-                        raw[field_name] = float(val_str)
-                    except ValueError:
-                        errors.append(f"{field_name}: expected float")
-                elif annotation in (bool, "bool") or str(annotation) in ("<class 'bool'>",):
-                    raw[field_name] = val_str.lower() in ("true", "1", "yes")
+                        errors.append(f"{field_name}: expected a number")
                 else:
                     raw[field_name] = val_str
 
@@ -299,23 +305,17 @@ class VoicePadApp(App[None]):
             return
 
         try:
-            # Validate through pydantic before writing
             new_config = _Config(**raw)
-            # Write to the project-level voicepad.yaml
             write_config(new_config, "voicepad", path=Path("voicepad.yaml"), format="yaml")
 
-            # Hot-reload: check what changed and apply immediately
             model_changed = (
                 new_config.transcription_model != self.config.transcription_model
                 or new_config.transcription_device != self.config.transcription_device
                 or new_config.transcription_compute_type != self.config.transcription_compute_type
             )
-
-            # Replace the live config (Config is frozen, so reassign the attribute)
             object.__setattr__(self, "config", new_config)
 
             if model_changed and not self._recording and not self._transcribing:
-                # Evict the old model from cache and re-warm with new settings
                 from voicepad_core.transcription import _batched_cache, _model_cache
 
                 _model_cache.clear()
@@ -326,7 +326,7 @@ class VoicePadApp(App[None]):
                 self._warm_model_worker()
                 status.update("[green]✓  saved — reloading model[/]")
             else:
-                status.update("[green]✓  saved — applied[/]")
+                status.update("[green]✓  saved[/]")
 
             self.set_timer(3.0, lambda: status.update(""))
         except Exception as e:
@@ -714,8 +714,12 @@ def _format_markdown(audio_path: Path, result) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _parse_markdown_entry(md_path: Path, index: int) -> SessionEntry | None:
-    """Parse a transcription markdown file back into a SessionEntry for history display."""
+def _parse_markdown_entry(md_path: Path, index: int, recordings_path: Path | None = None) -> SessionEntry | None:
+    """Parse a transcription markdown file back into a SessionEntry for history display.
+
+    recordings_path: where to look for the corresponding WAV file.
+    Falls back to a sibling 'recordings' directory if not provided.
+    """
     try:
         content = md_path.read_text(encoding="utf-8")
     except Exception:
@@ -755,10 +759,17 @@ def _parse_markdown_entry(md_path: Path, index: int) -> SessionEntry | None:
     if not text or text == "*(no speech detected)*":
         return None
 
+    # Resolve WAV path: check configured recordings_path first, then sibling directory
     wav_path: Path | None = None
     if wav_name:
-        candidate = md_path.parent.parent / "recordings" / wav_name
-        wav_path = candidate if candidate.exists() else None
+        candidates: list[Path] = []
+        if recordings_path is not None:
+            candidates.append(recordings_path / wav_name)
+        candidates.append(md_path.parent.parent / "recordings" / wav_name)
+        for candidate in candidates:
+            if candidate.exists():
+                wav_path = candidate
+                break
 
     timestamp = ""
     stem = md_path.stem
