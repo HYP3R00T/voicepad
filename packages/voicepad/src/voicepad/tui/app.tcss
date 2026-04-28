@@ -74,6 +74,27 @@ Screen {
     margin-top: 1;
 }
 
+#tx-copy-btn {
+    width: auto;
+    height: 1;
+    border: none;
+    background: transparent;
+    color: $text-muted;
+    text-style: none;
+    margin-top: 1;
+    padding: 0 1;
+    min-width: 10;
+}
+
+#tx-copy-btn:hover {
+    background: $boost;
+    color: $primary;
+}
+
+#tx-copy-btn:disabled {
+    color: $text-disabled;
+}
+
 /* ── history section — two panes side by side ── */
 #history-section {
     layout: horizontal;

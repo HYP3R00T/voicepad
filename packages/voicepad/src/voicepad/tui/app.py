@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import logging
 import threading
 import time
 from dataclasses import dataclass, field
@@ -14,12 +15,14 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.reactive import reactive
 from textual.theme import Theme
-from textual.widgets import Footer, Label, MarkdownViewer, OptionList, Static
+from textual.widgets import Button, Footer, Label, MarkdownViewer, OptionList, Static
 from textual.widgets.option_list import Option
 from voicepad_core import AudioRecorder, AudioRecorderError, get_config
 from voicepad_core.config import Config
 
 from voicepad.tui.workers import ModelWarmResult, RecordingSession, TranscriptionJob
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Theme
@@ -84,6 +87,7 @@ class VoicePadApp(App[None]):
 
     BINDINGS = [
         Binding("space", "toggle_recording", "Record / Stop", show=True),
+        Binding("c", "copy_transcription", "Copy", show=True),
         Binding("q", "quit", "Quit", show=True),
     ]
 
@@ -99,6 +103,7 @@ class VoicePadApp(App[None]):
         self._record_start: float = 0.0
         self._timer_thread: threading.Thread | None = None
         self._warm_result: ModelWarmResult | None = None
+        self._current_text: str = ""  # last transcribed text, used for copy
 
     # ------------------------------------------------------------------
     # Layout
@@ -131,6 +136,7 @@ class VoicePadApp(App[None]):
         tx = self.query_one("#transcription", Static)
         tx.mount(Label("speak and press space to begin…", id="tx-text", classes="placeholder"))
         tx.mount(Label("", id="tx-meta"))
+        tx.mount(Button("⎘  copy", id="tx-copy-btn", disabled=True))
 
         hist_list = self.query_one("#history-list-pane", Static)
         hist_list.mount(OptionList(id="history-options"))
@@ -279,6 +285,10 @@ class VoicePadApp(App[None]):
             self.query_one("#transcription", Static).scroll_end(animate=False)
             self._set_status("ready", "ready")
 
+            # Store text and enable copy
+            self._current_text = result.text or ""
+            self.query_one("#tx-copy-btn", Button).disabled = not bool(self._current_text)
+
             entry = SessionEntry(
                 index=len(self._entries),
                 wav_path=wav_path,
@@ -300,6 +310,25 @@ class VoicePadApp(App[None]):
         )
         ol.add_option(Option(label, id=str(entry.index)))
         ol.highlighted = ol.option_count - 1
+
+    # ------------------------------------------------------------------
+    # Copy transcription
+    # ------------------------------------------------------------------
+
+    def action_copy_transcription(self) -> None:
+        """Copy the current transcription text to the clipboard (bound to 'c')."""
+        if not self._current_text:
+            return
+        _copy_to_clipboard(self._current_text)
+        # Brief visual feedback: flash the button label
+        with contextlib.suppress(Exception):
+            btn = self.query_one("#tx-copy-btn", Button)
+            btn.label = "✓  copied"
+            self.set_timer(1.5, lambda: setattr(btn, "label", "⎘  copy"))
+
+    @on(Button.Pressed, "#tx-copy-btn")
+    def on_copy_btn_pressed(self) -> None:
+        self.action_copy_transcription()
 
     @on(OptionList.OptionSelected, "#history-options")
     def on_history_option_selected(self, event: OptionList.OptionSelected) -> None:
@@ -459,6 +488,21 @@ def _parse_markdown_entry(md_path: Path, index: int) -> SessionEntry | None:
         device=device,
         timestamp=timestamp,
     )
+
+
+# ---------------------------------------------------------------------------
+# Clipboard helper
+# ---------------------------------------------------------------------------
+
+
+def _copy_to_clipboard(text: str) -> None:
+    """Copy text to the system clipboard using pyperclip (cross-platform)."""
+    try:
+        import pyperclip
+
+        pyperclip.copy(text)
+    except Exception as e:
+        logger.warning(f"Clipboard copy failed: {e}")
 
 
 # ---------------------------------------------------------------------------

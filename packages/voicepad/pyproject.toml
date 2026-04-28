@@ -37,6 +37,7 @@ dependencies = [
   "typer>=0.23.1",
   "rich>=13.0.0",
   "textual>=8.2.4",
+  "pyperclip>=1.9.0",
 ]
 
 [project.urls]
