@@ -35,6 +35,9 @@ Screen {
 /* ── status ── */
 #status {
     height: 1;
+    width: 1fr;
+    text-align: center;
+    content-align: center middle;
     color: $text-muted;
     margin-bottom: 1;
 }
@@ -53,10 +56,13 @@ Screen {
     background: transparent;
     color: $text-success;
     text-style: bold;
+    content-align: center middle;
 }
 
 #controls {
+    layout: vertical;
     align: center middle;
+    width: 1fr;
     height: auto;
 }
 
@@ -82,7 +88,9 @@ Screen {
 
 /* ── timer ── */
 #timer {
+    width: 1fr;
     height: 1;
+    content-align: center middle;
     text-align: center;
     color: $text-error;
     text-style: bold;
@@ -94,13 +102,16 @@ Screen {
     border: round $border-blurred;
     border-title-color: $primary;
     padding: 1 2;
-    height: auto;
+    height: 10;
     min-height: 5;
     margin-bottom: 1;
     background: $surface;
+    overflow-y: auto;
 }
 
 #tx-text {
+    width: 1fr;
+    height: auto;
     color: $foreground;
 }
 
@@ -115,30 +126,41 @@ Screen {
     margin-top: 1;
 }
 
-/* ── history panel ── */
-#history {
+/* ── history section — two panes side by side ── */
+#history-section {
+    layout: horizontal;
+    height: 1fr;
+    margin-bottom: 0;
+}
+
+#history-list-pane {
     border: round $border-blurred;
     border-title-color: $text-muted;
+    width: 65;
+    height: 1fr;
+    background: $surface;
+    margin-right: 1;
+}
+
+#history-view-pane {
+    border: round $border-blurred;
+    border-title-color: $primary;
+    width: 1fr;
     height: 1fr;
     background: $surface;
 }
 
-#history-list {
+#history-options {
+    width: 1fr;
+    height: 1fr;
+    background: transparent;
+    border: none;
+    padding: 0;
+}
+
+#history-viewer {
+    width: 1fr;
+    height: 1fr;
     background: transparent;
     padding: 0 1;
-}
-
-#history-list > ListItem {
-    background: transparent;
-    padding: 0 0 1 0;
-}
-
-#history-list > ListItem:hover {
-    background: $boost;
-}
-
-#empty-hint {
-    color: $text-disabled;
-    text-style: italic;
-    padding: 1 2;
 }

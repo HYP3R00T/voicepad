@@ -51,6 +51,10 @@ BEAM_SIZE: int = 3
 # Set to "en" to skip language detection and save ~200ms per call.
 LANGUAGE: str | None = None
 
+# Initial prompt to prime Whisper toward punctuated, well-formatted output.
+# This is a soft hint — Whisper may still omit punctuation on very short clips.
+INITIAL_PROMPT: str = "Hello. This is a transcription with proper punctuation, capitalization, and grammar."
+
 # Minimum audio duration to attempt transcription.
 # Recordings shorter than this are almost certainly silence or noise.
 MIN_AUDIO_DURATION_S: float = 0.5
@@ -287,6 +291,8 @@ def transcribe_buffer(audio: np.ndarray, config: Config) -> TranscriptionResult:
             language=LANGUAGE,
             beam_size=BEAM_SIZE,
             vad_filter=False,
+            initial_prompt=INITIAL_PROMPT,
+            condition_on_previous_text=True,
         )
         segments = [Segment(start=s.start, end=s.end, text=s.text.strip()) for s in segments_iter]
 
@@ -303,6 +309,8 @@ def transcribe_buffer(audio: np.ndarray, config: Config) -> TranscriptionResult:
                 language=LANGUAGE,
                 beam_size=BEAM_SIZE,
                 vad_filter=False,
+                initial_prompt=INITIAL_PROMPT,
+                condition_on_previous_text=True,
             )
             segments = [Segment(start=s.start, end=s.end, text=s.text.strip()) for s in segments_iter]
         else:
