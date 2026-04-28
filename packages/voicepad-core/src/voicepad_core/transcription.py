@@ -41,20 +41,24 @@ logger = logging.getLogger(__name__)
 # Target device. "cuda" is tried first; falls back to "cpu" automatically
 # if CUDA is unavailable. CUDA DLLs come bundled with torch — no system
 # CUDA installation required.
+# Overridden at runtime by config.transcription_device.
 DEVICE: str = "cuda"
 
 # Compute precision for CTranslate2.
 # int8 gives the best speed/VRAM trade-off on an RTX 3050 (4 GB).
-# Switch to float16 if you want slightly higher accuracy at the cost of ~2x VRAM.
+# Overridden at runtime by config.transcription_compute_type.
 COMPUTE_TYPE: str = "int8"
 
-# Beam search width: 3 is a good balance of speed and accuracy.
-# Increase to 5 for better accuracy at the cost of ~30% more latency.
-BEAM_SIZE: int = 3
+# Beam search width.
+# 1 = greedy decoding — fastest, minimal quality loss for clear speech.
+# 3 = balanced (previous default).
+# 5 = most accurate, ~25% slower.
+BEAM_SIZE: int = 1
 
-# Language passed to Whisper. None = auto-detect per utterance.
-# Set to "en" to skip language detection and save ~200ms per call.
-LANGUAGE: str | None = None
+# Language passed to Whisper.
+# Fixed to "en" — skips language detection (~300ms saved per call).
+# Change to None to re-enable auto-detection for multilingual use.
+LANGUAGE: str = "en"
 
 # Batch size for BatchedInferencePipeline (GPU only).
 # 8 is optimal for RTX 3050 4GB with medium/int8. Reduce to 4 if you see OOM.
@@ -63,6 +67,18 @@ BATCH_SIZE: int = 8
 # Initial prompt to prime Whisper toward punctuated, well-formatted output.
 # This is a soft hint — Whisper may still omit punctuation on very short clips.
 INITIAL_PROMPT: str = "Hello. This is a transcription with proper punctuation, capitalization, and grammar."
+
+# Models that use the true distil-whisper architecture (reduced decoder layers).
+# These work best with condition_on_previous_text=False per the faster-whisper docs.
+# Note: turbo and large-v3-turbo are full large-v3 fine-tunes — NOT distil-whisper.
+# They support initial_prompt and condition_on_previous_text normally.
+_DISTIL_MODELS: frozenset[str] = frozenset({
+    "distil-small.en",
+    "distil-medium.en",
+    "distil-large-v2",
+    "distil-large-v3",
+    "distil-large-v3.5",
+})
 
 # Minimum audio duration to attempt transcription.
 # Recordings shorter than this are almost certainly silence or noise.
@@ -229,9 +245,8 @@ def ensure_model_downloaded(model_name: str) -> None:
 def get_or_load_model(config: Config) -> tuple[WhisperModel, str, str, bool]:
     """Return a cached WhisperModel, loading it if necessary.
 
-    Attempts CUDA first. Falls back to CPU on any CUDA-related error.
-    CUDA DLLs are provided by the bundled torch package — no system
-    CUDA installation required.
+    Respects config.transcription_device and config.transcription_compute_type.
+    Falls back to CPU on any CUDA-related error.
 
     Returns:
         (model, actual_device, actual_compute_type, fallback_occurred)
@@ -240,8 +255,15 @@ def get_or_load_model(config: Config) -> tuple[WhisperModel, str, str, bool]:
         TranscriptionError: If the model cannot be loaded on any device.
     """
     model_name = config.transcription_model
-    device = DEVICE
-    compute = COMPUTE_TYPE
+
+    # Resolve device from config
+    cfg_device = getattr(config, "transcription_device", "auto")
+    device = "cuda" if cfg_device == "auto" else cfg_device
+
+    # Resolve compute type from config
+    cfg_compute = getattr(config, "transcription_compute_type", "auto")
+    compute = "int8" if cfg_compute == "auto" else cfg_compute
+
     fallback = False
 
     cache_key = (model_name, device, compute)
@@ -305,6 +327,11 @@ def transcribe_buffer(audio: np.ndarray, config: Config) -> TranscriptionResult:
 
     model, device, compute, fallback = get_or_load_model(config)
 
+    # distil-whisper models (turbo, distil-*) work best without conditioning on previous text
+    is_distil = config.transcription_model in _DISTIL_MODELS
+    condition_on_prev = not is_distil
+    prompt = None if is_distil else INITIAL_PROMPT
+
     try:
         if device == "cuda":
             # BatchedInferencePipeline processes chunks in parallel — ~2x faster on GPU.
@@ -315,8 +342,8 @@ def transcribe_buffer(audio: np.ndarray, config: Config) -> TranscriptionResult:
                 language=LANGUAGE,
                 beam_size=BEAM_SIZE,
                 batch_size=BATCH_SIZE,
-                initial_prompt=INITIAL_PROMPT,
-                condition_on_previous_text=True,
+                initial_prompt=prompt,
+                condition_on_previous_text=condition_on_prev,
             )
         else:
             segments_iter, info = model.transcribe(
@@ -324,8 +351,8 @@ def transcribe_buffer(audio: np.ndarray, config: Config) -> TranscriptionResult:
                 language=LANGUAGE,
                 beam_size=BEAM_SIZE,
                 vad_filter=False,
-                initial_prompt=INITIAL_PROMPT,
-                condition_on_previous_text=True,
+                initial_prompt=prompt,
+                condition_on_previous_text=condition_on_prev,
             )
         segments = [Segment(start=s.start, end=s.end, text=s.text.strip()) for s in segments_iter]
 
@@ -343,8 +370,8 @@ def transcribe_buffer(audio: np.ndarray, config: Config) -> TranscriptionResult:
                 language=LANGUAGE,
                 beam_size=BEAM_SIZE,
                 vad_filter=False,
-                initial_prompt=INITIAL_PROMPT,
-                condition_on_previous_text=True,
+                initial_prompt=prompt,
+                condition_on_previous_text=condition_on_prev,
             )
             segments = [Segment(start=s.start, end=s.end, text=s.text.strip()) for s in segments_iter]
         else:

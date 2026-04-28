@@ -14,6 +14,7 @@ import soundfile as sf
 from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
+from textual.containers import VerticalScroll
 from textual.reactive import reactive
 from textual.theme import Theme
 from textual.widgets import (
@@ -30,6 +31,7 @@ from textual.widgets import (
 from textual.widgets.option_list import Option
 from voicepad_core import AudioRecorder, AudioRecorderError, get_config
 from voicepad_core.config import Config
+from voicepad_core.config.settings import get_config_with_metadata
 
 from voicepad.tui.workers import ModelWarmResult, RecordingSession, TranscriptionJob
 
@@ -177,6 +179,14 @@ class VoicePadApp(App[None]):
                     show_table_of_contents=False,
                 )
 
+            # ── Tab 4: Settings ────────────────────────────────────
+            with TabPane("  settings  ", id="tab-settings"):
+                with VerticalScroll(id="settings-scroll"):
+                    yield Static(id="settings-fields")
+                with Static(id="settings-footer"):
+                    yield Label("", id="settings-status")
+                    yield Button("💾  save", id="settings-save-btn")
+
         yield Footer()
 
     def on_mount(self) -> None:
@@ -193,6 +203,7 @@ class VoicePadApp(App[None]):
         self.register_theme(VOICEPAD_THEME)
         self.theme = "voicepad"
         self._load_history_from_disk()
+        self._populate_settings()
         self._warm_model_worker()
 
     # ------------------------------------------------------------------
@@ -208,6 +219,118 @@ class VoicePadApp(App[None]):
             if entry is not None:
                 self._entries.append(entry)
                 self._add_history_entry(entry)
+
+    # ------------------------------------------------------------------
+    # Settings tab
+    # ------------------------------------------------------------------
+
+    def _populate_settings(self) -> None:
+        """Build the settings form from Config fields + current values."""
+        from voicepad_core.config import Config as _Config
+
+        container = self.query_one("#settings-fields", Static)
+        _, meta = get_config_with_metadata()
+
+        for field_name, field_info in _Config.model_fields.items():
+            current_val = getattr(self.config, field_name)
+            src = meta.get_source(field_name)
+            source_label = src.source if src else "default"
+
+            description = field_info.description or ""
+            hint = description.split(".")[0] if description else ""
+
+            # Build children list — mount row first, then children into it
+            key_label = Label(
+                f"[bold]{field_name}[/]  [dim]({source_label})[/]",
+                classes="settings-key",
+            )
+            inp = Input(
+                value=str(current_val) if current_val is not None else "",
+                placeholder=str(field_info.default) if field_info.default is not None else "",
+                id=f"setting-{field_name}",
+                classes="settings-input",
+            )
+
+            children = [key_label]
+            if hint:
+                children.append(Label(f"[dim]{hint}[/]", classes="settings-hint"))
+            children.append(inp)
+
+            row = Static(classes="settings-row")
+            # Mount row into DOM first, then mount children into the attached row
+            container.mount(row)
+            row.mount(*children)
+
+    @on(Button.Pressed, "#settings-save-btn")
+    def on_settings_save(self) -> None:
+        """Read all setting inputs and write to voicepad.yaml."""
+        from utilityhub_config import write_config
+        from voicepad_core.config import Config as _Config
+
+        status = self.query_one("#settings-status", Label)
+        errors: list[str] = []
+        raw: dict[str, object] = {}
+
+        for field_name, field_info in _Config.model_fields.items():
+            with contextlib.suppress(Exception):
+                inp = self.query_one(f"#setting-{field_name}", Input)
+                val_str = inp.value.strip()
+                # Coerce to the right type
+                annotation = field_info.annotation
+                if val_str == "" or val_str.lower() == "none":
+                    raw[field_name] = None
+                elif annotation in (int, "int") or str(annotation) in ("<class 'int'>",):
+                    try:
+                        raw[field_name] = int(val_str)
+                    except ValueError:
+                        errors.append(f"{field_name}: expected int")
+                elif annotation in (float, "float") or str(annotation) in ("<class 'float'>",):
+                    try:
+                        raw[field_name] = float(val_str)
+                    except ValueError:
+                        errors.append(f"{field_name}: expected float")
+                elif annotation in (bool, "bool") or str(annotation) in ("<class 'bool'>",):
+                    raw[field_name] = val_str.lower() in ("true", "1", "yes")
+                else:
+                    raw[field_name] = val_str
+
+        if errors:
+            status.update(f"[red]✕  {'; '.join(errors)}[/]")
+            return
+
+        try:
+            # Validate through pydantic before writing
+            new_config = _Config(**raw)
+            # Write to the project-level voicepad.yaml
+            write_config(new_config, "voicepad", path=Path("voicepad.yaml"), format="yaml")
+
+            # Hot-reload: check what changed and apply immediately
+            model_changed = (
+                new_config.transcription_model != self.config.transcription_model
+                or new_config.transcription_device != self.config.transcription_device
+                or new_config.transcription_compute_type != self.config.transcription_compute_type
+            )
+
+            # Replace the live config (Config is frozen, so reassign the attribute)
+            object.__setattr__(self, "config", new_config)
+
+            if model_changed and not self._recording and not self._transcribing:
+                # Evict the old model from cache and re-warm with new settings
+                from voicepad_core.transcription import _batched_cache, _model_cache
+
+                _model_cache.clear()
+                _batched_cache.clear()
+                self._model_ready = False
+                self._set_status("transcribing", "loading model…")
+                self.query_one("#header-model", Label).update("loading…")
+                self._warm_model_worker()
+                status.update("[green]✓  saved — reloading model[/]")
+            else:
+                status.update("[green]✓  saved — applied[/]")
+
+            self.set_timer(3.0, lambda: status.update(""))
+        except Exception as e:
+            status.update(f"[red]✕  {e}[/]")
 
     # ------------------------------------------------------------------
     # Model warm-up

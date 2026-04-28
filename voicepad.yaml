@@ -1,78 +1,12 @@
-# VoicePad Configuration File
-# This file contains all available configuration options with their default values.
-# Uncomment and modify any setting to customize VoicePad behavior.
-
-# ==============================================================================
-# File Paths
-# ==============================================================================
-
-# Directory where audio recordings are saved
-recordings_path: data/recordings
-
-# Directory where transcription markdown files are saved
-markdown_path: data/markdown
-
-# ==============================================================================
-# Audio Input
-# ==============================================================================
-
-# Audio input device index (use 'voicepad config input list' to see available devices)
-# Set to null to use system default microphone
 input_device_index: 1
-
-# Prefix for recording filenames (timestamp will be appended)
+markdown_path: D:\voicepad\data\markdown
 recording_prefix: recording
-
-# ==============================================================================
-# Transcription Settings
-# ==============================================================================
-
-# Whisper model to use for transcription
-# Options: tiny, base, small, medium, large-v2, large-v3
-# Larger models = better accuracy but slower processing
-# Use 'voicepad config models' to see all available models
-transcription_model: medium
-
-# Device for transcription processing
-# Options: auto (recommended), cuda (GPU), cpu
-# 'auto' will use GPU if available, otherwise falls back to CPU
-transcription_device: auto
-
-# Compute precision for transcription
-# Options: auto (recommended), float16, int8, float32
-# Lower precision = faster but potentially less accurate
+recordings_path: data\recordings
 transcription_compute_type: auto
-
-# ==============================================================================
-# VAD (Voice Activity Detection) Chunking
-# ==============================================================================
-
-# Enable VAD-based chunking for long recordings
-# When enabled, audio is split into chunks at natural speech boundaries
-# This allows background processing while recording continues
+transcription_device: auto
+transcription_model: turbo
 vad_enabled: true
-
-# Minimum duration (seconds) before allowing chunk splits
-# Range: 10.0 - 600.0 seconds
-# Higher values = fewer, longer chunks with more context
-# Lower values = more, shorter chunks processed faster
 vad_min_chunk_duration: 10.0
-
-# VAD speech detection sensitivity threshold
-# Range: 0.0 - 1.0 (probability that audio is speech)
-# Higher values = more strict (less likely to detect as speech)
-# Lower values = more lenient (more likely to detect as speech)
-# Recommended: 0.4 - 0.6
-vad_threshold: 0.5
-
-# Minimum silence duration (milliseconds) required to trigger chunk boundary
-# Range: 100 - 5000 ms
-# Higher values = longer pauses needed for chunk split
-# Lower values = chunks split at shorter pauses
 vad_min_silence_duration_ms: 1000
-
-# Padding (milliseconds) added to each side of detected speech segments
-# Range: 0 - 2000 ms
-# Prevents cutting off speech edges
-# Recommended: 300 - 500 ms
 vad_speech_pad_ms: 400
+vad_threshold: 0.5

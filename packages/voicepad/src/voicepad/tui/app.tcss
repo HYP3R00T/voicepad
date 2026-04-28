@@ -213,3 +213,71 @@ TabPane {
 #tf-viewer > Markdown {
     padding: 0 0 0 2;
 }
+
+/* ── settings tab ── */
+#settings-scroll {
+    height: 1fr;
+    width: 1fr;
+}
+
+#settings-fields {
+    layout: vertical;
+    height: auto;
+    width: 1fr;
+    padding: 0 1;
+}
+
+.settings-row {
+    layout: vertical;
+    height: auto;
+    width: 1fr;
+    margin-bottom: 1;
+    border-bottom: solid $border-blurred;
+    padding-bottom: 1;
+}
+
+.settings-key {
+    height: 1;
+    color: $primary;
+    margin-bottom: 0;
+}
+
+.settings-hint {
+    height: 1;
+    color: $text-muted;
+    margin-bottom: 0;
+}
+
+.settings-input {
+    width: 1fr;
+    margin-top: 0;
+}
+
+#settings-footer {
+    layout: horizontal;
+    height: 3;
+    align: right middle;
+    padding: 0 2;
+    border-top: solid $border-blurred;
+}
+
+#settings-status {
+    width: 1fr;
+    content-align: left middle;
+    color: $text-muted;
+}
+
+#settings-save-btn {
+    width: auto;
+    height: 1;
+    border: none;
+    background: transparent;
+    color: $text-success;
+    text-style: bold;
+    padding: 0 1;
+}
+
+#settings-save-btn:hover {
+    background: $boost;
+    color: $success;
+}
