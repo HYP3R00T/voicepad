@@ -64,9 +64,52 @@ class TestConfigExpandPaths:
         assert config.recording_prefix == "recording"
 
     def test_default_transcription_model(self) -> None:
-        """When transcription_model is not provided, it defaults to 'small'."""
+        """When transcription_model is not provided, it defaults to 'turbo'."""
         config = Config(recordings_path="data/recordings", markdown_path="data/markdown")
-        assert config.transcription_model == "small"
+        assert config.transcription_model == "turbo"
+
+    def test_default_transcription_device(self) -> None:
+        """transcription_device defaults to 'auto'."""
+        config = Config(recordings_path="data/recordings", markdown_path="data/markdown")
+        assert config.transcription_device == "auto"
+
+    def test_default_transcription_compute_type(self) -> None:
+        """transcription_compute_type defaults to 'auto'."""
+        config = Config(recordings_path="data/recordings", markdown_path="data/markdown")
+        assert config.transcription_compute_type == "auto"
+
+    def test_default_vad_enabled(self) -> None:
+        """vad_enabled defaults to True."""
+        config = Config(recordings_path="data/recordings", markdown_path="data/markdown")
+        assert config.vad_enabled is True
+
+    def test_default_vad_threshold(self) -> None:
+        """vad_threshold defaults to 0.5."""
+        config = Config(recordings_path="data/recordings", markdown_path="data/markdown")
+        assert config.vad_threshold == 0.5
+
+    def test_vad_threshold_rejects_out_of_range(self) -> None:
+        """vad_threshold must be between 0.0 and 1.0."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            Config(recordings_path="data/recordings", markdown_path="data/markdown", vad_threshold=1.5)
+
+    def test_transcription_device_rejects_invalid(self) -> None:
+        """transcription_device only accepts 'auto', 'cuda', 'cpu'."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            Config(recordings_path="data/recordings", markdown_path="data/markdown", transcription_device="gpu")  # type: ignore[arg-type]
+
+    def test_transcription_compute_type_rejects_invalid(self) -> None:
+        """transcription_compute_type only accepts known values."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            Config(
+                recordings_path="data/recordings", markdown_path="data/markdown", transcription_compute_type="bfloat16"
+            )  # type: ignore[arg-type]
 
     def test_custom_input_device_index(self) -> None:
         """When input_device_index is provided, it is stored."""

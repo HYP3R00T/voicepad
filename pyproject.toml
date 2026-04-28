@@ -26,5 +26,5 @@ dev = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 markers = [
-  "gpu: marks tests that exercise GPU-specific code paths (deselect with -m 'not gpu')",
+  "gpu: marks tests that require a CUDA GPU. Skipped by default — pass --run-gpu to include.",
 ]

@@ -9,7 +9,6 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 from voicepad_core.config import Config
-from voicepad_core.streaming import StreamingTranscriber
 from voicepad_core.transcription import (
     COMPUTE_TYPE,
     DEVICE,
@@ -19,536 +18,459 @@ from voicepad_core.transcription import (
     _is_cuda_error,
     _load_cpu_fallback,
     _model_cache,
+    _trim_trailing_silence,
     get_or_load_model,
     model_downloaded,
     transcribe_buffer,
     transcribe_file,
 )
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _speech_audio(seconds: float = 1.0) -> np.ndarray:
+    """Return non-silent float32 audio at 16 kHz (sine wave)."""
+    t = np.linspace(0, seconds, int(16000 * seconds), endpoint=False)
+    return (0.1 * np.sin(2 * np.pi * 440 * t)).astype(np.float32)
+
+
+# ---------------------------------------------------------------------------
+# _is_cuda_error
+# ---------------------------------------------------------------------------
+
 
 class TestIsCudaError:
-    def test_is_cuda_error_returns_true_for_cuda_keyword(self) -> None:
-        """When exception contains 'cuda', _is_cuda_error returns True."""
-        e = RuntimeError("CUDA out of memory")
-        assert _is_cuda_error(e) is True
+    def test_returns_true_for_cuda_keyword(self) -> None:
+        assert _is_cuda_error(RuntimeError("CUDA out of memory")) is True
 
-    def test_is_cuda_error_returns_true_for_cublas_keyword(self) -> None:
-        """When exception contains 'cublas', _is_cuda_error returns True."""
-        e = RuntimeError("cublas error")
-        assert _is_cuda_error(e) is True
+    def test_returns_true_for_cublas_keyword(self) -> None:
+        assert _is_cuda_error(RuntimeError("cublas error")) is True
 
-    def test_is_cuda_error_returns_true_for_cudnn_keyword(self) -> None:
-        """When exception contains 'cudnn', _is_cuda_error returns True."""
-        e = RuntimeError("cudnn error")
-        assert _is_cuda_error(e) is True
+    def test_returns_true_for_cudnn_keyword(self) -> None:
+        assert _is_cuda_error(RuntimeError("cudnn error")) is True
 
-    def test_is_cuda_error_returns_false_for_non_cuda_error(self) -> None:
-        """When exception does not contain CUDA keywords, _is_cuda_error returns False."""
-        e = RuntimeError("General runtime error")
-        assert _is_cuda_error(e) is False
+    def test_returns_false_for_non_cuda_error(self) -> None:
+        assert _is_cuda_error(RuntimeError("General runtime error")) is False
 
-    def test_is_cuda_error_is_case_insensitive(self) -> None:
-        """_is_cuda_error checks keywords in lowercase."""
-        e = RuntimeError("CUDA Out Of Memory")
-        assert _is_cuda_error(e) is True
+    def test_is_case_insensitive(self) -> None:
+        assert _is_cuda_error(RuntimeError("CUDA Out Of Memory")) is True
 
-    def test_is_cuda_error_returns_true_for_nvrtc_keyword(self) -> None:
-        """When exception contains 'nvrtc', _is_cuda_error returns True."""
-        e = RuntimeError("nvrtc compilation failed")
-        assert _is_cuda_error(e) is True
+    def test_returns_true_for_nvrtc_keyword(self) -> None:
+        assert _is_cuda_error(RuntimeError("nvrtc compilation failed")) is True
 
-    def test_is_cuda_error_returns_true_for_cufft_keyword(self) -> None:
-        """When exception contains 'cufft', _is_cuda_error returns True."""
-        e = RuntimeError("cufft error")
-        assert _is_cuda_error(e) is True
+    def test_returns_true_for_cufft_keyword(self) -> None:
+        assert _is_cuda_error(RuntimeError("cufft error")) is True
 
-    def test_is_cuda_error_returns_true_for_curand_keyword(self) -> None:
-        """When exception contains 'curand', _is_cuda_error returns True."""
-        e = RuntimeError("curand error")
-        assert _is_cuda_error(e) is True
+    def test_returns_true_for_curand_keyword(self) -> None:
+        assert _is_cuda_error(RuntimeError("curand error")) is True
+
+
+# ---------------------------------------------------------------------------
+# _trim_trailing_silence
+# ---------------------------------------------------------------------------
+
+
+class TestTrimTrailingSilence:
+    def test_removes_silent_tail(self) -> None:
+        """Silent zeros at the end are trimmed."""
+        speech = _speech_audio(1.0)
+        silence = np.zeros(int(16000 * 2.0), dtype=np.float32)  # 2s of true silence
+        audio = np.concatenate([speech, silence])
+        trimmed = _trim_trailing_silence(audio)
+        assert len(trimmed) < len(audio)
+
+    def test_does_not_trim_speech(self) -> None:
+        """Audio that ends with speech is not trimmed."""
+        audio = _speech_audio(1.0)
+        trimmed = _trim_trailing_silence(audio)
+        # Should keep essentially all of it (within one window)
+        assert len(trimmed) >= len(audio) - int(0.3 * 16000)
+
+    def test_handles_very_short_audio(self) -> None:
+        """Audio shorter than one window is returned unchanged."""
+        audio = np.zeros(100, dtype=np.float32)
+        trimmed = _trim_trailing_silence(audio)
+        assert len(trimmed) == len(audio)
+
+    def test_all_silence_returns_minimal_audio(self) -> None:
+        """Fully silent audio is trimmed down to near-zero length."""
+        audio = np.zeros(32000, dtype=np.float32)
+        trimmed = _trim_trailing_silence(audio)
+        assert len(trimmed) < len(audio)
+
+    def test_preserves_dtype(self) -> None:
+        """Output dtype matches input dtype."""
+        audio = _speech_audio(1.0)
+        trimmed = _trim_trailing_silence(audio)
+        assert trimmed.dtype == np.float32
+
+
+# ---------------------------------------------------------------------------
+# model_downloaded
+# ---------------------------------------------------------------------------
 
 
 class TestModelDownloaded:
-    def test_model_downloaded_returns_false_if_cache_dir_missing(self) -> None:
-        """When the cache directory doesn't exist, model_downloaded returns False."""
-        result = model_downloaded("nonexistent-model-xyz")
-        assert result is False
+    def test_returns_false_if_cache_dir_missing(self) -> None:
+        assert model_downloaded("nonexistent-model-xyz") is False
 
-    def test_model_downloaded_returns_false_if_snapshots_dir_missing(self, tmp_path: Path) -> None:
-        """When the snapshots directory doesn't exist, model_downloaded returns False."""
+    def test_returns_false_if_snapshots_dir_missing(self, tmp_path: Path) -> None:
+        with patch.dict(os.environ, {"HF_HOME": str(tmp_path)}):
+            assert model_downloaded("tiny") is False
 
-        env = {"HF_HOME": str(tmp_path)}
-        with patch.dict(os.environ, env):
-            result = model_downloaded("tiny")
-            assert result is False
-
-    def test_model_downloaded_returns_false_if_model_bin_missing(self, tmp_path: Path) -> None:
-        """When snapshots exist but model.bin is absent, model_downloaded returns False."""
-
+    def test_returns_false_if_model_bin_missing(self, tmp_path: Path) -> None:
         repo_dir = tmp_path / "models--Systran--faster-whisper-tiny" / "snapshots" / "abc123"
         repo_dir.mkdir(parents=True)
-        # No model.bin written
+        with patch.dict(os.environ, {"HF_HOME": str(tmp_path)}):
+            assert model_downloaded("tiny") is False
 
-        env = {"HF_HOME": str(tmp_path)}
-        with patch.dict(os.environ, env):
-            result = model_downloaded("tiny")
-            assert result is False
-
-    def test_model_downloaded_returns_true_if_model_bin_present(self, tmp_path: Path) -> None:
-        """When model.bin exists in a snapshot, model_downloaded returns True."""
-
+    def test_returns_true_if_model_bin_present(self, tmp_path: Path) -> None:
         repo_dir = tmp_path / "models--Systran--faster-whisper-tiny" / "snapshots" / "abc123"
         repo_dir.mkdir(parents=True)
         (repo_dir / "model.bin").write_bytes(b"fake")
+        with patch.dict(os.environ, {"HF_HOME": str(tmp_path)}):
+            assert model_downloaded("tiny") is True
 
-        env = {"HF_HOME": str(tmp_path)}
-        with patch.dict(os.environ, env):
-            result = model_downloaded("tiny")
-            assert result is True
+
+# ---------------------------------------------------------------------------
+# ensure_model_downloaded
+# ---------------------------------------------------------------------------
 
 
 class TestEnsureModelDownloaded:
-    def test_ensure_model_downloaded_skips_if_already_downloaded(self, tmp_path: Path) -> None:
-        """When model is already downloaded, ensure_model_downloaded does nothing."""
-
+    def test_skips_if_already_downloaded(self, tmp_path: Path) -> None:
         repo_dir = tmp_path / "models--Systran--faster-whisper-tiny" / "snapshots" / "abc123"
         repo_dir.mkdir(parents=True)
         (repo_dir / "model.bin").write_bytes(b"fake")
-
-        env = {"HF_HOME": str(tmp_path)}
-        with patch.dict(os.environ, env), patch("voicepad_core.transcription.snapshot_download") as mock_dl:
+        with (
+            patch.dict(os.environ, {"HF_HOME": str(tmp_path)}),
+            patch("voicepad_core.transcription.snapshot_download") as mock_dl,
+        ):
             from voicepad_core.transcription import ensure_model_downloaded
 
             ensure_model_downloaded("tiny")
             mock_dl.assert_not_called()
 
-    def test_ensure_model_downloaded_calls_snapshot_download_if_missing(self, tmp_path: Path) -> None:
-        """When model is not downloaded, snapshot_download is called."""
-
-        env = {"HF_HOME": str(tmp_path)}
-        with patch.dict(os.environ, env), patch("voicepad_core.transcription.snapshot_download") as mock_dl:
+    def test_calls_snapshot_download_if_missing(self, tmp_path: Path) -> None:
+        with (
+            patch.dict(os.environ, {"HF_HOME": str(tmp_path)}),
+            patch("voicepad_core.transcription.snapshot_download") as mock_dl,
+        ):
             from voicepad_core.transcription import ensure_model_downloaded
 
             ensure_model_downloaded("tiny")
             mock_dl.assert_called_once()
 
-    def test_ensure_model_downloaded_raises_on_http_error(self, tmp_path: Path) -> None:
-        """When snapshot_download raises HfHubHTTPError, TranscriptionError is raised."""
-
+    def test_raises_on_http_error(self, tmp_path: Path) -> None:
         from huggingface_hub.utils import HfHubHTTPError
 
-        env = {"HF_HOME": str(tmp_path)}
-        with patch.dict(os.environ, env), patch("voicepad_core.transcription.snapshot_download") as mock_dl:
-            mock_response = MagicMock()
-            mock_response.status_code = 404
-            mock_dl.side_effect = HfHubHTTPError("404", response=mock_response)
+        mock_response = MagicMock()
+        mock_response.status_code = 404
+        with (
+            patch.dict(os.environ, {"HF_HOME": str(tmp_path)}),
+            patch(
+                "voicepad_core.transcription.snapshot_download",
+                side_effect=HfHubHTTPError("404", response=mock_response),
+            ),
+        ):
             from voicepad_core.transcription import ensure_model_downloaded
 
             with pytest.raises(TranscriptionError):
                 ensure_model_downloaded("tiny")
 
-    def test_ensure_model_downloaded_raises_on_generic_error(self, tmp_path: Path) -> None:
-        """When snapshot_download raises any other error, TranscriptionError is raised."""
-
-        env = {"HF_HOME": str(tmp_path)}
-        with patch.dict(os.environ, env), patch("voicepad_core.transcription.snapshot_download") as mock_dl:
-            mock_dl.side_effect = OSError("disk full")
+    def test_raises_on_generic_error(self, tmp_path: Path) -> None:
+        with (
+            patch.dict(os.environ, {"HF_HOME": str(tmp_path)}),
+            patch("voicepad_core.transcription.snapshot_download", side_effect=OSError("disk full")),
+        ):
             from voicepad_core.transcription import ensure_model_downloaded
 
             with pytest.raises(TranscriptionError):
                 ensure_model_downloaded("tiny")
+
+
+# ---------------------------------------------------------------------------
+# _load_cpu_fallback
+# ---------------------------------------------------------------------------
 
 
 class TestLoadCpuFallback:
-    def test_load_cpu_fallback_with_empty_cache(self) -> None:
-        """When _load_cpu_fallback is called with an empty cache, a model is loaded."""
+    def test_loads_model_with_empty_cache(self) -> None:
         _model_cache.clear()
         with patch("voicepad_core.transcription.WhisperModel"):
             model, device, compute = _load_cpu_fallback("tiny")
-            assert device == "cpu"
-            assert compute == "int8"
-
-    def test_load_cpu_fallback_uses_cache_on_hit(self) -> None:
-        """When the model is already cached, it returns the cached model."""
-        mock_model = MagicMock()
-        cache_key = ("tiny", "cpu", "int8")
-        _model_cache[cache_key] = mock_model
-
-        model, device, compute = _load_cpu_fallback("tiny")
-
-        assert model is mock_model
         assert device == "cpu"
         assert compute == "int8"
 
+    def test_returns_cached_model_on_hit(self) -> None:
+        mock_model = MagicMock()
+        _model_cache[("tiny", "cpu", "int8")] = mock_model
+        model, device, compute = _load_cpu_fallback("tiny")
+        assert model is mock_model
+        assert device == "cpu"
+
     def teardown_method(self) -> None:
-        """Clear the model cache after each test."""
         _model_cache.clear()
+
+
+# ---------------------------------------------------------------------------
+# get_or_load_model  (GPU-marked — mocked, no real GPU needed)
+# ---------------------------------------------------------------------------
 
 
 @pytest.mark.gpu
 class TestGetOrLoadModel:
-    def test_get_or_load_model_returns_from_cache(self, tmp_path: Path) -> None:
-        """When model is in cache, it is returned without reloading."""
+    def test_returns_from_cache(self, tmp_path: Path) -> None:
         _model_cache.clear()
         config = Config(recordings_path=tmp_path, markdown_path=tmp_path, transcription_model="tiny")
         mock_model = MagicMock()
-        cache_key = ("tiny", DEVICE, COMPUTE_TYPE)
-        _model_cache[cache_key] = mock_model
-
+        _model_cache[("tiny", DEVICE, COMPUTE_TYPE)] = mock_model
         model, device, compute, fallback = get_or_load_model(config)
-
         assert model is mock_model
         assert fallback is False
 
-    def test_get_or_load_model_fallback_on_cuda_error(self, tmp_path: Path) -> None:
-        """When CUDA load fails, the model falls back to CPU."""
+    def test_fallback_on_cuda_error(self, tmp_path: Path) -> None:
         _model_cache.clear()
-        config = Config(
-            recordings_path=tmp_path,
-            markdown_path=tmp_path,
-            transcription_model="tiny",
-        )
+        config = Config(recordings_path=tmp_path, markdown_path=tmp_path, transcription_model="tiny")
+        with (
+            patch("voicepad_core.transcription.WhisperModel", side_effect=RuntimeError("CUDA out of memory")),
+            patch("voicepad_core.transcription._load_cpu_fallback", return_value=(MagicMock(), "cpu", "int8")),
+        ):
+            model, device, compute, fallback = get_or_load_model(config)
+        assert device == "cpu"
+        assert fallback is True
 
-        with patch("voicepad_core.transcription.WhisperModel") as mock_whisper:
-            mock_whisper.side_effect = RuntimeError("CUDA out of memory")
-            with patch("voicepad_core.transcription._load_cpu_fallback") as mock_fallback:
-                mock_cpu = MagicMock()
-                mock_fallback.return_value = (mock_cpu, "cpu", "int8")
-
-                model, device, compute, fallback = get_or_load_model(config)
-
-                assert device == "cpu"
-                assert fallback is True
-
-    def test_get_or_load_model_raises_on_non_cuda_error(self, tmp_path: Path) -> None:
-        """When a non-CUDA RuntimeError occurs, TranscriptionError is raised."""
+    def test_raises_on_non_cuda_error(self, tmp_path: Path) -> None:
         _model_cache.clear()
         config = Config(recordings_path=tmp_path, markdown_path=tmp_path)
+        with (
+            patch("voicepad_core.transcription.WhisperModel", side_effect=RuntimeError("General error")),
+            pytest.raises(TranscriptionError),
+        ):
+            get_or_load_model(config)
 
-        with patch("voicepad_core.transcription.WhisperModel") as mock_whisper:
-            mock_whisper.side_effect = RuntimeError("General error")
-
-            with pytest.raises(TranscriptionError):
-                get_or_load_model(config)
-
-    def test_get_or_load_model_raises_on_other_exception(self, tmp_path: Path) -> None:
-        """When any other exception occurs, TranscriptionError is raised."""
+    def test_raises_on_other_exception(self, tmp_path: Path) -> None:
         _model_cache.clear()
         config = Config(recordings_path=tmp_path, markdown_path=tmp_path)
-
-        with patch("voicepad_core.transcription.WhisperModel") as mock_whisper:
-            mock_whisper.side_effect = ValueError("Invalid model name")
-
-            with pytest.raises(TranscriptionError):
-                get_or_load_model(config)
+        with (
+            patch("voicepad_core.transcription.WhisperModel", side_effect=ValueError("Invalid model name")),
+            pytest.raises(TranscriptionError),
+        ):
+            get_or_load_model(config)
 
     def teardown_method(self) -> None:
-        """Clear the model cache after each test."""
         _model_cache.clear()
+
+
+# ---------------------------------------------------------------------------
+# transcribe_buffer  (GPU-marked — model is mocked)
+# ---------------------------------------------------------------------------
 
 
 @pytest.mark.gpu
 class TestTranscribeBuffer:
-    def test_transcribe_buffer_raises_if_audio_too_short(self, tmp_path: Path) -> None:
-        """When audio is shorter than MIN_AUDIO_DURATION_S, AudioTooShortError is raised."""
-        config = Config(recordings_path=tmp_path, markdown_path=tmp_path)
-        # Create audio shorter than 0.5 seconds at 16 kHz
-        short_audio = np.zeros(4000, dtype=np.float32)  # 0.25 seconds
+    def _mock_model(self, text: str = "hello") -> MagicMock:
+        seg = MagicMock()
+        seg.start, seg.end, seg.text = 0.0, 0.9, text
+        m = MagicMock()
+        m.transcribe.return_value = ([seg], MagicMock(language="en", language_probability=0.99))
+        return m
 
+    def test_raises_if_audio_too_short(self, tmp_path: Path) -> None:
+        config = Config(recordings_path=tmp_path, markdown_path=tmp_path)
         with pytest.raises(AudioTooShortError):
-            transcribe_buffer(short_audio, config)
+            transcribe_buffer(np.zeros(4000, dtype=np.float32), config)
 
-    def test_transcribe_buffer_flattens_multidimensional_audio(self, tmp_path: Path) -> None:
-        """When audio is multidimensional, it is flattened before processing."""
+    def test_trims_trailing_silence_before_transcribing(self, tmp_path: Path) -> None:
+        """_trim_trailing_silence is called; audio with only silence raises AudioTooShortError."""
         config = Config(recordings_path=tmp_path, markdown_path=tmp_path)
-        # Create 2D audio (e.g., stereo)
-        audio_2d = np.ones((2, 16000), dtype=np.float32)
-
-        mock_model = MagicMock()
-        mock_model.transcribe.return_value = ([], MagicMock(language="en", language_probability=0.9))
-
-        with patch("voicepad_core.transcription.get_or_load_model") as mock_get_model:
-            mock_get_model.return_value = (mock_model, DEVICE, COMPUTE_TYPE, False)
-
-            result = transcribe_buffer(audio_2d, config)
-
-            assert isinstance(result, TranscriptionResult)
-
-    def test_transcribe_buffer_logs_long_audio_warning(self, tmp_path: Path) -> None:
-        """When audio exceeds MAX_AUDIO_DURATION_S, a log message is emitted."""
-        config = Config(recordings_path=tmp_path, markdown_path=tmp_path)
-        # Create audio longer than 900 seconds
-        long_audio = np.zeros(16000 * 1000, dtype=np.float32)
-
-        mock_model = MagicMock()
-        mock_model.transcribe.return_value = ([], MagicMock(language="en", language_probability=0.9))
-
-        with patch("voicepad_core.transcription.get_or_load_model") as mock_get_model:
-            mock_get_model.return_value = (mock_model, DEVICE, COMPUTE_TYPE, False)
-
-            with patch("voicepad_core.transcription.logger") as mock_logger:
-                transcribe_buffer(long_audio, config)
-                mock_logger.info.assert_called()
-
-    def test_transcribe_buffer_returns_result_with_text(self, tmp_path: Path) -> None:
-        """When transcription succeeds, TranscriptionResult contains the text."""
-        config = Config(recordings_path=tmp_path, markdown_path=tmp_path)
-        audio = np.zeros(16000, dtype=np.float32)  # 1 second
-
-        mock_segment = MagicMock()
-        mock_segment.start = 0.0
-        mock_segment.end = 1.0
-        mock_segment.text = "hello"
-
-        mock_model = MagicMock()
-        mock_model.transcribe.return_value = (
-            [mock_segment],
-            MagicMock(language="en", language_probability=0.99),
-        )
-
-        with patch("voicepad_core.transcription.get_or_load_model") as mock_get_model:
-            mock_get_model.return_value = (mock_model, DEVICE, COMPUTE_TYPE, False)
-
+        # 1s of speech + 2s of silence — trim should keep the speech part
+        audio = np.concatenate([_speech_audio(1.0), np.zeros(32000, dtype=np.float32)])
+        mock_model = self._mock_model()
+        with patch(
+            "voicepad_core.transcription.get_or_load_model", return_value=(mock_model, DEVICE, COMPUTE_TYPE, False)
+        ):
             result = transcribe_buffer(audio, config)
+        assert result.text == "hello"
 
-            assert result.text == "hello"
-            assert len(result.segments) == 1
-
-    def test_transcribe_buffer_disables_previous_text_conditioning(self, tmp_path: Path) -> None:
-        """When transcribing, the model is not conditioned on previous text."""
+    def test_flattens_multidimensional_audio(self, tmp_path: Path) -> None:
         config = Config(recordings_path=tmp_path, markdown_path=tmp_path)
-        audio = np.zeros(16000, dtype=np.float32)
+        audio_2d = np.tile(_speech_audio(0.5), (2, 1))  # shape (2, 8000)
+        mock_model = self._mock_model()
+        with patch(
+            "voicepad_core.transcription.get_or_load_model", return_value=(mock_model, DEVICE, COMPUTE_TYPE, False)
+        ):
+            result = transcribe_buffer(audio_2d, config)
+        assert isinstance(result, TranscriptionResult)
 
-        mock_model = MagicMock()
-        mock_model.transcribe.return_value = (
-            [],
-            MagicMock(language="en", language_probability=0.9),
-        )
-
-        with patch("voicepad_core.transcription.get_or_load_model") as mock_get_model:
-            mock_get_model.return_value = (mock_model, DEVICE, COMPUTE_TYPE, False)
-
-            transcribe_buffer(audio, config)
-
-            assert mock_model.transcribe.call_args.kwargs["beam_size"] == 3
-            assert mock_model.transcribe.call_args.kwargs["condition_on_previous_text"] is False
-
-    def test_transcribe_buffer_retries_on_cuda_inference_error(self, tmp_path: Path) -> None:
-        """When CUDA fails during inference, the model retries on CPU."""
+    def test_returns_result_with_text(self, tmp_path: Path) -> None:
         config = Config(recordings_path=tmp_path, markdown_path=tmp_path)
-        audio = np.zeros(16000, dtype=np.float32)
+        mock_model = self._mock_model("hello world")
+        with patch(
+            "voicepad_core.transcription.get_or_load_model", return_value=(mock_model, DEVICE, COMPUTE_TYPE, False)
+        ):
+            result = transcribe_buffer(_speech_audio(1.0), config)
+        assert result.text == "hello world"
+        assert len(result.segments) == 1
 
+    def test_passes_no_speech_threshold(self, tmp_path: Path) -> None:
+        """no_speech_threshold is forwarded to model.transcribe."""
+        config = Config(recordings_path=tmp_path, markdown_path=tmp_path)
+        mock_model = self._mock_model()
+        with patch(
+            "voicepad_core.transcription.get_or_load_model", return_value=(mock_model, DEVICE, COMPUTE_TYPE, False)
+        ):
+            transcribe_buffer(_speech_audio(1.0), config)
+        call_kwargs = mock_model.transcribe.call_args.kwargs
+        assert "no_speech_threshold" in call_kwargs
+        assert call_kwargs["no_speech_threshold"] > 0.5  # should be 0.8
+
+    def test_passes_vad_filter_true(self, tmp_path: Path) -> None:
+        """vad_filter=True is always passed."""
+        config = Config(recordings_path=tmp_path, markdown_path=tmp_path)
+        mock_model = self._mock_model()
+        with patch(
+            "voicepad_core.transcription.get_or_load_model", return_value=(mock_model, DEVICE, COMPUTE_TYPE, False)
+        ):
+            transcribe_buffer(_speech_audio(1.0), config)
+        assert mock_model.transcribe.call_args.kwargs["vad_filter"] is True
+
+    def test_retries_on_cuda_inference_error(self, tmp_path: Path) -> None:
+        config = Config(recordings_path=tmp_path, markdown_path=tmp_path)
         mock_model = MagicMock()
         mock_model.transcribe.side_effect = RuntimeError("CUDA out of memory")
+        seg = MagicMock()
+        seg.start, seg.end, seg.text = 0.0, 0.9, "hello"
+        mock_cpu = MagicMock()
+        mock_cpu.transcribe.return_value = ([seg], MagicMock(language="en", language_probability=0.9))
+        with (
+            patch(
+                "voicepad_core.transcription.get_or_load_model", return_value=(mock_model, DEVICE, COMPUTE_TYPE, False)
+            ),
+            patch("voicepad_core.transcription._load_cpu_fallback", return_value=(mock_cpu, "cpu", "int8")),
+        ):
+            result = transcribe_buffer(_speech_audio(1.0), config)
+        assert result.fallback_to_cpu is True
 
-        mock_cpu_model = MagicMock()
-        mock_segment = MagicMock()
-        mock_segment.start = 0.0
-        mock_segment.end = 1.0
-        mock_segment.text = "hello"
-        mock_cpu_model.transcribe.return_value = (
-            [mock_segment],
-            MagicMock(language="en", language_probability=0.9),
-        )
-
-        with patch("voicepad_core.transcription.get_or_load_model") as mock_get_model:
-            mock_get_model.return_value = (mock_model, DEVICE, COMPUTE_TYPE, False)
-
-            with patch("voicepad_core.transcription._load_cpu_fallback") as mock_fallback:
-                mock_fallback.return_value = (mock_cpu_model, "cpu", "int8")
-
-                result = transcribe_buffer(audio, config)
-
-                assert result.fallback_to_cpu is True
-
-    def test_transcribe_buffer_raises_on_non_cuda_inference_error(self, tmp_path: Path) -> None:
-        """When a non-CUDA error occurs during inference, TranscriptionError is raised."""
+    def test_raises_on_non_cuda_inference_error(self, tmp_path: Path) -> None:
         config = Config(recordings_path=tmp_path, markdown_path=tmp_path)
-        audio = np.zeros(16000, dtype=np.float32)
-
         mock_model = MagicMock()
         mock_model.transcribe.side_effect = RuntimeError("Some other error")
+        with (
+            patch(
+                "voicepad_core.transcription.get_or_load_model", return_value=(mock_model, DEVICE, COMPUTE_TYPE, False)
+            ),
+            pytest.raises(TranscriptionError),
+        ):
+            transcribe_buffer(_speech_audio(1.0), config)
 
-        with patch("voicepad_core.transcription.get_or_load_model") as mock_get_model:
-            mock_get_model.return_value = (mock_model, DEVICE, COMPUTE_TYPE, False)
-
-            with pytest.raises(TranscriptionError):
-                transcribe_buffer(audio, config)
-
-    def test_transcribe_buffer_raises_on_other_exception(self, tmp_path: Path) -> None:
-        """When any other exception occurs during transcription, TranscriptionError is raised."""
+    def test_raises_on_other_exception(self, tmp_path: Path) -> None:
         config = Config(recordings_path=tmp_path, markdown_path=tmp_path)
-        audio = np.zeros(16000, dtype=np.float32)
-
         mock_model = MagicMock()
         mock_model.transcribe.side_effect = ValueError("Invalid input")
+        with (
+            patch(
+                "voicepad_core.transcription.get_or_load_model", return_value=(mock_model, DEVICE, COMPUTE_TYPE, False)
+            ),
+            pytest.raises(TranscriptionError),
+        ):
+            transcribe_buffer(_speech_audio(1.0), config)
 
-        with patch("voicepad_core.transcription.get_or_load_model") as mock_get_model:
-            mock_get_model.return_value = (mock_model, DEVICE, COMPUTE_TYPE, False)
-
-            with pytest.raises(TranscriptionError):
-                transcribe_buffer(audio, config)
+    def test_logs_long_audio_info(self, tmp_path: Path) -> None:
+        config = Config(recordings_path=tmp_path, markdown_path=tmp_path)
+        # 1000s of speech-like audio
+        long_audio = np.tile(_speech_audio(1.0), 1000)
+        mock_model = self._mock_model()
+        with (
+            patch(
+                "voicepad_core.transcription.get_or_load_model", return_value=(mock_model, DEVICE, COMPUTE_TYPE, False)
+            ),
+            patch("voicepad_core.transcription.logger") as mock_logger,
+        ):
+            transcribe_buffer(long_audio, config)
+        mock_logger.info.assert_called()
 
     def teardown_method(self) -> None:
-        """Clear the model cache after each test."""
         _model_cache.clear()
+
+
+# ---------------------------------------------------------------------------
+# transcribe_file  (GPU-marked — model is mocked)
+# ---------------------------------------------------------------------------
 
 
 @pytest.mark.gpu
 class TestTranscribeFile:
-    def test_transcribe_file_raises_if_file_not_found(self, tmp_path: Path) -> None:
-        """When the audio file doesn't exist, TranscriptionError is raised."""
-        config = Config(recordings_path=tmp_path, markdown_path=tmp_path)
-        nonexistent_path = tmp_path / "nonexistent.wav"
+    def _mock_model(self) -> MagicMock:
+        seg = MagicMock()
+        seg.start, seg.end, seg.text = 0.0, 0.9, "test"
+        m = MagicMock()
+        m.transcribe.return_value = ([seg], MagicMock(language="en", language_probability=0.9))
+        return m
 
+    def test_raises_if_file_not_found(self, tmp_path: Path) -> None:
+        config = Config(recordings_path=tmp_path, markdown_path=tmp_path)
         with pytest.raises(TranscriptionError, match="not found"):
-            transcribe_file(nonexistent_path, config)
+            transcribe_file(tmp_path / "nonexistent.wav", config)
 
-    def test_transcribe_file_raises_if_path_is_not_file(self, tmp_path: Path) -> None:
-        """When the path is a directory, TranscriptionError is raised."""
+    def test_raises_if_path_is_directory(self, tmp_path: Path) -> None:
         config = Config(recordings_path=tmp_path, markdown_path=tmp_path)
-        directory_path = tmp_path / "subdir"
-        directory_path.mkdir()
-
+        d = tmp_path / "subdir"
+        d.mkdir()
         with pytest.raises(TranscriptionError, match="not a file"):
-            transcribe_file(directory_path, config)
+            transcribe_file(d, config)
 
-    def test_transcribe_file_reads_mono_audio(self, tmp_path: Path) -> None:
-        """When a mono audio file is read, it is passed to transcribe_buffer."""
-        config = Config(recordings_path=tmp_path, markdown_path=tmp_path)
-        wav_path = tmp_path / "test.wav"
-
-        # Create a dummy WAV file
+    def test_reads_mono_audio(self, tmp_path: Path) -> None:
         import soundfile as sf
 
-        audio = np.zeros(16000, dtype=np.float32)
-        sf.write(str(wav_path), audio, 16000)
-
-        mock_segment = MagicMock()
-        mock_segment.start = 0.0
-        mock_segment.end = 1.0
-        mock_segment.text = "test"
-
-        mock_model = MagicMock()
-        mock_model.transcribe.return_value = (
-            [mock_segment],
-            MagicMock(language="en", language_probability=0.9),
-        )
-
-        with patch("voicepad_core.transcription.get_or_load_model") as mock_get_model:
-            mock_get_model.return_value = (mock_model, DEVICE, COMPUTE_TYPE, False)
-
-            result = transcribe_file(wav_path, config)
-
-            assert isinstance(result, TranscriptionResult)
-
-    def test_transcribe_file_averages_stereo_audio(self, tmp_path: Path) -> None:
-        """When stereo audio is read, channels are averaged to mono."""
         config = Config(recordings_path=tmp_path, markdown_path=tmp_path)
-        wav_path = tmp_path / "stereo.wav"
+        wav = tmp_path / "test.wav"
+        sf.write(str(wav), _speech_audio(1.0), 16000)
+        with patch(
+            "voicepad_core.transcription.get_or_load_model",
+            return_value=(self._mock_model(), DEVICE, COMPUTE_TYPE, False),
+        ):
+            result = transcribe_file(wav, config)
+        assert isinstance(result, TranscriptionResult)
 
+    def test_averages_stereo_to_mono(self, tmp_path: Path) -> None:
         import soundfile as sf
 
-        stereo_audio = np.ones((16000, 2), dtype=np.float32)
-        sf.write(str(wav_path), stereo_audio, 16000)
-
-        mock_segment = MagicMock()
-        mock_segment.start = 0.0
-        mock_segment.end = 1.0
-        mock_segment.text = "stereo"
-
-        mock_model = MagicMock()
-        mock_model.transcribe.return_value = (
-            [mock_segment],
-            MagicMock(language="en", language_probability=0.9),
-        )
-
-        with patch("voicepad_core.transcription.get_or_load_model") as mock_get_model:
-            mock_get_model.return_value = (mock_model, DEVICE, COMPUTE_TYPE, False)
-
-            result = transcribe_file(wav_path, config)
-
-            assert isinstance(result, TranscriptionResult)
-
-    def test_transcribe_file_warns_if_sample_rate_mismatch(self, tmp_path: Path) -> None:
-        """When the file sample rate is not 16000, a warning is logged."""
         config = Config(recordings_path=tmp_path, markdown_path=tmp_path)
-        wav_path = tmp_path / "wrong_sr.wav"
+        wav = tmp_path / "stereo.wav"
+        stereo = np.tile(_speech_audio(1.0), (2, 1)).T  # (16000, 2)
+        sf.write(str(wav), stereo, 16000)
+        with patch(
+            "voicepad_core.transcription.get_or_load_model",
+            return_value=(self._mock_model(), DEVICE, COMPUTE_TYPE, False),
+        ):
+            result = transcribe_file(wav, config)
+        assert isinstance(result, TranscriptionResult)
 
+    def test_warns_on_sample_rate_mismatch(self, tmp_path: Path) -> None:
         import soundfile as sf
 
-        audio = np.zeros(8000, dtype=np.float32)
-        sf.write(str(wav_path), audio, 8000)  # Wrong sample rate
-
-        mock_segment = MagicMock()
-        mock_segment.start = 0.0
-        mock_segment.end = 1.0
-        mock_segment.text = "wrong"
-
-        mock_model = MagicMock()
-        mock_model.transcribe.return_value = (
-            [mock_segment],
-            MagicMock(language="en", language_probability=0.9),
-        )
-
-        with patch("voicepad_core.transcription.get_or_load_model") as mock_get_model:
-            mock_get_model.return_value = (mock_model, DEVICE, COMPUTE_TYPE, False)
-
-            with patch("voicepad_core.transcription.logger") as mock_logger:
-                transcribe_file(wav_path, config)
-
-                mock_logger.warning.assert_called()
-
-    def test_transcribe_file_raises_if_file_read_fails(self, tmp_path: Path) -> None:
-        """When the audio file cannot be read, TranscriptionError is raised."""
         config = Config(recordings_path=tmp_path, markdown_path=tmp_path)
-        wav_path = tmp_path / "invalid.wav"
-        wav_path.write_text("not a real wav file")
+        wav = tmp_path / "wrong_sr.wav"
+        sf.write(str(wav), _speech_audio(1.0), 8000)
+        with (
+            patch(
+                "voicepad_core.transcription.get_or_load_model",
+                return_value=(self._mock_model(), DEVICE, COMPUTE_TYPE, False),
+            ),
+            patch("voicepad_core.transcription.logger") as mock_logger,
+        ):
+            transcribe_file(wav, config)
+        mock_logger.warning.assert_called()
 
+    def test_raises_if_file_unreadable(self, tmp_path: Path) -> None:
+        config = Config(recordings_path=tmp_path, markdown_path=tmp_path)
+        bad = tmp_path / "invalid.wav"
+        bad.write_text("not a wav")
         with pytest.raises(TranscriptionError, match="Failed to read"):
-            transcribe_file(wav_path, config)
+            transcribe_file(bad, config)
 
     def teardown_method(self) -> None:
-        """Clear the model cache after each test."""
         _model_cache.clear()
-
-
-class _FakeRecorder:
-    def __init__(self) -> None:
-        import threading
-
-        self._lock = threading.Lock()
-        self._frames: list[np.ndarray] = []
-
-
-class TestStreamingTranscriber:
-    def test_dispatch_chunk_only_seeds_first_chunk_with_prompt(self, tmp_path: Path) -> None:
-        """When streaming chunks are transcribed, only the first chunk gets the initial prompt."""
-        config = Config(recordings_path=tmp_path, markdown_path=tmp_path)
-        transcriber = StreamingTranscriber(
-            recorder=_FakeRecorder(),
-            config=config,
-            on_chunk=lambda _chunk: None,
-            on_error=lambda _error: None,
-        )
-
-        mock_model = MagicMock()
-        mock_model.transcribe.return_value = (
-            [],
-            MagicMock(language="en", language_probability=0.9),
-        )
-
-        with patch("voicepad_core.transcription.get_or_load_model") as mock_get_model:
-            mock_get_model.return_value = (mock_model, DEVICE, COMPUTE_TYPE, False)
-
-            transcriber._dispatch_chunk(np.zeros(16000 * 11, dtype=np.float32), is_final=False)
-            transcriber._dispatch_chunk(np.zeros(16000 * 11, dtype=np.float32), is_final=True)
-
-        first_call = mock_model.transcribe.call_args_list[0].kwargs
-        second_call = mock_model.transcribe.call_args_list[1].kwargs
-
-        assert first_call["beam_size"] == 3
-        assert first_call["condition_on_previous_text"] is False
-        assert first_call["initial_prompt"] is not None
-        assert second_call["condition_on_previous_text"] is False
-        assert second_call["initial_prompt"] is None

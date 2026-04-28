@@ -106,6 +106,7 @@ class StreamingTranscriber:
         self._thread: threading.Thread | None = None
         self._chunk_index = 0
         self._consumed_samples = 0
+        self._prev_context: str = ""
         self._stop_event = threading.Event()
 
     def start(self) -> None:
@@ -210,8 +211,13 @@ class StreamingTranscriber:
 
         try:
             is_distil = self._config.transcription_model in _DISTIL_MODELS
-            condition_on_prev = False
-            prompt = INITIAL_PROMPT if self._chunk_index == 0 and not is_distil else None
+            condition_on_prev = not is_distil
+            if is_distil:
+                prompt = None
+            elif self._prev_context:
+                prompt = (INITIAL_PROMPT + " " + self._prev_context[-200:]).strip()
+            else:
+                prompt = INITIAL_PROMPT
 
             t0 = time.perf_counter()
             model, device, _compute, _ = get_or_load_model(self._config)
@@ -250,6 +256,10 @@ class StreamingTranscriber:
                 )
 
             text = " ".join(s.text for s in segments if s.text).strip()
+
+            # Update context for next chunk's prompt
+            if text:
+                self._prev_context = " ".join(text.split()[-30:])
 
             self._consumed_samples = len(full_audio)
             self._chunk_index += 1
