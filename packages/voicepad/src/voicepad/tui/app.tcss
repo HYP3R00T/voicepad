@@ -38,21 +38,29 @@ Screen {
     color: $text-muted;
 }
 
-/* ── body ── */
+/* ── body + tabs ── */
 #body {
     layout: vertical;
-    padding: 1 2;
     height: 1fr;
 }
 
-/* ── transcription panel ── */
+#tabs {
+    height: 1fr;
+    padding: 0;
+}
+
+TabPane {
+    padding: 1 2;
+    height: 1fr;
+    layout: vertical;
+}
+
+/* ── record tab ── */
 #transcription {
     border: round $border-blurred;
     border-title-color: $primary;
     padding: 1 2;
-    height: 10;
-    min-height: 5;
-    margin-bottom: 1;
+    height: 1fr;
     background: $surface;
     overflow-y: auto;
 }
@@ -80,7 +88,6 @@ Screen {
     border: none;
     background: transparent;
     color: $text-muted;
-    text-style: none;
     margin-top: 1;
     padding: 0 1;
     min-width: 10;
@@ -95,7 +102,7 @@ Screen {
     color: $text-disabled;
 }
 
-/* ── history section — two panes side by side ── */
+/* ── history tab ── */
 #history-section {
     layout: horizontal;
     height: 1fr;
@@ -104,7 +111,7 @@ Screen {
 #history-list-pane {
     border: round $border-blurred;
     border-title-color: $text-muted;
-    width: 65;
+    width: 55;
     height: 1fr;
     background: $surface;
     margin-right: 1;
@@ -116,6 +123,7 @@ Screen {
     width: 1fr;
     height: 1fr;
     background: $surface;
+    layout: vertical;
 }
 
 #history-options {
@@ -130,5 +138,78 @@ Screen {
     width: 1fr;
     height: 1fr;
     background: transparent;
+    scrollbar-gutter: auto;
+    scrollbar-size-vertical: 1;
+}
+
+/* Override Markdown's default padding: 0 2 0 2 — remove right padding so
+   content sits flush against the scrollbar with no dead space */
+#history-view-pane MarkdownViewer > Markdown {
+    padding: 0 0 0 2;
+}
+
+#retranscribe-btn {
+    width: auto;
+    height: 1;
+    border: none;
+    background: transparent;
+    color: $text-warning;
+    text-style: bold;
+    margin: 1 2;
     padding: 0 1;
+}
+
+#retranscribe-btn:hover {
+    background: $warning-muted;
+    color: $warning;
+}
+
+#retranscribe-btn:disabled {
+    color: $text-disabled;
+}
+
+/* ── transcribe file tab ── */
+#tf-section {
+    layout: horizontal;
+    height: auto;
+    margin-bottom: 1;
+    align: left middle;
+}
+
+#tf-input {
+    width: 1fr;
+    margin-right: 1;
+}
+
+#tf-btn {
+    width: auto;
+    height: 3;
+    border: tall $border-blurred;
+    background: transparent;
+    color: $text-success;
+    text-style: bold;
+    padding: 0 2;
+}
+
+#tf-btn:hover {
+    background: $success-muted;
+    border: tall $success;
+}
+
+#tf-btn:disabled {
+    color: $text-disabled;
+    border: tall $border-blurred;
+}
+
+#tf-viewer {
+    width: 1fr;
+    height: 1fr;
+    background: $surface;
+    border: round $border-blurred;
+    scrollbar-gutter: auto;
+    scrollbar-size-vertical: 1;
+}
+
+#tf-viewer > Markdown {
+    padding: 0 0 0 2;
 }

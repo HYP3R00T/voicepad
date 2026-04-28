@@ -10,12 +10,23 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
+import soundfile as sf
 from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.reactive import reactive
 from textual.theme import Theme
-from textual.widgets import Button, Footer, Label, MarkdownViewer, OptionList, Static
+from textual.widgets import (
+    Button,
+    Footer,
+    Input,
+    Label,
+    MarkdownViewer,
+    OptionList,
+    Static,
+    TabbedContent,
+    TabPane,
+)
 from textual.widgets.option_list import Option
 from voicepad_core import AudioRecorder, AudioRecorderError, get_config
 from voicepad_core.config import Config
@@ -54,6 +65,16 @@ _MD_PLACEHOLDER = """\
 # voicepad
 
 Select a recording from the list on the left to view its full transcription here.
+
+Use the **⟳ retranscribe** button to re-run the model on the selected recording.
+"""
+
+_TRANSCRIBE_PLACEHOLDER = """\
+# transcribe a file
+
+Enter the path to any audio file above and press **Transcribe** (or hit Enter).
+
+Supported formats: WAV, MP3, FLAC, OGG, M4A, and anything else soundfile can read.
 """
 
 
@@ -103,52 +124,71 @@ class VoicePadApp(App[None]):
         self._record_start: float = 0.0
         self._timer_thread: threading.Thread | None = None
         self._warm_result: ModelWarmResult | None = None
-        self._current_text: str = ""  # last transcribed text, used for copy
+        self._current_text: str = ""
+        # history tab: currently selected entry index
+        self._selected_entry_idx: int | None = None
 
     # ------------------------------------------------------------------
     # Layout
     # ------------------------------------------------------------------
 
     def compose(self) -> ComposeResult:
-        # Header: title | status+timer (center, fixed) | model info
         with Static(id="header"):
             yield Label("voicepad", id="header-title")
             yield Label("○  initialising", id="status")
             yield Label("loading…", id="header-model")
 
-        with Static(id="body"):
-            tx = Static(id="transcription")
-            tx.border_title = "transcription"
-            yield tx
+        with Static(id="body"), TabbedContent(id="tabs"):
+            # ── Tab 1: Record ──────────────────────────────────────
+            with TabPane("  record  ", id="tab-record"):
+                tx = Static(id="transcription")
+                tx.border_title = "transcription"
+                yield tx
 
-            with Static(id="history-section"):
+            # ── Tab 2: History + Retranscribe ──────────────────────
+            with TabPane("  history  ", id="tab-history"), Static(id="history-section"):
                 hist_list = Static(id="history-list-pane")
-                hist_list.border_title = "history"
+                hist_list.border_title = "recordings"
                 yield hist_list
 
-                hist_view = Static(id="history-view-pane")
-                hist_view.border_title = "viewer"
-                yield hist_view
+                with Static(id="history-view-pane"):
+                    yield MarkdownViewer(
+                        _MD_PLACEHOLDER,
+                        id="history-viewer",
+                        show_table_of_contents=False,
+                    )
+                    yield Button(
+                        "⟳  retranscribe",
+                        id="retranscribe-btn",
+                        disabled=True,
+                    )
+
+            # ── Tab 3: Transcribe any file ─────────────────────────
+            with TabPane("  transcribe file  ", id="tab-transcribe"):
+                with Static(id="tf-section"):
+                    yield Input(
+                        placeholder="path to audio file…",
+                        id="tf-input",
+                    )
+                    yield Button("▶  transcribe", id="tf-btn", disabled=True)
+                yield MarkdownViewer(
+                    _TRANSCRIBE_PLACEHOLDER,
+                    id="tf-viewer",
+                    show_table_of_contents=False,
+                )
 
         yield Footer()
 
     def on_mount(self) -> None:
+        # ── Tab 1: record ──
         tx = self.query_one("#transcription", Static)
         tx.mount(Label("speak and press space to begin…", id="tx-text", classes="placeholder"))
         tx.mount(Label("", id="tx-meta"))
         tx.mount(Button("⎘  copy", id="tx-copy-btn", disabled=True))
 
+        # ── Tab 2: history ──
         hist_list = self.query_one("#history-list-pane", Static)
         hist_list.mount(OptionList(id="history-options"))
-
-        hist_view = self.query_one("#history-view-pane", Static)
-        hist_view.mount(
-            MarkdownViewer(
-                _MD_PLACEHOLDER,
-                id="history-viewer",
-                show_table_of_contents=False,
-            )
-        )
 
         self.register_theme(VOICEPAD_THEME)
         self.theme = "voicepad"
@@ -195,12 +235,19 @@ class VoicePadApp(App[None]):
         )
         self._set_status("ready", "ready")
         self._model_ready = True
+        # Enable tf-btn if there's already a path in the input
+        with contextlib.suppress(Exception):
+            val = self.query_one("#tf-input", Input).value.strip()
+            self.query_one("#tf-btn", Button).disabled = not bool(val)
 
     # ------------------------------------------------------------------
     # Record / stop
     # ------------------------------------------------------------------
 
     def action_toggle_recording(self) -> None:
+        active = self.query_one("#tabs", TabbedContent).active
+        if active != "tab-record":
+            return
         if not self._model_ready or self._transcribing:
             return
         if self._recording:
@@ -239,7 +286,7 @@ class VoicePadApp(App[None]):
         self._transcribe_worker(audio)
 
     # ------------------------------------------------------------------
-    # Transcription
+    # Live transcription (record tab)
     # ------------------------------------------------------------------
 
     @work(thread=True, name="transcribe")
@@ -285,7 +332,6 @@ class VoicePadApp(App[None]):
             self.query_one("#transcription", Static).scroll_end(animate=False)
             self._set_status("ready", "ready")
 
-            # Store text and enable copy
             self._current_text = result.text or ""
             self.query_one("#tx-copy-btn", Button).disabled = not bool(self._current_text)
 
@@ -312,15 +358,156 @@ class VoicePadApp(App[None]):
         ol.highlighted = ol.option_count - 1
 
     # ------------------------------------------------------------------
-    # Copy transcription
+    # History tab — select entry → show markdown + enable retranscribe
+    # ------------------------------------------------------------------
+
+    @on(OptionList.OptionSelected, "#history-options")
+    def on_history_option_selected(self, event: OptionList.OptionSelected) -> None:
+        with contextlib.suppress(Exception):
+            idx = int(event.option.id)  # type: ignore[arg-type]
+            if 0 <= idx < len(self._entries):
+                self._selected_entry_idx = idx
+                entry = self._entries[idx]
+                self.query_one("#retranscribe-btn", Button).disabled = not self._model_ready or entry.wav_path is None
+                if entry.md_path and entry.md_path.exists():
+                    self._load_history_viewer(entry.md_path)
+
+    @work(name="md-view")
+    async def _load_history_viewer(self, md_path: Path) -> None:
+        viewer = self.query_one("#history-viewer", MarkdownViewer)
+        await viewer.go(md_path.resolve())
+
+    # ------------------------------------------------------------------
+    # Retranscribe (history tab)
+    # ------------------------------------------------------------------
+
+    @on(Button.Pressed, "#retranscribe-btn")
+    def on_retranscribe_btn_pressed(self) -> None:
+        if self._selected_entry_idx is None or not self._model_ready:
+            return
+        entry = self._entries[self._selected_entry_idx]
+        if entry.wav_path and entry.wav_path.exists():
+            self.query_one("#retranscribe-btn", Button).disabled = True
+            self._retranscribe_file(entry.wav_path, entry.md_path)
+
+    @work(thread=True, name="retranscribe")
+    def _retranscribe_file(self, wav_path: Path, md_path: Path | None) -> None:
+        from voicepad_core.transcription import transcribe_buffer
+
+        self.call_from_thread(self._set_status, "transcribing", f"retranscribing {wav_path.name}…")
+        try:
+            audio, _sr = sf.read(str(wav_path), dtype="float32", always_2d=False)
+            if audio.ndim > 1:
+                audio = audio.mean(axis=1)
+            result = transcribe_buffer(audio, self.config)
+            error: str | None = None
+        except Exception as e:
+            result = None
+            error = str(e)
+
+        self.call_from_thread(self._on_retranscribe_done, wav_path, md_path, result, error)
+
+    def _on_retranscribe_done(self, wav_path: Path, md_path: Path | None, result, error: str | None) -> None:
+        self.query_one("#retranscribe-btn", Button).disabled = False
+        if error:
+            self._set_status("error", error)
+            return
+
+        if result:
+            # Overwrite markdown and update the entry
+            out_md = md_path or (self.config.markdown_path / f"{wav_path.stem}.md")
+            self.config.markdown_path.mkdir(parents=True, exist_ok=True)
+            out_md.write_text(_format_markdown(wav_path, result), encoding="utf-8")
+            self._set_status("ready", "ready")
+
+            # Update the in-memory entry if it exists
+            if self._selected_entry_idx is not None:
+                entry = self._entries[self._selected_entry_idx]
+                self._entries[self._selected_entry_idx] = SessionEntry(
+                    index=entry.index,
+                    wav_path=entry.wav_path,
+                    md_path=out_md,
+                    duration_s=result.duration_s,
+                    text=result.text,
+                    latency_ms=result.latency_ms,
+                    device=result.device,
+                    timestamp=entry.timestamp,
+                )
+
+            # Reload the viewer with the fresh markdown
+            self._load_history_viewer(out_md)
+
+    # ------------------------------------------------------------------
+    # Transcribe file tab
+    # ------------------------------------------------------------------
+
+    @on(Input.Changed, "#tf-input")
+    def on_tf_input_changed(self, event: Input.Changed) -> None:
+        self.query_one("#tf-btn", Button).disabled = not self._model_ready or not event.value.strip()
+
+    @on(Input.Submitted, "#tf-input")
+    def on_tf_input_submitted(self, _event: Input.Submitted) -> None:
+        self._start_tf_transcription()
+
+    @on(Button.Pressed, "#tf-btn")
+    def on_tf_btn_pressed(self) -> None:
+        self._start_tf_transcription()
+
+    def _start_tf_transcription(self) -> None:
+        path_str = self.query_one("#tf-input", Input).value.strip()
+        if not path_str or not self._model_ready:
+            return
+        audio_path = Path(path_str)
+        if not audio_path.exists():
+            self._set_status("error", f"file not found: {audio_path.name}")
+            return
+        self.query_one("#tf-btn", Button).disabled = True
+        self._transcribe_file_worker(audio_path)
+
+    @work(thread=True, name="tf-transcribe")
+    def _transcribe_file_worker(self, audio_path: Path) -> None:
+        from voicepad_core.transcription import transcribe_buffer
+
+        self.call_from_thread(self._set_status, "transcribing", f"transcribing {audio_path.name}…")
+        try:
+            audio, _sr = sf.read(str(audio_path), dtype="float32", always_2d=False)
+            if audio.ndim > 1:
+                audio = audio.mean(axis=1)
+            result = transcribe_buffer(audio, self.config)
+            error: str | None = None
+        except Exception as e:
+            result = None
+            error = str(e)
+
+        self.call_from_thread(self._on_tf_done, audio_path, result, error)
+
+    def _on_tf_done(self, audio_path: Path, result, error: str | None) -> None:
+        self.query_one("#tf-btn", Button).disabled = False
+        if error:
+            self._set_status("error", error)
+            return
+
+        if result:
+            # Save markdown alongside the audio file (or in markdown_path if read-only)
+            md_path = self.config.markdown_path / f"{audio_path.stem}.md"
+            self.config.markdown_path.mkdir(parents=True, exist_ok=True)
+            md_path.write_text(_format_markdown(audio_path, result), encoding="utf-8")
+            self._set_status("ready", f"done — {audio_path.name}")
+            self._load_tf_viewer(md_path)
+
+    @work(name="tf-view")
+    async def _load_tf_viewer(self, md_path: Path) -> None:
+        viewer = self.query_one("#tf-viewer", MarkdownViewer)
+        await viewer.go(md_path.resolve())
+
+    # ------------------------------------------------------------------
+    # Copy transcription (record tab)
     # ------------------------------------------------------------------
 
     def action_copy_transcription(self) -> None:
-        """Copy the current transcription text to the clipboard (bound to 'c')."""
         if not self._current_text:
             return
         _copy_to_clipboard(self._current_text)
-        # Brief visual feedback: flash the button label
         with contextlib.suppress(Exception):
             btn = self.query_one("#tx-copy-btn", Button)
             btn.label = "✓  copied"
@@ -330,22 +517,8 @@ class VoicePadApp(App[None]):
     def on_copy_btn_pressed(self) -> None:
         self.action_copy_transcription()
 
-    @on(OptionList.OptionSelected, "#history-options")
-    def on_history_option_selected(self, event: OptionList.OptionSelected) -> None:
-        with contextlib.suppress(Exception):
-            idx = int(event.option.id)  # type: ignore[arg-type]
-            if 0 <= idx < len(self._entries):
-                entry = self._entries[idx]
-                if entry.md_path and entry.md_path.exists():
-                    self._load_markdown_viewer(entry.md_path)
-
-    @work(name="md-view")
-    async def _load_markdown_viewer(self, md_path: Path) -> None:
-        viewer = self.query_one("#history-viewer", MarkdownViewer)
-        await viewer.go(md_path.resolve())
-
     # ------------------------------------------------------------------
-    # Timer — updates #header-timer in the header bar
+    # Timer
     # ------------------------------------------------------------------
 
     def _start_timer(self) -> None:
@@ -354,7 +527,6 @@ class VoicePadApp(App[None]):
 
     def _stop_timer(self) -> None:
         self._timer_thread = None
-        # Clear timer from status — just show the state dot + message
         with contextlib.suppress(Exception):
             self.call_from_thread(self._refresh_status_label)
 
@@ -372,12 +544,8 @@ class VoicePadApp(App[None]):
         label.update(f"◉  recording…  ⏱ {timer_str}")
 
     def _refresh_status_label(self) -> None:
-        """Re-render status label without timer (called after recording stops)."""
         label = self.query_one("#status", Label)
-        # The label text will be overwritten by the next _set_status call;
-        # this just clears the timer portion immediately.
-        current = label.renderable
-        if "⏱" in str(current):
+        if "⏱" in str(label.renderable):
             label.update("◌  transcribing…")
 
     # ------------------------------------------------------------------
@@ -399,11 +567,11 @@ class VoicePadApp(App[None]):
 # ---------------------------------------------------------------------------
 
 
-def _format_markdown(wav_path: Path, result) -> str:
+def _format_markdown(audio_path: Path, result) -> str:
     lines = [
         "# Transcription",
         "",
-        f"**File:** `{wav_path.name}`",
+        f"**File:** `{audio_path.name}`",
         f"**Model:** {result.device} / {result.compute_type}",
         f"**Language:** {result.language} ({result.language_probability * 100:.1f}%)",
         f"**Duration:** {result.duration_s:.1f}s",
