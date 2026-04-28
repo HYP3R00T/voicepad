@@ -239,12 +239,20 @@ class VoicePadApp(App[None]):
         """Build the settings form — only user-facing fields shown."""
         from voicepad_core.config import Config as _Config
 
+        from voicepad.cli.config import _get_input_devices
+
         user_fields = {
             "recordings_path": "Where your WAV recordings are saved",
             "markdown_path": "Where your transcription files are saved",
             "transcription_model": "Whisper model to use for transcription",
-            "input_device_index": "Microphone device index. Leave blank for system default",
+            "input_device_index": "Microphone to record from",
         }
+
+        # Build device options once — reused for the Select widget
+        audio_devices = _get_input_devices()
+        # "system default" option stored as value -1 (sentinel for None)
+        device_options: list[tuple[str, int]] = [("system default", -1)]
+        device_options += [(f"[{d.index}]  {d.name}", d.index) for d in audio_devices]
 
         container = self.query_one("#settings-fields", Static)
         _, meta = get_config_with_metadata()
@@ -264,13 +272,23 @@ class VoicePadApp(App[None]):
             hint_label = Label(f"[dim]{hint}[/]", classes="settings-hint")
 
             if field_name == "transcription_model":
-                # Dropdown — only valid model names accepted
                 options = [(m, m) for m in VALID_TRANSCRIPTION_MODELS]
                 current_str = str(current_val) if current_val is not None else "turbo"
                 widget = Select(
                     options=options,
                     value=current_str if current_str in VALID_TRANSCRIPTION_MODELS else "turbo",
                     id="setting-transcription_model",
+                    classes="settings-input",
+                    allow_blank=False,
+                )
+            elif field_name == "input_device_index":
+                # current_val is int | None; use -1 as the sentinel for "system default"
+                current_idx = current_val if current_val is not None else -1
+                valid_values = {v for _, v in device_options}
+                widget = Select(
+                    options=device_options,
+                    value=current_idx if current_idx in valid_values else -1,
+                    id="setting-input_device_index",
                     classes="settings-input",
                     allow_blank=False,
                 )
@@ -308,6 +326,11 @@ class VoicePadApp(App[None]):
                 if field_name == "transcription_model":
                     sel = self.query_one("#setting-transcription_model", Select)
                     raw[field_name] = str(sel.value) if sel.value is not Select.BLANK else raw[field_name]
+                elif field_name == "input_device_index":
+                    sel = self.query_one("#setting-input_device_index", Select)
+                    if sel.value is not Select.BLANK:
+                        v = int(sel.value)
+                        raw[field_name] = None if v == -1 else v
                 else:
                     inp = self.query_one(f"#setting-{field_name}", Input)
                     val_str = inp.value.strip()
