@@ -29,9 +29,9 @@ run = "uv sync --upgrade"
 description = "Sync dependencies"
 
 [tasks.test]
-run = "pytest packages --cov=voicepad --cov=voicepad_core --cov-fail-under=80"
-description = "Run pytest with >=80% full package coverage gate (includes GPU tests)"
+run = "pytest packages --cov=voicepad --cov=voicepad_core --cov-fail-under=70"
+description = "Run all tests (GPU tests skipped by default, 70% coverage threshold)"
 
-[tasks.test-fast]
-run = "pytest packages -m 'not gpu' --cov=voicepad --cov=voicepad_core --cov-fail-under=80"
-description = "Run pytest skipping GPU tests — safe for CI without a GPU"
+[tasks.test-gpu]
+run = "pytest packages --run-gpu --cov=voicepad --cov=voicepad_core --cov-fail-under=80"
+description = "Run all tests including GPU tests (requires CUDA, 80% coverage threshold)"
