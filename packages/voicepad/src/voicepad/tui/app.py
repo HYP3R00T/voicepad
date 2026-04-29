@@ -79,15 +79,6 @@ Select a recording from the list on the left to view its full transcription here
 Use the **⟳ retranscribe** button to re-run the model on the selected recording.
 """
 
-_TRANSCRIBE_PLACEHOLDER = """\
-# transcribe a file
-
-Enter the path to any audio file above and press **Transcribe** (or hit Enter).
-
-Supported formats: WAV, MP3, FLAC, OGG, M4A, and anything else soundfile can read.
-"""
-
-
 # ---------------------------------------------------------------------------
 # Data
 # ---------------------------------------------------------------------------
@@ -174,21 +165,7 @@ class VoicePadApp(App[None]):
                         disabled=True,
                     )
 
-            # ── Tab 3: Transcribe any file ─────────────────────────
-            with TabPane("  transcribe file  ", id="tab-transcribe"):
-                with Static(id="tf-section"):
-                    yield Input(
-                        placeholder="path to audio file…",
-                        id="tf-input",
-                    )
-                    yield Button("▶  transcribe", id="tf-btn", disabled=True)
-                yield MarkdownViewer(
-                    _TRANSCRIBE_PLACEHOLDER,
-                    id="tf-viewer",
-                    show_table_of_contents=False,
-                )
-
-            # ── Tab 4: Settings ────────────────────────────────────
+            # ── Tab 3: Settings ────────────────────────────────────
             with TabPane("  settings  ", id="tab-settings"):
                 with VerticalScroll(id="settings-scroll"):
                     yield Static(id="settings-fields")
@@ -402,10 +379,6 @@ class VoicePadApp(App[None]):
         )
         self._set_status("ready", "ready")
         self._model_ready = True
-        # Enable tf-btn if there's already a path in the input
-        with contextlib.suppress(Exception):
-            val = self.query_one("#tf-input", Input).value.strip()
-            self.query_one("#tf-btn", Button).disabled = not bool(val)
 
     # ------------------------------------------------------------------
     # Record / stop
@@ -629,69 +602,6 @@ class VoicePadApp(App[None]):
 
             # Reload the viewer with the fresh markdown
             self._load_history_viewer(out_md)
-
-    # ------------------------------------------------------------------
-    # Transcribe file tab
-    # ------------------------------------------------------------------
-
-    @on(Input.Changed, "#tf-input")
-    def on_tf_input_changed(self, event: Input.Changed) -> None:
-        self.query_one("#tf-btn", Button).disabled = not self._model_ready or not event.value.strip()
-
-    @on(Input.Submitted, "#tf-input")
-    def on_tf_input_submitted(self, _event: Input.Submitted) -> None:
-        self._start_tf_transcription()
-
-    @on(Button.Pressed, "#tf-btn")
-    def on_tf_btn_pressed(self) -> None:
-        self._start_tf_transcription()
-
-    def _start_tf_transcription(self) -> None:
-        path_str = self.query_one("#tf-input", Input).value.strip()
-        if not path_str or not self._model_ready:
-            return
-        audio_path = Path(path_str)
-        if not audio_path.exists():
-            self._set_status("error", f"file not found: {audio_path.name}")
-            return
-        self.query_one("#tf-btn", Button).disabled = True
-        self._transcribe_file_worker(audio_path)
-
-    @work(thread=True, name="tf-transcribe")
-    def _transcribe_file_worker(self, audio_path: Path) -> None:
-        from voicepad_core.transcription import transcribe_buffer
-
-        self.call_from_thread(self._set_status, "transcribing", f"transcribing {audio_path.name}…")
-        try:
-            audio, _sr = sf.read(str(audio_path), dtype="float32", always_2d=False)
-            if audio.ndim > 1:
-                audio = audio.mean(axis=1)
-            result = transcribe_buffer(audio, self.config)
-            error: str | None = None
-        except Exception as e:
-            result = None
-            error = str(e)
-
-        self.call_from_thread(self._on_tf_done, audio_path, result, error)
-
-    def _on_tf_done(self, audio_path: Path, result, error: str | None) -> None:
-        self.query_one("#tf-btn", Button).disabled = False
-        if error:
-            self._set_status("error", error)
-            return
-
-        if result:
-            # Save markdown alongside the audio file (or in markdown_path if read-only)
-            md_path = self.config.markdown_path / f"{audio_path.stem}.md"
-            self.config.markdown_path.mkdir(parents=True, exist_ok=True)
-            md_path.write_text(_format_markdown(audio_path, result), encoding="utf-8")
-            self._set_status("ready", f"done — {audio_path.name}")
-            self._load_tf_viewer(md_path)
-
-    @work(name="tf-view")
-    async def _load_tf_viewer(self, md_path: Path) -> None:
-        viewer = self.query_one("#tf-viewer", MarkdownViewer)
-        await viewer.go(md_path.resolve())
 
     # ------------------------------------------------------------------
     # Copy transcription (record tab)

@@ -168,52 +168,6 @@ TabPane {
     color: $text-disabled;
 }
 
-/* ── transcribe file tab ── */
-#tf-section {
-    layout: horizontal;
-    height: auto;
-    margin-bottom: 1;
-    align: left middle;
-}
-
-#tf-input {
-    width: 1fr;
-    margin-right: 1;
-}
-
-#tf-btn {
-    width: auto;
-    height: 3;
-    border: tall $border-blurred;
-    background: transparent;
-    color: $text-success;
-    text-style: bold;
-    padding: 0 2;
-}
-
-#tf-btn:hover {
-    background: $success-muted;
-    border: tall $success;
-}
-
-#tf-btn:disabled {
-    color: $text-disabled;
-    border: tall $border-blurred;
-}
-
-#tf-viewer {
-    width: 1fr;
-    height: 1fr;
-    background: $surface;
-    border: round $border-blurred;
-    scrollbar-gutter: auto;
-    scrollbar-size-vertical: 1;
-}
-
-#tf-viewer > Markdown {
-    padding: 0 0 0 2;
-}
-
 /* ── settings tab ── */
 #settings-scroll {
     height: 1fr;
