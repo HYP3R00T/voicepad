@@ -190,6 +190,13 @@ TabPane {
     padding: 0 1;
 }
 
+#settings-config-path {
+    height: 1;
+    color: $text-muted;
+    margin-bottom: 1;
+    padding: 0 1;
+}
+
 .settings-row {
     layout: vertical;
     height: auto;

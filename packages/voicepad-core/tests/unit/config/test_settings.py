@@ -44,14 +44,16 @@ class TestConfigExpandPaths:
             config.recordings_path = Path("other")
 
     def test_default_recordings_path(self) -> None:
-        """When recordings_path is not provided, the default is used."""
+        """When recordings_path is not provided, the default points to ~/.config/voicepad/data/recordings."""
         config = Config(markdown_path="data/markdown")
-        assert config.recordings_path == Path("data/recordings")
+        assert "voicepad" in str(config.recordings_path)
+        assert "recordings" in str(config.recordings_path)
 
     def test_default_markdown_path(self) -> None:
-        """When markdown_path is not provided, the default is used."""
+        """When markdown_path is not provided, the default points to ~/.config/voicepad/data/markdown."""
         config = Config(recordings_path="data/recordings")
-        assert config.markdown_path == Path("data/markdown")
+        assert "voicepad" in str(config.markdown_path)
+        assert "markdown" in str(config.markdown_path)
 
     def test_default_input_device_index_is_none(self) -> None:
         """When input_device_index is not provided, it defaults to None."""

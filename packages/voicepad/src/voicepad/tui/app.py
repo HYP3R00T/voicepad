@@ -16,7 +16,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import VerticalScroll
 from textual.reactive import reactive
-from textual.theme import Theme
+from textual.theme import BUILTIN_THEMES, Theme
 from textual.widgets import (
     Button,
     Footer,
@@ -46,30 +46,34 @@ from voicepad.tui.workers import ModelWarmResult, RecordingSession
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Theme
+# Theme — use a blue-tinted Catppuccin Mocha theme
 # ---------------------------------------------------------------------------
 
-VOICEPAD_THEME = Theme(
-    name="voicepad",
-    primary="#58a6ff",
-    secondary="#bc8cff",
-    accent="#58a6ff",
-    foreground="#e6edf3",
-    background="#0d1117",
-    surface="#161b22",
-    panel="#21262d",
-    success="#3fb950",
-    warning="#d29922",
-    error="#f85149",
-    dark=True,
+
+_BASE_MOCHA = BUILTIN_THEMES["catppuccin-mocha"]
+_BLUE_MOCHA = Theme(
+    name="catppuccin-mocha-blue",
+    primary="#89b4fa",  # Catppuccin Blue
+    secondary="#74c7ec",  # Catppuccin Sapphire
+    warning=_BASE_MOCHA.warning,
+    error=_BASE_MOCHA.error,
+    success=_BASE_MOCHA.success,
+    accent="#89dceb",  # Catppuccin Sky
+    foreground=_BASE_MOCHA.foreground,
+    background=_BASE_MOCHA.background,
+    surface=_BASE_MOCHA.surface,
+    panel=_BASE_MOCHA.panel,
+    boost=_BASE_MOCHA.boost,
+    dark=_BASE_MOCHA.dark,
+    luminosity_spread=_BASE_MOCHA.luminosity_spread,
+    text_alpha=_BASE_MOCHA.text_alpha,
     variables={
-        "border-blurred": "#30363d",
-        "footer-key-foreground": "#58a6ff",
-        "footer-background": "#161b22",
-        "footer-foreground": "#7d8590",
-        "block-cursor-text-style": "none",
+        **_BASE_MOCHA.variables,
+        "border": "#89b4fa",
     },
 )
+
+_THEME_NAME = _BLUE_MOCHA.name
 
 _MD_PLACEHOLDER = """\
 # voicepad
@@ -171,7 +175,7 @@ class VoicePadApp(App[None]):
                     yield Static(id="settings-fields")
                 with Static(id="settings-footer"):
                     yield Label("", id="settings-status")
-                    yield Button("💾  save", id="settings-save-btn")
+                    yield Button("󰆓  save", id="settings-save-btn")
 
         yield Footer()
 
@@ -186,8 +190,8 @@ class VoicePadApp(App[None]):
         hist_list = self.query_one("#history-list-pane", Static)
         hist_list.mount(OptionList(id="history-options"))
 
-        self.register_theme(VOICEPAD_THEME)
-        self.theme = "voicepad"
+        self.register_theme(_BLUE_MOCHA)
+        self.theme = _THEME_NAME
         self._load_history_from_disk()
         self._populate_settings()
         self._warm_model_worker()
@@ -214,6 +218,7 @@ class VoicePadApp(App[None]):
 
     def _populate_settings(self) -> None:
         """Build the settings form — only user-facing fields shown."""
+        from utilityhub_config import get_config_path
         from voicepad_core.config import Config as _Config
 
         from voicepad.cli.config import _get_input_devices
@@ -227,23 +232,29 @@ class VoicePadApp(App[None]):
 
         # Build device options once — reused for the Select widget
         audio_devices = _get_input_devices()
-        # "system default" option stored as value -1 (sentinel for None)
         device_options: list[tuple[str, int]] = [("system default", -1)]
         device_options += [(f"[{d.index}]  {d.name}", d.index) for d in audio_devices]
 
         container = self.query_one("#settings-fields", Static)
         _, meta = get_config_with_metadata()
 
+        # Show the config file path at the top so users know where to find it
+        config_path = get_config_path("voicepad", format="yaml")
+        path_label = Label(
+            f"[dim]  {config_path}[/]",
+            id="settings-config-path",
+        )
+        container.mount(path_label)
+
         for field_name, hint in user_fields.items():
             field_info = _Config.model_fields.get(field_name)
             if field_info is None:
                 continue
             current_val = getattr(self.config, field_name)
-            src = meta.get_source(field_name)
-            source_label = src.source if src else "default"
 
+            # Show field name only — no source label
             key_label = Label(
-                f"[bold]{field_name}[/]  [dim]({source_label})[/]",
+                f"[bold]{field_name}[/]",
                 classes="settings-key",
             )
             hint_label = Label(f"[dim]{hint}[/]", classes="settings-hint")
@@ -306,7 +317,7 @@ class VoicePadApp(App[None]):
                 elif field_name == "input_device_index":
                     sel = self.query_one("#setting-input_device_index", Select)
                     if sel.value is not Select.BLANK:
-                        v = int(sel.value)
+                        v = int(sel.value)  # ty:ignore[invalid-argument-type]
                         raw[field_name] = None if v == -1 else v
                 else:
                     inp = self.query_one(f"#setting-{field_name}", Input)
@@ -328,7 +339,11 @@ class VoicePadApp(App[None]):
 
         try:
             new_config = _Config(**raw)
-            write_config(new_config, "voicepad", path=Path("voicepad.yaml"), format="yaml")
+            # Always write to the global config — never a project-local file
+            from utilityhub_config import get_config_path
+
+            global_path = get_config_path("voicepad", format="yaml")
+            write_config(new_config, "voicepad", path=global_path, format="yaml")
 
             model_changed = (
                 new_config.transcription_model != self.config.transcription_model
@@ -411,7 +426,7 @@ class VoicePadApp(App[None]):
 
         # Start streaming transcriber — transcribes chunks during recording
         self._streamer = StreamingTranscriber(
-            recorder=self._session._recorder,
+            recorder=self._session._recorder,  # ty:ignore[invalid-argument-type]
             config=self.config,
             on_chunk=lambda chunk: self.call_from_thread(self._on_stream_chunk, chunk),
             on_error=lambda err: self.call_from_thread(self._set_status, "error", err),
@@ -530,7 +545,7 @@ class VoicePadApp(App[None]):
     @on(OptionList.OptionSelected, "#history-options")
     def on_history_option_selected(self, event: OptionList.OptionSelected) -> None:
         with contextlib.suppress(Exception):
-            idx = int(event.option.id)  # type: ignore[arg-type]
+            idx = int(event.option.id)  # type: ignore[arg-type]  # ty:ignore[invalid-argument-type]
             if 0 <= idx < len(self._entries):
                 self._selected_entry_idx = idx
                 entry = self._entries[idx]
@@ -648,7 +663,7 @@ class VoicePadApp(App[None]):
 
     def _refresh_status_label(self) -> None:
         label = self.query_one("#status", Label)
-        if "󰔛" in str(label.renderable):
+        if "󰔛" in str(label.renderable):  # ty:ignore[unresolved-attribute]
             label.update("󰔟  transcribing…")
 
     # ------------------------------------------------------------------

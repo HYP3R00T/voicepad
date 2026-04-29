@@ -49,11 +49,11 @@ class Config(BaseModel):
     # ------------------------------------------------------------------
 
     recordings_path: Path = Field(
-        default=Path("data/recordings"),
+        default=Path("~/.config/voicepad/data/recordings"),
         description="Directory where WAV recordings are saved.",
     )
     markdown_path: Path = Field(
-        default=Path("data/markdown"),
+        default=Path("~/.config/voicepad/data/markdown"),
         description="Directory where markdown transcriptions are saved.",
     )
 
