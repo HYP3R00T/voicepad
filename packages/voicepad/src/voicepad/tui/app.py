@@ -17,6 +17,7 @@ from textual.binding import Binding
 from textual.containers import VerticalScroll
 from textual.reactive import reactive
 from textual.screen import ModalScreen
+from textual.theme import Theme
 from textual.widgets import (
     Button,
     Footer,
@@ -31,6 +32,7 @@ from textual.widgets import (
     TabbedContent,
     TabPane,
 )
+from textual.widgets._footer import FooterKey
 from textual.widgets.option_list import Option
 from voicepad_core import (
     VALID_TRANSCRIPTION_MODELS,
@@ -48,10 +50,58 @@ from voicepad.tui.workers import ModelWarmResult, RecordingSession
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Theme — use Textual's built-in Catppuccin Mocha
+# Theme — Catppuccin Mocha with blue primary instead of pink
 # ---------------------------------------------------------------------------
 
-_THEME_NAME = "catppuccin-mocha"
+_THEME_NAME = "catppuccin-mocha-blue"
+
+_CATPPUCCIN_MOCHA_BLUE = Theme(
+    name=_THEME_NAME,
+    primary="#89b4fa",  # Catppuccin Mocha Blue
+    secondary="#74c7ec",  # Catppuccin Mocha Sapphire
+    warning="#FAE3B0",
+    error="#F28FAD",
+    success="#ABE9B3",
+    accent="#fab387",
+    foreground="#cdd6f4",
+    background="#181825",
+    surface="#313244",
+    panel="#45475a",
+    variables={
+        "input-cursor-foreground": "#11111b",
+        "input-cursor-background": "#f5e0dc",
+        "input-selection-background": "#9399b2 30%",
+        "border": "#89b4fa",
+        "border-blurred": "#585b70",
+        "footer-background": "#45475a",
+        "footer-key-foreground": "#89b4fa",
+        "block-cursor-foreground": "#1e1e2e",
+        "block-cursor-text-style": "none",
+        "button-color-foreground": "#181825",
+    },
+)
+
+
+# ---------------------------------------------------------------------------
+# Custom Footer — Info key docked to the right
+# ---------------------------------------------------------------------------
+
+
+class VoicePadFooter(Footer):
+    """Footer with the Info key docked to the right alongside the palette key."""
+
+    def compose(self) -> ComposeResult:
+        # Yield all the standard left-side bindings (and the palette key)
+        yield from super().compose()
+        # Add the Info key docked to the right, just left of the palette key
+        yield FooterKey(
+            "i",
+            "i",
+            "Info",
+            "show_info",
+            classes="-command-palette -info-key",
+        ).data_bind(compact=Footer.compact)
+
 
 _MD_PLACEHOLDER = """\
 # voicepad
@@ -134,8 +184,8 @@ class VoicePadApp(App[None]):
     BINDINGS = [
         Binding("space", "toggle_recording", "Record / Stop", show=True),
         Binding("c", "copy_transcription", "Copy", show=True),
-        Binding("i", "show_info", "Info", show=True),
         Binding("q", "quit", "Quit", show=True),
+        Binding("i", "show_info", "Info", show=False, key_display="i"),
     ]
 
     _model_ready: reactive[bool] = reactive(False)
@@ -199,7 +249,7 @@ class VoicePadApp(App[None]):
                     yield Label("", id="settings-status")
                     yield Button("󰆓  save", id="settings-save-btn")
 
-        yield Footer()
+        yield VoicePadFooter()
 
     def on_mount(self) -> None:
         # ── Tab 1: record ──
@@ -212,6 +262,7 @@ class VoicePadApp(App[None]):
         hist_list = self.query_one("#history-list-pane", Static)
         hist_list.mount(OptionList(id="history-options"))
 
+        self.register_theme(_CATPPUCCIN_MOCHA_BLUE)
         self.theme = _THEME_NAME
         self._load_history_from_disk()
         self._populate_settings()

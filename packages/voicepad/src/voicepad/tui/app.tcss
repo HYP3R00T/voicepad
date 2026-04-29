@@ -48,6 +48,13 @@ Footer {
     background: transparent;
 }
 
+/* Info key sits to the right of the palette key */
+VoicePadFooter FooterKey.-info-key {
+    dock: right;
+    padding-right: 0;
+    border-left: vkey $foreground 20%;
+}
+
 #tabs {
     height: 1fr;
     padding: 0;
@@ -351,10 +358,17 @@ InfoModal {
     padding: 0;
 }
 
+/* Override Link widget default pink/magenta color with blue theme */
 #sponsor-link, #github-link {
     width: auto;
     height: 1;
     color: $primary;
+    link-color: $primary;
+    link-background: transparent;
+    link-style: bold;
+    link-color-hover: $accent;
+    link-background-hover: $boost;
+    link-style-hover: bold underline;
     text-style: bold;
     background: transparent;
     border: none;
@@ -362,6 +376,12 @@ InfoModal {
 }
 
 #sponsor-link:hover, #github-link:hover {
+    background: $boost;
+    color: $accent;
+    text-style: bold underline;
+}
+
+#sponsor-link:focus, #github-link:focus {
     background: $boost;
     color: $accent;
     text-style: bold underline;
