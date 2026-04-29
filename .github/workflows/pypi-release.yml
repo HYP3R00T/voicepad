@@ -52,9 +52,6 @@ jobs:
             exit 1
           }
 
-      - name: Sync dependencies
-        run: uv sync --all-extras --all-groups --locked
-
       - name: Bump version
         id: version
         working-directory: packages/${{ inputs.package }}
@@ -65,12 +62,21 @@ jobs:
 
       - name: Generate changelog
         run: |
-          git cliff \
-            --include-path "packages/${{ inputs.package }}/**" \
-            --tag-pattern "${{ inputs.package }}-v*" \
-            --unreleased \
-            --tag "${{ inputs.package }}-v${{ steps.version.outputs.new_version }}" \
-            --output "packages/${{ inputs.package }}/CHANGELOG.md"
+          PREV_TAG=$(git tag --list "${{ inputs.package }}-v*" --sort=-version:refname | head -n 1)
+          if [ -z "$PREV_TAG" ]; then
+            git cliff \
+              --include-path "packages/${{ inputs.package }}/**" \
+              --tag-pattern "${{ inputs.package }}-v*" \
+              --tag "${{ inputs.package }}-v${{ steps.version.outputs.new_version }}" \
+              --output "packages/${{ inputs.package }}/CHANGELOG.md"
+          else
+            git cliff \
+              --include-path "packages/${{ inputs.package }}/**" \
+              --tag-pattern "${{ inputs.package }}-v*" \
+              --tag "${{ inputs.package }}-v${{ steps.version.outputs.new_version }}" \
+              "${PREV_TAG}..HEAD" \
+              --output "packages/${{ inputs.package }}/CHANGELOG.md"
+          fi
 
       - name: Build package
         run: uv build packages/${{ inputs.package }}/
