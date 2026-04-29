@@ -645,16 +645,18 @@ class VoicePadApp(App[None]):
 
     def _stop_timer(self) -> None:
         self._timer_thread = None
-        with contextlib.suppress(Exception):
-            self.call_from_thread(self._refresh_status_label)
+        if self.is_running:
+            with contextlib.suppress(Exception):
+                self.call_from_thread(self._refresh_status_label)
 
     def _timer_loop(self) -> None:
         while self._recording:
             elapsed = time.monotonic() - self._record_start
             mins, secs = divmod(int(elapsed), 60)
             timer_str = f"{mins:02d}:{secs:02d}" if mins else f"{elapsed:.1f}s"
-            with contextlib.suppress(Exception):
-                self.call_from_thread(self._update_status_with_timer, timer_str)
+            if self.is_running:
+                with contextlib.suppress(Exception):
+                    self.call_from_thread(self._update_status_with_timer, timer_str)
             time.sleep(0.1)
 
     def _update_status_with_timer(self, timer_str: str) -> None:
