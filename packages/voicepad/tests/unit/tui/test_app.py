@@ -6,10 +6,11 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import numpy as np
-from textual.widgets import Label
-from voicepad.tui.app import VoicePadApp, _format_markdown, _format_markdown_streaming
+from textual.widgets import Label, Link
+from voicepad.tui.app import InfoModal, VoicePadApp, _format_markdown, _format_markdown_streaming
 from voicepad.tui.workers import ModelWarmResult
 from voicepad_core import ChunkResult, Config, Segment
 
@@ -167,7 +168,6 @@ class TestRecordingToggle:
             assert app._recording is False
 
     async def test_space_starts_recording_when_ready(self, monkeypatch, tmp_path: Path) -> None:
-        from unittest.mock import MagicMock
 
         config = Config(recordings_path=tmp_path / "r", markdown_path=tmp_path / "m")
         monkeypatch.setattr(VoicePadApp, "_warm_model_worker", lambda self: None, raising=False)
@@ -369,6 +369,145 @@ class TestFormatMarkdownStreaming:
         ]
         md = _format_markdown_streaming(wav, "a b", 2.0, chunks)
         assert "1200ms" in md
+
+
+# ---------------------------------------------------------------------------
+# Import needed for SimpleNamespace usage in tests
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# InfoModal tests
+# ---------------------------------------------------------------------------
+
+
+class TestInfoModal:
+    """Tests for the InfoModal screen."""
+
+    async def test_info_modal_has_sponsor_link(self, monkeypatch, tmp_path: Path) -> None:
+        """InfoModal should have a GitHub Sponsors link."""
+        config = Config(recordings_path=tmp_path / "r", markdown_path=tmp_path / "m")
+        monkeypatch.setattr(VoicePadApp, "_warm_model_worker", lambda self: None, raising=False)
+        app = VoicePadApp(config)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            # Open the info modal
+            app.push_screen(InfoModal())
+            await pilot.pause()
+            # Check for sponsor link
+            sponsor_link = app.screen.query_one("#sponsor-link", Link)
+            assert sponsor_link is not None
+            assert sponsor_link.url == "https://github.com/sponsors/HYP3R00T"
+
+    async def test_info_modal_has_github_link(self, monkeypatch, tmp_path: Path) -> None:
+        """InfoModal should have a Star on GitHub link."""
+        config = Config(recordings_path=tmp_path / "r", markdown_path=tmp_path / "m")
+        monkeypatch.setattr(VoicePadApp, "_warm_model_worker", lambda self: None, raising=False)
+        app = VoicePadApp(config)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.push_screen(InfoModal())
+            await pilot.pause()
+            github_link = app.screen.query_one("#github-link", Link)
+            assert github_link is not None
+            assert github_link.url == "https://github.com/HYP3R00T/voicepad"
+
+    async def test_info_modal_links_are_link_widgets(self, monkeypatch, tmp_path: Path) -> None:
+        """Links in the InfoModal should be Link widgets, not Label markup."""
+        config = Config(recordings_path=tmp_path / "r", markdown_path=tmp_path / "m")
+        monkeypatch.setattr(VoicePadApp, "_warm_model_worker", lambda self: None, raising=False)
+        app = VoicePadApp(config)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.push_screen(InfoModal())
+            await pilot.pause()
+            # Verify that Link widgets exist (not Label with markup)
+            sponsor_link = app.screen.query_one("#sponsor-link", Link)
+            github_link = app.screen.query_one("#github-link", Link)
+            assert isinstance(sponsor_link, Link)
+            assert isinstance(github_link, Link)
+
+
+# ---------------------------------------------------------------------------
+# Link click tests
+# ---------------------------------------------------------------------------
+
+
+class TestLinkClicks:
+    """Tests for link click functionality in the app."""
+
+    async def test_markdown_link_clicked_opens_browser(self, monkeypatch, tmp_path: Path) -> None:
+        """Clicking a link in the markdown viewer should open the browser."""
+        from textual.widgets import Markdown
+
+        config = Config(recordings_path=tmp_path / "r", markdown_path=tmp_path / "m")
+        monkeypatch.setattr(VoicePadApp, "_warm_model_worker", lambda self: None, raising=False)
+
+        mock_webbrowser = MagicMock()
+        with patch("webbrowser.open", mock_webbrowser):
+            app = VoicePadApp(config)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                # Simulate a link click event
+                event = Markdown.LinkClicked(
+                    markdown=MagicMock(),
+                    href="https://example.com",
+                )
+                app.on_markdown_link_clicked(event)
+                await pilot.pause()
+                mock_webbrowser.assert_called_once_with("https://example.com")
+
+    async def test_markdown_link_clicked_handles_errors(self, monkeypatch, tmp_path: Path) -> None:
+        """Link click handler should gracefully handle errors."""
+        from textual.widgets import Markdown
+
+        config = Config(recordings_path=tmp_path / "r", markdown_path=tmp_path / "m")
+        monkeypatch.setattr(VoicePadApp, "_warm_model_worker", lambda self: None, raising=False)
+
+        def raise_error(url: str) -> None:
+            raise OSError("Browser not found")
+
+        with patch("webbrowser.open", side_effect=raise_error):
+            app = VoicePadApp(config)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                event = Markdown.LinkClicked(
+                    markdown=MagicMock(),
+                    href="https://example.com",
+                )
+                # Should not raise an exception
+                app.on_markdown_link_clicked(event)
+                await pilot.pause()
+
+    async def test_info_modal_links_are_clickable(self, monkeypatch, tmp_path: Path) -> None:
+        """Links in the InfoModal should be Link widgets, not Label markup."""
+        config = Config(recordings_path=tmp_path / "r", markdown_path=tmp_path / "m")
+        monkeypatch.setattr(VoicePadApp, "_warm_model_worker", lambda self: None, raising=False)
+        app = VoicePadApp(config)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.push_screen(InfoModal())
+            await pilot.pause()
+            # Verify that Link widgets exist (not Label with markup)
+            sponsor_link = app.screen.query_one("#sponsor-link", Link)
+            github_link = app.screen.query_one("#github-link", Link)
+            assert isinstance(sponsor_link, Link)
+            assert isinstance(github_link, Link)
+
+    async def test_app_has_info_action(self, monkeypatch, tmp_path: Path) -> None:
+        """App should have an action to show the info modal."""
+        config = Config(recordings_path=tmp_path / "r", markdown_path=tmp_path / "m")
+        monkeypatch.setattr(VoicePadApp, "_warm_model_worker", lambda self: None, raising=False)
+        app = VoicePadApp(config)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            # Verify the action exists
+            assert hasattr(app, "action_show_info")
+            # Press 'i' to trigger the info modal
+            await pilot.press("i")
+            await pilot.pause()
+            # Check if InfoModal is in the screen stack
+            assert any(isinstance(screen, InfoModal) for screen in app.screen_stack)
 
 
 # ---------------------------------------------------------------------------

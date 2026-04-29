@@ -16,12 +16,14 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import VerticalScroll
 from textual.reactive import reactive
-from textual.theme import BUILTIN_THEMES, Theme
+from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
     Footer,
     Input,
     Label,
+    Link,
+    Markdown,
     MarkdownViewer,
     OptionList,
     Select,
@@ -46,34 +48,10 @@ from voicepad.tui.workers import ModelWarmResult, RecordingSession
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Theme — use a blue-tinted Catppuccin Mocha theme
+# Theme — use Textual's built-in Catppuccin Mocha
 # ---------------------------------------------------------------------------
 
-
-_BASE_MOCHA = BUILTIN_THEMES["catppuccin-mocha"]
-_BLUE_MOCHA = Theme(
-    name="catppuccin-mocha-blue",
-    primary="#89b4fa",  # Catppuccin Blue
-    secondary="#74c7ec",  # Catppuccin Sapphire
-    warning=_BASE_MOCHA.warning,
-    error=_BASE_MOCHA.error,
-    success=_BASE_MOCHA.success,
-    accent="#89dceb",  # Catppuccin Sky
-    foreground=_BASE_MOCHA.foreground,
-    background=_BASE_MOCHA.background,
-    surface=_BASE_MOCHA.surface,
-    panel=_BASE_MOCHA.panel,
-    boost=_BASE_MOCHA.boost,
-    dark=_BASE_MOCHA.dark,
-    luminosity_spread=_BASE_MOCHA.luminosity_spread,
-    text_alpha=_BASE_MOCHA.text_alpha,
-    variables={
-        **_BASE_MOCHA.variables,
-        "border": "#89b4fa",
-    },
-)
-
-_THEME_NAME = _BLUE_MOCHA.name
+_THEME_NAME = "catppuccin-mocha"
 
 _MD_PLACEHOLDER = """\
 # voicepad
@@ -82,6 +60,48 @@ Select a recording from the list on the left to view its full transcription here
 
 Use the **⟳ retranscribe** button to re-run the model on the selected recording.
 """
+
+# ---------------------------------------------------------------------------
+# Info Modal Screen
+# ---------------------------------------------------------------------------
+
+
+class InfoModal(ModalScreen[None]):
+    """Modal screen showing app info, version, and sponsor information."""
+
+    BINDINGS = [
+        Binding("escape", "dismiss", "Close", show=False),
+        Binding("i", "dismiss", "Close", show=False),
+    ]
+
+    def compose(self) -> ComposeResult:
+        with Static(id="info-dialog"):
+            yield Static("voicepad", id="info-title")
+            yield Static(
+                "Local voice recording & GPU-accelerated transcription",
+                id="info-subtitle",
+            )
+            yield Static("", id="info-divider")
+            with Static(id="info-details"):
+                yield Static("Version 0.1.3", classes="info-line")
+                yield Static("by Rajesh Das (HYP3R00T)", classes="info-line")
+                yield Static("MIT License", classes="info-line")
+            yield Static("", id="info-divider2")
+            with Static(id="info-tech"):
+                yield Static("Built with Python, Textual, and Whisper", classes="info-line tech-line")
+            yield Static("", id="info-divider3")
+            with Static(id="info-sponsor-section"):
+                yield Static("Support Development", id="info-sponsor-title")
+                with Static(id="info-links"):
+                    yield Link("GitHub Sponsors", url="https://github.com/sponsors/HYP3R00T", id="sponsor-link")
+                    yield Static("•", classes="link-separator")
+                    yield Link("Star on GitHub", url="https://github.com/HYP3R00T/voicepad", id="github-link")
+            yield Button("Close", variant="default", id="info-close-btn")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Close the modal when button is pressed."""
+        self.dismiss()
+
 
 # ---------------------------------------------------------------------------
 # Data
@@ -114,6 +134,7 @@ class VoicePadApp(App[None]):
     BINDINGS = [
         Binding("space", "toggle_recording", "Record / Stop", show=True),
         Binding("c", "copy_transcription", "Copy", show=True),
+        Binding("i", "show_info", "Info", show=True),
         Binding("q", "quit", "Quit", show=True),
     ]
 
@@ -162,6 +183,7 @@ class VoicePadApp(App[None]):
                         _MD_PLACEHOLDER,
                         id="history-viewer",
                         show_table_of_contents=False,
+                        open_links=False,
                     )
                     yield Button(
                         "⟳  retranscribe",
@@ -190,7 +212,6 @@ class VoicePadApp(App[None]):
         hist_list = self.query_one("#history-list-pane", Static)
         hist_list.mount(OptionList(id="history-options"))
 
-        self.register_theme(_BLUE_MOCHA)
         self.theme = _THEME_NAME
         self._load_history_from_disk()
         self._populate_settings()
@@ -317,7 +338,7 @@ class VoicePadApp(App[None]):
                 elif field_name == "input_device_index":
                     sel = self.query_one("#setting-input_device_index", Select)
                     if sel.value is not Select.BLANK:
-                        v = int(sel.value)  # ty:ignore[invalid-argument-type]
+                        v = int(sel.value)
                         raw[field_name] = None if v == -1 else v
                 else:
                     inp = self.query_one(f"#setting-{field_name}", Input)
@@ -426,7 +447,7 @@ class VoicePadApp(App[None]):
 
         # Start streaming transcriber — transcribes chunks during recording
         self._streamer = StreamingTranscriber(
-            recorder=self._session._recorder,  # ty:ignore[invalid-argument-type]
+            recorder=self._session._recorder,
             config=self.config,
             on_chunk=lambda chunk: self.call_from_thread(self._on_stream_chunk, chunk),
             on_error=lambda err: self.call_from_thread(self._set_status, "error", err),
@@ -545,7 +566,7 @@ class VoicePadApp(App[None]):
     @on(OptionList.OptionSelected, "#history-options")
     def on_history_option_selected(self, event: OptionList.OptionSelected) -> None:
         with contextlib.suppress(Exception):
-            idx = int(event.option.id)  # type: ignore[arg-type]  # ty:ignore[invalid-argument-type]
+            idx = int(event.option.id)  # type: ignore[arg-type]
             if 0 <= idx < len(self._entries):
                 self._selected_entry_idx = idx
                 entry = self._entries[idx]
@@ -557,6 +578,16 @@ class VoicePadApp(App[None]):
     async def _load_history_viewer(self, md_path: Path) -> None:
         viewer = self.query_one("#history-viewer", MarkdownViewer)
         await viewer.go(md_path.resolve())
+
+    @on(Markdown.LinkClicked)
+    def on_markdown_link_clicked(self, event: Markdown.LinkClicked) -> None:
+        """Handle link clicks in the markdown viewer by opening them in the system browser."""
+        import webbrowser
+
+        try:
+            webbrowser.open(event.href)
+        except Exception as e:
+            logger.warning(f"Failed to open link {event.href}: {e}")
 
     # ------------------------------------------------------------------
     # Retranscribe (history tab)
@@ -622,6 +653,10 @@ class VoicePadApp(App[None]):
     # Copy transcription (record tab)
     # ------------------------------------------------------------------
 
+    def action_show_info(self) -> None:
+        """Show the info modal with app details and sponsor information."""
+        self.push_screen(InfoModal())
+
     def action_copy_transcription(self) -> None:
         if not self._current_text:
             return
@@ -645,18 +680,16 @@ class VoicePadApp(App[None]):
 
     def _stop_timer(self) -> None:
         self._timer_thread = None
-        if self.is_running:
-            with contextlib.suppress(Exception):
-                self.call_from_thread(self._refresh_status_label)
+        with contextlib.suppress(Exception):
+            self.call_from_thread(self._refresh_status_label)
 
     def _timer_loop(self) -> None:
         while self._recording:
             elapsed = time.monotonic() - self._record_start
             mins, secs = divmod(int(elapsed), 60)
             timer_str = f"{mins:02d}:{secs:02d}" if mins else f"{elapsed:.1f}s"
-            if self.is_running:
-                with contextlib.suppress(Exception):
-                    self.call_from_thread(self._update_status_with_timer, timer_str)
+            with contextlib.suppress(Exception):
+                self.call_from_thread(self._update_status_with_timer, timer_str)
             time.sleep(0.1)
 
     def _update_status_with_timer(self, timer_str: str) -> None:
@@ -665,7 +698,7 @@ class VoicePadApp(App[None]):
 
     def _refresh_status_label(self) -> None:
         label = self.query_one("#status", Label)
-        if "󰔛" in str(label.renderable):  # ty:ignore[unresolved-attribute]
+        if "󰔛" in str(label.renderable):
             label.update("󰔟  transcribing…")
 
     # ------------------------------------------------------------------
