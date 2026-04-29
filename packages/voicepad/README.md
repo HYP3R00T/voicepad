@@ -1,56 +1,44 @@
-# voicepad CLI
+# voicepad
 
-Simple command-line interface for recording audio and managing transcription configuration.
+Terminal interface for VoicePad — record audio and transcribe it locally with a single keypress.
 
 ## Install
 
 ```bash
-pip install voicepad
+# Run without installing
+uvx voicepad
+
+# Install permanently
+uv tool install voicepad
 ```
 
-**Requirements:** Python 3.13+
-
-## Quick Start
+## Usage
 
 ```bash
-# List audio input devices
-voicepad config input
-
-# Start recording (press Ctrl+C to stop)
-voicepad record start
-
-# Check system capabilities
-voicepad config system
+voicepad
 ```
 
-## Example: Record and Transcribe
+That's it. The interactive TUI opens, loads the Whisper model, and you're ready to record.
 
-```bash
-# Record a meeting (will auto-transcribe)
-voicepad record start --prefix team_meeting
+| Key | Action |
+|---|---|
+| `Space` | Start / stop recording |
+| `c` | Copy transcription to clipboard |
+| `Tab` | Switch tabs (Record / History / Settings) |
+| `q` | Quit |
 
-# Output:
-# - data/recordings/team_meeting_20260218_103045.wav
-# - data/markdown/team_meeting_20260218_103045.md
+## Configuration
+
+Settings are stored at `~/.config/voicepad/voicepad.yaml` and can be changed from the **Settings** tab inside the app.
+
+```yaml
+transcription_model: turbo       # default model
+transcription_device: auto       # auto, cuda, or cpu
+input_device_index: null         # null = system default mic
+recordings_path: ~/.config/voicepad/data/recordings
+markdown_path: ~/.config/voicepad/data/markdown
 ```
 
 ## Documentation
 
-- [CLI Command Reference](https://voicepad.readthedocs.io/packages/voicepad/) - Full documentation
-- [voicepad-core Library](https://voicepad.readthedocs.io/packages/voicepad-core/) - Python API
-- [Main README](https://github.com/HYP3R00T/voicepad#readme) - Project overview
-
-## Configuration
-
-Edit `voicepad.yaml` to set defaults:
-
-```yaml
-recordings_path: data/recordings
-markdown_path: data/markdown
-input_device_index: null
-transcription_model: tiny
-transcription_device: auto
-transcription_compute_type: auto
-```
-
-See the [full documentation](https://voicepad.readthedocs.io/packages/voicepad/) for all configuration options.
+**[voicepad.hyperoot.dev](https://voicepad.hyperoot.dev)**
