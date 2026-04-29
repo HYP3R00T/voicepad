@@ -80,23 +80,6 @@ class TestConfigExpandPaths:
         config = Config(recordings_path="data/recordings", markdown_path="data/markdown")
         assert config.transcription_compute_type == "auto"
 
-    def test_default_vad_enabled(self) -> None:
-        """vad_enabled defaults to True."""
-        config = Config(recordings_path="data/recordings", markdown_path="data/markdown")
-        assert config.vad_enabled is True
-
-    def test_default_vad_threshold(self) -> None:
-        """vad_threshold defaults to 0.5."""
-        config = Config(recordings_path="data/recordings", markdown_path="data/markdown")
-        assert config.vad_threshold == 0.5
-
-    def test_vad_threshold_rejects_out_of_range(self) -> None:
-        """vad_threshold must be between 0.0 and 1.0."""
-        from pydantic import ValidationError
-
-        with pytest.raises(ValidationError):
-            Config(recordings_path="data/recordings", markdown_path="data/markdown", vad_threshold=1.5)
-
     def test_transcription_device_rejects_invalid(self) -> None:
         """transcription_device only accepts 'auto', 'cuda', 'cpu'."""
         from pydantic import ValidationError

@@ -114,46 +114,6 @@ class Config(BaseModel):
         ),
     )
 
-    # ------------------------------------------------------------------
-    # VAD (Voice Activity Detection) chunking
-    # ------------------------------------------------------------------
-
-    vad_enabled: bool = Field(
-        default=True,
-        description="Enable VAD-based chunking for long recordings. "
-        "When enabled, audio is split at natural speech boundaries.",
-    )
-    vad_min_chunk_duration: float = Field(
-        default=10.0,
-        ge=10.0,
-        le=600.0,
-        description="Minimum audio duration (seconds) before allowing a chunk split. "
-        "Higher = fewer, longer chunks with more context. "
-        "Lower = more frequent splits, faster first results.",
-    )
-    vad_threshold: float = Field(
-        default=0.5,
-        ge=0.0,
-        le=1.0,
-        description="Speech detection sensitivity (0.0–1.0). "
-        "Higher = stricter (less likely to detect as speech). "
-        "Lower = more lenient. Recommended: 0.4–0.6.",
-    )
-    vad_min_silence_duration_ms: int = Field(
-        default=1000,
-        ge=100,
-        le=5000,
-        description="Minimum silence duration (ms) required to trigger a chunk boundary. "
-        "Higher = longer pauses needed. Lower = splits at shorter pauses.",
-    )
-    vad_speech_pad_ms: int = Field(
-        default=400,
-        ge=0,
-        le=2000,
-        description="Padding (ms) added to each side of detected speech segments. "
-        "Prevents cutting off speech edges. Recommended: 300–500ms.",
-    )
-
     @field_validator("recordings_path", "markdown_path", mode="before")
     @classmethod
     def expand_paths(cls, v: Path | str) -> Path:
