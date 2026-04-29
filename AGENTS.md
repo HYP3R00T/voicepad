@@ -11,11 +11,12 @@ Instructions for coding agents working in this repository.
 
 ```sh
 mise install
-uv sync --extra gpu --upgrade
+uv sync --upgrade
 prek install --hook-type pre-commit --overwrite
 prek install --hook-type commit-msg --overwrite
 ```
 
+GPU support (CUDA DLLs) is bundled with `torch` — no separate CUDA installation needed.
 Dev container runs `scripts/setup.sh` automatically on create.
 
 ## Key files

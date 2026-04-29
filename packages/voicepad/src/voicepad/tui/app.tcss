@@ -1,0 +1,418 @@
+/* VoicePad — minimal layout stylesheet */
+
+Screen {
+    layout: vertical;
+}
+
+/* ── header bar ── */
+#header {
+    height: 1;
+    background: $background;
+    layout: horizontal;
+    padding: 0 2;
+}
+
+/* ── separator between header and tabs ── */
+#header-rule {
+    height: 1;
+    background: $background;
+    border-bottom: solid $border-blurred;
+}
+
+#header-title {
+    width: auto;
+    content-align: left middle;
+    color: $primary;
+    text-style: bold;
+    margin-right: 1;
+}
+
+#header-version {
+    width: auto;
+    content-align: left middle;
+    color: $text-muted;
+    margin-right: 2;
+}
+
+#status {
+    width: 1fr;
+    content-align: center middle;
+    text-align: center;
+    color: $text-muted;
+}
+
+#status.ready        { color: $text-success; }
+#status.recording    { color: $text-error; }
+#status.transcribing { color: $text-warning; }
+#status.error        { color: $text-error; }
+
+#header-model {
+    width: auto;
+    content-align: right middle;
+    color: $text-muted;
+}
+
+/* ── body + tabs ── */
+#body {
+    layout: vertical;
+    height: 1fr;
+}
+
+Footer {
+    background: transparent;
+}
+
+#tabs {
+    height: 1fr;
+    padding: 0;
+}
+
+Tabs .underline--bar {
+    background: $border-blurred 50%;
+    color: $border-blurred;
+}
+
+TabPane {
+    padding: 1 2;
+    height: 1fr;
+    layout: vertical;
+}
+
+/* ── record tab ── */
+#transcription {
+    border: round $border-blurred;
+    border-title-color: $primary;
+    padding: 1 2;
+    height: 1fr;
+    background: transparent;
+    overflow-y: auto;
+}
+
+#tx-text {
+    width: 1fr;
+    height: auto;
+    color: $foreground;
+}
+
+#tx-text.placeholder {
+    color: $text-disabled;
+    text-style: italic;
+}
+
+#tx-meta {
+    height: 1;
+    color: $text-muted;
+    margin-top: 1;
+}
+
+#tx-copy-btn {
+    width: auto;
+    height: 1;
+    border: none;
+    background: transparent;
+    color: $text-muted;
+    margin-top: 1;
+    padding: 0 1;
+    min-width: 10;
+}
+
+#tx-copy-btn:hover {
+    background: $boost;
+    color: $primary;
+}
+
+#tx-copy-btn:disabled {
+    color: $text-disabled;
+}
+
+/* ── history tab ── */
+#history-section {
+    layout: horizontal;
+    height: 1fr;
+}
+
+#history-list-pane {
+    border: round $border-blurred;
+    border-title-color: $text-muted;
+    width: 55;
+    height: 1fr;
+    background: transparent;
+    margin-right: 1;
+}
+
+#history-view-pane {
+    border: round $border-blurred;
+    border-title-color: $primary;
+    width: 1fr;
+    height: 1fr;
+    background: transparent;
+    layout: vertical;
+}
+
+#history-options {
+    width: 1fr;
+    height: 1fr;
+    background: transparent;
+    border: none;
+    padding: 0;
+}
+
+#history-viewer {
+    width: 1fr;
+    height: 1fr;
+    background: transparent;
+    scrollbar-gutter: auto;
+    scrollbar-size-vertical: 1;
+}
+
+/* Override Markdown's default padding: 0 2 0 2 — remove right padding so
+   content sits flush against the scrollbar with no dead space */
+#history-view-pane MarkdownViewer > Markdown {
+    padding: 0 0 0 2;
+}
+
+#retranscribe-btn {
+    width: auto;
+    height: 1;
+    border: none;
+    background: transparent;
+    color: $text-warning;
+    text-style: bold;
+    margin: 1 2;
+    padding: 0 1;
+}
+
+#retranscribe-btn:hover {
+    background: $warning-muted;
+    color: $warning;
+}
+
+#retranscribe-btn:disabled {
+    color: $text-disabled;
+}
+
+/* ── settings tab ── */
+#settings-scroll {
+    height: 1fr;
+    width: 1fr;
+}
+
+#settings-fields {
+    layout: vertical;
+    height: auto;
+    width: 1fr;
+    padding: 0 1;
+}
+
+#settings-config-path {
+    height: 1;
+    color: $text-muted;
+    background: $surface;
+    border-left: tall $primary;
+    margin-bottom: 2;
+    padding: 0 2;
+}
+
+.settings-row {
+    layout: vertical;
+    height: auto;
+    width: 1fr;
+    margin-bottom: 1;
+    padding-bottom: 1;
+}
+
+.settings-key {
+    height: 1;
+    color: $primary;
+    margin-bottom: 0;
+}
+
+.settings-input {
+    width: 1fr;
+    margin-top: 0;
+}
+
+#settings-footer {
+    layout: horizontal;
+    height: 3;
+    align: right middle;
+    padding: 0 2;
+}
+
+#settings-status {
+    width: 1fr;
+    content-align: left middle;
+    color: $text-muted;
+}
+
+#settings-save-btn {
+    width: auto;
+    height: 1;
+    border: none;
+    background: transparent;
+    color: $text-success;
+    text-style: bold;
+    padding: 0 1;
+}
+
+#settings-save-btn:hover {
+    background: $boost;
+    color: $success;
+}
+
+/* ── info modal ── */
+InfoModal {
+    align: center middle;
+}
+
+#info-dialog {
+    layout: vertical;
+    padding: 3 5;
+    width: 64;
+    height: auto;
+    border: tall $primary;
+    background: $background;
+}
+
+/* Level 1 — strong: header */
+#info-title {
+    width: 100%;
+    height: auto;
+    text-align: center;
+    color: $foreground;
+    text-style: bold;
+    margin-bottom: 2;
+}
+
+/* Level 2 — normal: tagline */
+#info-subtitle {
+    width: 100%;
+    height: auto;
+    text-align: center;
+    color: $text;
+    margin-bottom: 2;
+}
+
+/* Features box — border only, same background as dialog */
+#info-guarantees {
+    width: 100%;
+    height: auto;
+    layout: vertical;
+    padding: 1 3;
+    margin-bottom: 2;
+    border: round $border-blurred;
+}
+
+.guarantee-line {
+    width: 100%;
+    height: 1;
+    color: $text;
+}
+
+/* Philosophy — centered, slightly dim */
+#info-philosophy {
+    width: 100%;
+    height: 1;
+    text-align: center;
+    color: $text-muted;
+    margin-bottom: 2;
+}
+
+/* Separator */
+#info-divider, #info-divider2 {
+    width: 100%;
+    height: 0;
+    border-bottom: solid $border-blurred;
+    margin: 0 0 2 0;
+}
+
+/* Level 1 — CTA title */
+#info-sponsor-title {
+    width: 100%;
+    height: 1;
+    text-align: center;
+    color: $foreground;
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+/* CTA buttons row */
+#info-links {
+    width: 100%;
+    height: 1;
+    layout: horizontal;
+    align: center middle;
+    margin-bottom: 1;
+}
+
+/* Both links — bold, primary blue, never underlined */
+#github-link, #sponsor-link {
+    width: auto;
+    height: 1;
+    color: $primary;
+    link-color: $primary;
+    link-background: transparent;
+    link-style: bold;
+    link-color-hover: $foreground;
+    link-background-hover: transparent;
+    link-style-hover: bold;
+    text-style: bold;
+    background: transparent;
+    border: none;
+    padding: 0 1;
+}
+
+#github-link:hover, #sponsor-link:hover {
+    color: $foreground;
+    text-style: bold;
+    background: transparent;
+}
+
+#github-link:focus, #sponsor-link:focus {
+    color: $primary;
+    text-style: bold;
+    background: transparent;
+}
+
+.link-separator {
+    width: auto;
+    height: 1;
+    color: $border-blurred;
+    padding: 0 1;
+    content-align: center middle;
+}
+
+/* Micro text */
+#info-microcopy {
+    width: 100%;
+    height: 1;
+    text-align: center;
+    color: $text-disabled;
+    text-style: italic;
+    margin-bottom: 2;
+}
+
+/* Level 3 — dim: metadata */
+#info-meta {
+    width: 100%;
+    height: 1;
+    text-align: center;
+    color: $text-disabled;
+    margin-bottom: 2;
+}
+
+/* Close button */
+#info-close-btn {
+    width: 100%;
+    height: 1;
+    border: none;
+    background: transparent;
+    color: $text-muted;
+    text-style: none;
+}
+
+#info-close-btn:hover {
+    background: transparent;
+    color: $foreground;
+    text-style: bold;
+}

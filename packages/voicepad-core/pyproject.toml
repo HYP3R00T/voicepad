@@ -36,10 +36,10 @@ classifiers = [
 
 dependencies = [
   "faster-whisper>=1.2.1",
-  "psutil>=7.2.2",
   "pydantic>=2.0.0",
   "sounddevice>=0.5.5",
   "soundfile>=0.13.1",
+  "torch>=2.11.0",
   "utilityhub-config>=0.2.2",
 ]
 
@@ -49,17 +49,13 @@ Repository = "https://github.com/HYP3R00T/voicepad"
 Issues = "https://github.com/HYP3R00T/voicepad/issues"
 Documentation = "https://hyp3r00t.github.io/voicepad/"
 
-[project.optional-dependencies]
-gpu = [
-  # CUDA 12.x libraries for GPU acceleration (NVIDIA only, Windows/Linux)
-  # These are installed in virtual environment, no system conflicts
-  # Compatible with all NVIDIA GPUs from GTX 10-series to RTX 50-series
-  "nvidia-cublas-cu12>=12.0.0,<13.0.0",
-  "nvidia-cudnn-cu12>=9.0.0,<10.0.0",
-]
+[[tool.uv.index]]
+url = "https://download.pytorch.org/whl/cu128"
+name = "pytorch-cu128"
+explicit = true
 
-[project.scripts]
-voicepad-core = "voicepad_core.main:main"
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
 
 [build-system]
 requires = ["uv_build>=0.10.2,<0.11.0"]

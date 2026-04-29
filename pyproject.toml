@@ -6,13 +6,6 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = ["voicepad", "voicepad-core"]
 
-[project.optional-dependencies]
-gpu = [
-  # For local development with GPU support
-  # Chains to voicepad[gpu] -> voicepad-core[gpu]
-  "voicepad[gpu]",
-]
-
 [tool.uv.workspace]
 members = ["packages/voicepad-core", "packages/voicepad"]
 
@@ -24,7 +17,14 @@ voicepad-core = { workspace = true }
 dev = [
   "pytest>=9.0.2",
   "pytest-cov>=7.0.0",
+  "pytest-asyncio>=1.3.0",
   "ruff>=0.15.1",
   "ty>=0.0.17",
   "zensical>=0.0.23",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+markers = [
+  "gpu: marks tests that require a CUDA GPU. Skipped by default — pass --run-gpu to include.",
 ]
