@@ -32,7 +32,6 @@ from textual.widgets import (
     TabbedContent,
     TabPane,
 )
-from textual.widgets._footer import FooterKey
 from textual.widgets.option_list import Option
 from voicepad_core import (
     VALID_TRANSCRIPTION_MODELS,
@@ -82,27 +81,6 @@ _CATPPUCCIN_MOCHA_BLUE = Theme(
 )
 
 
-# ---------------------------------------------------------------------------
-# Custom Footer — Info key docked to the right
-# ---------------------------------------------------------------------------
-
-
-class VoicePadFooter(Footer):
-    """Footer with the Info key docked to the right alongside the palette key."""
-
-    def compose(self) -> ComposeResult:
-        # Yield all the standard left-side bindings (and the palette key)
-        yield from super().compose()
-        # Add the Info key docked to the right, just left of the palette key
-        yield FooterKey(
-            "i",
-            "i",
-            "Info",
-            "show_info",
-            classes="-command-palette -info-key",
-        ).data_bind(compact=Footer.compact)
-
-
 _MD_PLACEHOLDER = """\
 # voicepad
 
@@ -126,26 +104,61 @@ class InfoModal(ModalScreen[None]):
 
     def compose(self) -> ComposeResult:
         with Static(id="info-dialog"):
-            yield Static("voicepad", id="info-title")
+            # ── 1. Header ─────────────────────────────────────────
+            yield Static("󰍬  VoicePad", id="info-title")
+
+            # ── 2. Tagline ────────────────────────────────────────
             yield Static(
-                "Local voice recording & GPU-accelerated transcription",
+                "Your voice, your data.\nTranscription that never leaves your machine.",
                 id="info-subtitle",
             )
+
+            # ── 3. Features box ───────────────────────────────────
+            with Static(id="info-guarantees"):
+                yield Static("󰒍  Fully local processing", classes="guarantee-line")
+                yield Static("󰌨  GPU-accelerated transcription", classes="guarantee-line")
+                yield Static("󰍹  No cloud. No tracking. No data leaks.", classes="guarantee-line")
+
+            # ── 4. Philosophy ─────────────────────────────────────
+            yield Static(
+                "Built with 󰋑 using Python, Textual, and Whisper",
+                id="info-philosophy",
+            )
+
+            # ── 5. Separator ──────────────────────────────────────
             yield Static("", id="info-divider")
-            with Static(id="info-details"):
-                yield Static("Version 0.1.3", classes="info-line")
-                yield Static("by Rajesh Das (HYP3R00T)", classes="info-line")
-                yield Static("MIT License", classes="info-line")
+
+            # ── 6. CTA ────────────────────────────────────────────
+            yield Static("Support the project", id="info-sponsor-title")
+            with Static(id="info-links"):
+                yield Link(
+                    "󰊤  Star on GitHub",
+                    url="https://github.com/HYP3R00T/voicepad",
+                    id="github-link",
+                )
+                yield Static("  ", classes="link-separator")
+                yield Link(
+                    "󰋑  Sponsor Me",
+                    url="https://github.com/sponsors/HYP3R00T",
+                    id="sponsor-link",
+                )
+
+            # ── 7. Micro text ─────────────────────────────────────
+            yield Static(
+                "Privacy-first tools grow through community support.",
+                id="info-microcopy",
+            )
+
+            # ── 8. Metadata ───────────────────────────────────────
+            yield Static(
+                "v0.1.3  •  Rajesh Das (HYP3R00T)  •  MIT License",
+                id="info-meta",
+            )
+
+            # ── 9. Separator ──────────────────────────────────────
             yield Static("", id="info-divider2")
-            with Static(id="info-tech"):
-                yield Static("Built with Python, Textual, and Whisper", classes="info-line tech-line")
-            yield Static("", id="info-divider3")
-            with Static(id="info-sponsor-section"):
-                yield Static("Support Development", id="info-sponsor-title")
-                with Static(id="info-links"):
-                    yield Link("GitHub Sponsors", url="https://github.com/sponsors/HYP3R00T", id="sponsor-link")
-                    yield Static("•", classes="link-separator")
-                    yield Link("Star on GitHub", url="https://github.com/HYP3R00T/voicepad", id="github-link")
+
+            # ── 10. Close ─────────────────────────────────────────
             yield Button("Close", variant="default", id="info-close-btn")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -185,7 +198,7 @@ class VoicePadApp(App[None]):
         Binding("space", "toggle_recording", "Record / Stop", show=True),
         Binding("c", "copy_transcription", "Copy", show=True),
         Binding("q", "quit", "Quit", show=True),
-        Binding("i", "show_info", "Info", show=False, key_display="i"),
+        Binding("i", "show_info", "Info", show=True, key_display="i"),
     ]
 
     _model_ready: reactive[bool] = reactive(False)
@@ -211,9 +224,12 @@ class VoicePadApp(App[None]):
 
     def compose(self) -> ComposeResult:
         with Static(id="header"):
-            yield Label("voicepad", id="header-title")
+            yield Label("VoicePad", id="header-title")
+            yield Label("v0.1.3", id="header-version")
             yield Label("󰔟  initialising", id="status")
             yield Label("loading…", id="header-model")
+
+        yield Static(id="header-rule")
 
         with Static(id="body"), TabbedContent(id="tabs"):
             # ── Tab 1: Record ──────────────────────────────────────
@@ -249,7 +265,7 @@ class VoicePadApp(App[None]):
                     yield Label("", id="settings-status")
                     yield Button("󰆓  save", id="settings-save-btn")
 
-        yield VoicePadFooter()
+        yield Footer()
 
     def on_mount(self) -> None:
         # ── Tab 1: record ──
@@ -313,7 +329,7 @@ class VoicePadApp(App[None]):
         # Show the config file path at the top so users know where to find it
         config_path = get_config_path("voicepad", format="yaml")
         path_label = Label(
-            f"[dim]  {config_path}[/]",
+            f"[dim]config file:[/]  {config_path}",
             id="settings-config-path",
         )
         container.mount(path_label)
@@ -324,12 +340,11 @@ class VoicePadApp(App[None]):
                 continue
             current_val = getattr(self.config, field_name)
 
-            # Show field name only — no source label
+            # Single-line label: "field_name  —  hint description"
             key_label = Label(
-                f"[bold]{field_name}[/]",
+                f"[bold]{field_name}[/]  [dim]—  {hint}[/]",
                 classes="settings-key",
             )
-            hint_label = Label(f"[dim]{hint}[/]", classes="settings-hint")
 
             if field_name == "transcription_model":
                 options = [(m, m) for m in VALID_TRANSCRIPTION_MODELS]
@@ -362,7 +377,7 @@ class VoicePadApp(App[None]):
 
             row = Static(classes="settings-row")
             container.mount(row)
-            row.mount(key_label, hint_label, widget)
+            row.mount(key_label, widget)
 
     @on(Button.Pressed, "#settings-save-btn")
     def on_settings_save(self) -> None:
@@ -430,7 +445,7 @@ class VoicePadApp(App[None]):
                 _model_cache.clear()
                 self._model_ready = False
                 self._set_status("transcribing", "loading model…")
-                self.query_one("#header-model", Label).update("loading…")
+                self.query_one("#header-model", Label).update("[dim]M:[/] loading…")
                 self._warm_model_worker()
                 status.update("[green]✓  saved — reloading model[/]")
             else:
@@ -461,8 +476,7 @@ class VoicePadApp(App[None]):
 
         fallback = "  cpu fallback" if result.fallback else ""
         model_label.update(
-            f"[dim]{self.config.transcription_model}[/]  "
-            f"[bold]{result.device}[/] [dim]{result.compute_type}{fallback}[/]"
+            f"[dim]model:[/] {self.config.transcription_model}  [dim]device:[/] {result.device}{fallback}"
         )
         self._set_status("ready", "ready")
         self._model_ready = True

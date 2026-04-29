@@ -12,12 +12,26 @@ Screen {
     padding: 0 2;
 }
 
+/* ── separator between header and tabs ── */
+#header-rule {
+    height: 1;
+    background: $background;
+    border-bottom: solid $border-blurred;
+}
+
 #header-title {
     width: auto;
     content-align: left middle;
     color: $primary;
     text-style: bold;
-    margin-right: 3;
+    margin-right: 1;
+}
+
+#header-version {
+    width: auto;
+    content-align: left middle;
+    color: $text-muted;
+    margin-right: 2;
 }
 
 #status {
@@ -46,13 +60,6 @@ Screen {
 
 Footer {
     background: transparent;
-}
-
-/* Info key sits to the right of the palette key */
-VoicePadFooter FooterKey.-info-key {
-    dock: right;
-    padding-right: 0;
-    border-left: vkey $foreground 20%;
 }
 
 #tabs {
@@ -200,8 +207,10 @@ TabPane {
 #settings-config-path {
     height: 1;
     color: $text-muted;
-    margin-bottom: 1;
-    padding: 0 1;
+    background: $surface;
+    border-left: tall $primary;
+    margin-bottom: 2;
+    padding: 0 2;
 }
 
 .settings-row {
@@ -209,19 +218,12 @@ TabPane {
     height: auto;
     width: 1fr;
     margin-bottom: 1;
-    border-bottom: solid $border-blurred;
     padding-bottom: 1;
 }
 
 .settings-key {
     height: 1;
     color: $primary;
-    margin-bottom: 0;
-}
-
-.settings-hint {
-    height: 1;
-    color: $text-muted;
     margin-bottom: 0;
 }
 
@@ -235,7 +237,6 @@ TabPane {
     height: 3;
     align: right middle;
     padding: 0 2;
-    border-top: solid $border-blurred;
 }
 
 #settings-status {
@@ -266,147 +267,152 @@ InfoModal {
 
 #info-dialog {
     layout: vertical;
-    padding: 3 4;
-    width: 60;
+    padding: 3 5;
+    width: 64;
     height: auto;
-    border: thick $primary;
-    background: $panel;
+    border: tall $primary;
+    background: $background;
 }
 
+/* Level 1 — strong: header */
 #info-title {
     width: 100%;
     height: auto;
-    content-align: center middle;
     text-align: center;
-    color: $primary;
+    color: $foreground;
     text-style: bold;
-    padding: 0;
-    margin-bottom: 1;
+    margin-bottom: 2;
 }
 
+/* Level 2 — normal: tagline */
 #info-subtitle {
     width: 100%;
     height: auto;
-    content-align: center middle;
-    text-align: center;
-    color: $text-muted;
-    text-style: italic;
-    padding: 0;
-    margin-bottom: 1;
-}
-
-#info-divider, #info-divider2, #info-divider3 {
-    width: 100%;
-    height: 0;
-    border-bottom: solid $border;
-    margin: 1 0;
-}
-
-#info-details {
-    width: 100%;
-    height: auto;
-    layout: vertical;
-    align: center middle;
-    padding: 0;
-}
-
-.info-line {
-    width: 100%;
-    height: 1;
-    content-align: center middle;
     text-align: center;
     color: $text;
-    padding: 0;
+    margin-bottom: 2;
 }
 
-#info-tech {
+/* Features box — border only, same background as dialog */
+#info-guarantees {
     width: 100%;
     height: auto;
     layout: vertical;
-    align: center middle;
-    padding: 0;
+    padding: 1 3;
+    margin-bottom: 2;
+    border: round $border-blurred;
 }
 
-.tech-line {
+.guarantee-line {
+    width: 100%;
+    height: 1;
+    color: $text;
+}
+
+/* Philosophy — centered, slightly dim */
+#info-philosophy {
+    width: 100%;
+    height: 1;
+    text-align: center;
     color: $text-muted;
-    text-style: italic;
+    margin-bottom: 2;
 }
 
-#info-sponsor-section {
+/* Separator */
+#info-divider, #info-divider2 {
     width: 100%;
-    height: auto;
-    layout: vertical;
-    align: center middle;
-    padding: 0;
+    height: 0;
+    border-bottom: solid $border-blurred;
+    margin: 0 0 2 0;
 }
 
+/* Level 1 — CTA title */
 #info-sponsor-title {
     width: 100%;
     height: 1;
-    content-align: center middle;
     text-align: center;
-    color: $text;
+    color: $foreground;
     text-style: bold;
     margin-bottom: 1;
 }
 
+/* CTA buttons row */
 #info-links {
     width: 100%;
-    height: auto;
+    height: 1;
     layout: horizontal;
     align: center middle;
-    padding: 0;
+    margin-bottom: 1;
 }
 
-/* Override Link widget default pink/magenta color with blue theme */
-#sponsor-link, #github-link {
+/* Both links — bold, primary blue, never underlined */
+#github-link, #sponsor-link {
     width: auto;
     height: 1;
     color: $primary;
     link-color: $primary;
     link-background: transparent;
     link-style: bold;
-    link-color-hover: $accent;
-    link-background-hover: $boost;
-    link-style-hover: bold underline;
+    link-color-hover: $foreground;
+    link-background-hover: transparent;
+    link-style-hover: bold;
     text-style: bold;
     background: transparent;
     border: none;
     padding: 0 1;
 }
 
-#sponsor-link:hover, #github-link:hover {
-    background: $boost;
-    color: $accent;
-    text-style: bold underline;
+#github-link:hover, #sponsor-link:hover {
+    color: $foreground;
+    text-style: bold;
+    background: transparent;
 }
 
-#sponsor-link:focus, #github-link:focus {
-    background: $boost;
-    color: $accent;
-    text-style: bold underline;
+#github-link:focus, #sponsor-link:focus {
+    color: $primary;
+    text-style: bold;
+    background: transparent;
 }
 
 .link-separator {
     width: auto;
     height: 1;
-    color: $text-muted;
+    color: $border-blurred;
     padding: 0 1;
     content-align: center middle;
 }
 
+/* Micro text */
+#info-microcopy {
+    width: 100%;
+    height: 1;
+    text-align: center;
+    color: $text-disabled;
+    text-style: italic;
+    margin-bottom: 2;
+}
+
+/* Level 3 — dim: metadata */
+#info-meta {
+    width: 100%;
+    height: 1;
+    text-align: center;
+    color: $text-disabled;
+    margin-bottom: 2;
+}
+
+/* Close button */
 #info-close-btn {
     width: 100%;
     height: 1;
-    margin: 2 0 0 0;
     border: none;
-    background: $primary 20%;
-    color: $primary;
-    text-style: bold;
+    background: transparent;
+    color: $text-muted;
+    text-style: none;
 }
 
 #info-close-btn:hover {
-    background: $primary;
-    color: $surface;
+    background: transparent;
+    color: $foreground;
     text-style: bold;
 }
