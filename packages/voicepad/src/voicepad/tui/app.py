@@ -137,7 +137,7 @@ class VoicePadApp(App[None]):
     def compose(self) -> ComposeResult:
         with Static(id="header"):
             yield Label("voicepad", id="header-title")
-            yield Label("○  initialising", id="status")
+            yield Label("󰔟  initialising", id="status")
             yield Label("loading…", id="header-model")
 
         with Static(id="body"), TabbedContent(id="tabs"):
@@ -644,20 +644,20 @@ class VoicePadApp(App[None]):
 
     def _update_status_with_timer(self, timer_str: str) -> None:
         label = self.query_one("#status", Label)
-        label.update(f"◉  recording…  ⏱ {timer_str}")
+        label.update(f"󰑊  recording…  󰔛 {timer_str}")
 
     def _refresh_status_label(self) -> None:
         label = self.query_one("#status", Label)
-        if "⏱" in str(label.renderable):
-            label.update("◌  transcribing…")
+        if "󰔛" in str(label.renderable):
+            label.update("󰔟  transcribing…")
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 
     def _set_status(self, state: str, message: str) -> None:
-        dots = {"ready": "●", "recording": "◉", "transcribing": "◌", "error": "✕"}
-        dot = dots.get(state, "○")
+        dots = {"ready": "", "recording": "󰑊", "transcribing": "󰔟", "error": "󰅙"}
+        dot = dots.get(state, "󰔟")
         label = self.query_one("#status", Label)
         label.remove_class("ready", "recording", "transcribing", "error")
         if state:

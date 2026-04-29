@@ -7,7 +7,7 @@ Screen {
 /* ── header bar ── */
 #header {
     height: 1;
-    background: $panel;
+    background: $background;
     layout: horizontal;
     padding: 0 2;
 }
@@ -44,9 +44,18 @@ Screen {
     height: 1fr;
 }
 
+Footer {
+    background: transparent;
+}
+
 #tabs {
     height: 1fr;
     padding: 0;
+}
+
+Tabs .underline--bar {
+    background: $border-blurred 50%;
+    color: $border-blurred;
 }
 
 TabPane {
@@ -61,7 +70,7 @@ TabPane {
     border-title-color: $primary;
     padding: 1 2;
     height: 1fr;
-    background: $surface;
+    background: transparent;
     overflow-y: auto;
 }
 
@@ -113,7 +122,7 @@ TabPane {
     border-title-color: $text-muted;
     width: 55;
     height: 1fr;
-    background: $surface;
+    background: transparent;
     margin-right: 1;
 }
 
@@ -122,7 +131,7 @@ TabPane {
     border-title-color: $primary;
     width: 1fr;
     height: 1fr;
-    background: $surface;
+    background: transparent;
     layout: vertical;
 }
 
