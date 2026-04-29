@@ -13,7 +13,7 @@ VoicePad saves two files for each recording:
 
 By default, both are saved under `~/.config/voicepad/data/`:
 
-```
+```sh
 ~/.config/voicepad/data/recordings/    # WAV files
 ~/.config/voicepad/data/markdown/      # Markdown transcriptions
 ```
@@ -39,7 +39,7 @@ Both paths support `~` expansion.
 
 Each file is named with a prefix and a timestamp:
 
-```
+```sh
 recording_20260429_143022.wav
 recording_20260429_143022.md
 ```
