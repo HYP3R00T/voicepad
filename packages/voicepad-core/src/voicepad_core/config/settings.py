@@ -9,30 +9,42 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from utilityhub_config import expand_path, load_settings
 
 # ---------------------------------------------------------------------------
-# Valid model names — sourced from faster_whisper.utils.available_models()
+# Valid model names — queried live from faster_whisper at import time.
+# This means new models added upstream are automatically available.
 # ---------------------------------------------------------------------------
 
-VALID_TRANSCRIPTION_MODELS: tuple[str, ...] = (
-    "tiny",
-    "tiny.en",
-    "base",
-    "base.en",
-    "small",
-    "small.en",
-    "medium",
-    "medium.en",
-    "large-v1",
-    "large-v2",
-    "large-v3",
-    "large",
-    "distil-large-v2",
-    "distil-medium.en",
-    "distil-small.en",
-    "distil-large-v3",
-    "distil-large-v3.5",
-    "large-v3-turbo",
-    "turbo",
-)
+
+def _get_available_models() -> tuple[str, ...]:
+    try:
+        from faster_whisper.utils import available_models
+
+        return tuple(available_models())
+    except Exception:
+        # Fallback mirrors faster_whisper's internal _MODELS dict keys
+        return (
+            "tiny.en",
+            "tiny",
+            "base.en",
+            "base",
+            "small.en",
+            "small",
+            "medium.en",
+            "medium",
+            "large-v1",
+            "large-v2",
+            "large-v3",
+            "large",
+            "distil-large-v2",
+            "distil-medium.en",
+            "distil-small.en",
+            "distil-large-v3",
+            "distil-large-v3.5",
+            "large-v3-turbo",
+            "turbo",
+        )
+
+
+VALID_TRANSCRIPTION_MODELS: tuple[str, ...] = _get_available_models()
 
 
 class Config(BaseModel):
@@ -55,6 +67,10 @@ class Config(BaseModel):
     markdown_path: Path = Field(
         default=Path("~/.config/voicepad/data/markdown"),
         description="Directory where markdown transcriptions are saved.",
+    )
+    model_cache_path: Path = Field(
+        default=Path("~/.config/voicepad/models"),
+        description="Directory where Whisper model weights are cached.",
     )
 
     # ------------------------------------------------------------------
@@ -114,7 +130,7 @@ class Config(BaseModel):
         ),
     )
 
-    @field_validator("recordings_path", "markdown_path", mode="before")
+    @field_validator("recordings_path", "markdown_path", "model_cache_path", mode="before")
     @classmethod
     def expand_paths(cls, v: Path | str) -> Path:
         """Expand ~ and environment variables in path fields."""

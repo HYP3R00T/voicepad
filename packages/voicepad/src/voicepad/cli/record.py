@@ -80,7 +80,7 @@ def start_recording(
     # On subsequent runs the cache check is instant.
     if not no_transcribe:
         model_name = config.transcription_model
-        if not model_downloaded(model_name):
+        if not model_downloaded(model_name, config):
             typer.echo()
             typer.secho(
                 f"[↓] Model '{model_name}' not found locally — downloading now.",
@@ -89,7 +89,7 @@ def start_recording(
             typer.echo("    This only happens once. Subsequent runs start immediately.")
             typer.echo()
             try:
-                ensure_model_downloaded(model_name)
+                ensure_model_downloaded(model_name, config)
                 typer.secho(f"    [OK] '{model_name}' downloaded.", fg=typer.colors.GREEN)
             except TranscriptionError as e:
                 typer.secho(f"[ERROR] Download failed: {e}", fg=typer.colors.RED, err=True)

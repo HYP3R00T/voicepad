@@ -7,6 +7,7 @@ import logging
 import threading
 import time
 from dataclasses import dataclass, field
+from importlib.metadata import version as _pkg_version
 from pathlib import Path
 
 import numpy as np
@@ -47,6 +48,15 @@ from voicepad_core.config.settings import get_config_with_metadata
 from voicepad.tui.workers import ModelWarmResult, RecordingSession
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Version — read dynamically from package metadata
+# ---------------------------------------------------------------------------
+
+try:
+    _APP_VERSION = f"v{_pkg_version('voicepad')}"
+except Exception:
+    _APP_VERSION = "dev"
 
 # ---------------------------------------------------------------------------
 # Theme — Catppuccin Mocha with blue primary instead of pink
@@ -151,7 +161,7 @@ class InfoModal(ModalScreen[None]):
 
             # ── 8. Metadata ───────────────────────────────────────
             yield Static(
-                "v0.1.3  •  Rajesh Das (HYP3R00T)  •  MIT License",
+                f"{_APP_VERSION}  •  Rajesh Das (HYP3R00T)  •  MIT License",
                 id="info-meta",
             )
 
@@ -164,6 +174,157 @@ class InfoModal(ModalScreen[None]):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Close the modal when button is pressed."""
         self.dismiss()
+
+
+# ---------------------------------------------------------------------------
+# First-run / Setup Modal
+# ---------------------------------------------------------------------------
+
+
+class SetupModal(ModalScreen[str]):
+    """Shown on first run or when the selected model is not downloaded.
+
+    Lets the user confirm (or change) the model, then downloads it with a
+    progress indicator. Dismisses with the chosen model name when done.
+    """
+
+    BINDINGS: list[Binding] = []  # no escape — must complete setup
+
+    def __init__(self, config: Config, config_missing: bool) -> None:
+        super().__init__()
+        self._config = config
+        self._config_missing = config_missing
+        self._downloading = False
+        self._pending_model: str = config.transcription_model
+        self._timer: object | None = None
+        self._dot_count: int = 0
+        self._chosen_model: str = config.transcription_model
+
+    def compose(self) -> ComposeResult:
+        with Static(id="setup-dialog"):
+            yield Static("󰍬  Welcome to VoicePad", id="setup-title")
+
+            if self._config_missing:
+                yield Static(
+                    "No config file found — using defaults.\nYou can change settings later from the Settings tab.",
+                    id="setup-subtitle",
+                )
+            else:
+                yield Static(
+                    "The selected model is not downloaded yet.\nChoose a model and VoicePad will download it now.",
+                    id="setup-subtitle",
+                )
+
+            yield Static("Select a Whisper model:", id="setup-model-label")
+            yield Select(
+                options=[(m, m) for m in VALID_TRANSCRIPTION_MODELS],
+                value=self._config.transcription_model,
+                id="setup-model-select",
+                allow_blank=False,
+            )
+
+            yield Static("", id="setup-model-hint")
+            yield Static("", id="setup-status")
+            yield Button("Download & Start", id="setup-start-btn", variant="primary")
+
+    def on_mount(self) -> None:
+        self._update_hint(self._config.transcription_model)
+        self._timer: object | None = None
+
+    @on(Select.Changed, "#setup-model-select")
+    def on_model_changed(self, event: Select.Changed) -> None:
+        if event.value is not Select.BLANK:
+            self._update_hint(str(event.value))
+
+    def _update_hint(self, model: str) -> None:
+        _hints: dict[str, str] = {
+            "tiny": "~40 MB · fastest · low accuracy · CPU",
+            "tiny.en": "~40 MB · fastest · English only · CPU",
+            "base": "~75 MB · very fast · fair accuracy · CPU",
+            "base.en": "~75 MB · very fast · English only · CPU",
+            "small": "~250 MB · fast · good accuracy · ~1 GB VRAM",
+            "small.en": "~250 MB · fast · English only · ~1 GB VRAM",
+            "medium": "~770 MB · moderate · very good · ~2 GB VRAM",
+            "medium.en": "~770 MB · moderate · English only · ~2 GB VRAM",
+            "large-v1": "~1.5 GB · slow · excellent · ~5 GB VRAM",
+            "large-v2": "~1.5 GB · slow · excellent · ~5 GB VRAM",
+            "large-v3": "~1.5 GB · slow · best accuracy · ~5 GB VRAM",
+            "large": "~1.5 GB · slow · excellent · ~5 GB VRAM",
+            "large-v3-turbo": "~800 MB · recommended · excellent · ~3 GB VRAM",
+            "turbo": "~800 MB · recommended · excellent · ~3 GB VRAM",
+            "distil-small.en": "~135 MB · fast · English only · ~1 GB VRAM",
+            "distil-medium.en": "~395 MB · moderate · English only · ~1 GB VRAM",
+            "distil-large-v2": "~760 MB · fast · English only · ~3 GB VRAM",
+            "distil-large-v3": "~760 MB · fast · English only · ~3 GB VRAM",
+            "distil-large-v3.5": "~760 MB · fast · English only · ~3 GB VRAM",
+        }
+        hint = _hints.get(model, "")
+        self.query_one("#setup-model-hint", Static).update(f"[dim]{hint}[/]" if hint else "")
+
+    @on(Button.Pressed, "#setup-start-btn")
+    def on_start_pressed(self) -> None:
+        if self._downloading:
+            return
+        sel = self.query_one("#setup-model-select", Select)
+        if sel.value is Select.BLANK:
+            return
+        model = str(sel.value)
+        self._downloading = True
+        self._pending_model = model
+        self.query_one("#setup-start-btn", Button).disabled = True
+        self._download_model(model)
+
+    @work(thread=True, name="setup-download")
+    def _download_model(self, model: str) -> None:
+        from voicepad_core import ensure_model_downloaded, model_downloaded
+        from voicepad_core.transcription import TranscriptionError
+
+        self.app.call_from_thread(self._set_setup_status, f"Checking '{model}'…")
+
+        if model_downloaded(model, self._config):
+            self.app.call_from_thread(self._on_download_done, model, None)
+            return
+
+        self.app.call_from_thread(
+            self._set_setup_status,
+            f"Downloading '{model}'… this may take a few minutes.",
+        )
+        self.app.call_from_thread(self._show_progress)
+
+        try:
+            ensure_model_downloaded(model, self._config)
+            self.app.call_from_thread(self._on_download_done, model, None)
+        except TranscriptionError as e:
+            self.app.call_from_thread(self._on_download_done, model, str(e))
+
+    def _show_progress(self) -> None:
+        self._dot_count = 0
+
+        def _tick() -> None:
+            self._dot_count = (self._dot_count + 1) % 4
+            dots = "." * self._dot_count
+            self._set_setup_status(f"Downloading '{self._pending_model}'{dots}")
+
+        self._timer = self.set_interval(0.5, _tick)
+
+    def _set_setup_status(self, msg: str) -> None:
+        self.query_one("#setup-status", Static).update(msg)
+
+    def _on_download_done(self, model: str, error: str | None) -> None:
+        if self._timer is not None:
+            self._timer.stop()  # type: ignore[union-attr]
+            self._timer = None
+        if error:
+            self._set_setup_status(f"[red]Download failed: {error}[/]")
+            self.query_one("#setup-start-btn", Button).disabled = False
+            self._downloading = False
+        else:
+            self._chosen_model = model
+            self._set_setup_status(f"[green]✓  '{model}' ready — starting…[/]")
+            self.app.call_after_refresh(self._do_dismiss)
+
+    def _do_dismiss(self) -> None:
+        self.dismiss(self._chosen_model)
 
 
 # ---------------------------------------------------------------------------
@@ -225,7 +386,7 @@ class VoicePadApp(App[None]):
     def compose(self) -> ComposeResult:
         with Static(id="header"):
             yield Label("VoicePad", id="header-title")
-            yield Label("v0.1.3", id="header-version")
+            yield Label(_APP_VERSION, id="header-version")
             yield Label("󰔟  initialising", id="status")
             yield Label("loading…", id="header-model")
 
@@ -282,7 +443,62 @@ class VoicePadApp(App[None]):
         self.theme = _THEME_NAME
         self._load_history_from_disk()
         self._populate_settings()
+        self._check_first_run()
+
+    # ------------------------------------------------------------------
+    # First-run check
+    # ------------------------------------------------------------------
+
+    def _check_first_run(self) -> None:
+        """Show setup modal if config is missing or model not downloaded."""
+        from utilityhub_config import get_config_path
+        from voicepad_core import model_downloaded
+
+        config_path = get_config_path("voicepad", format="yaml")
+        config_missing = not config_path.exists()
+        model_ready = model_downloaded(self.config.transcription_model, self.config)
+
+        if config_missing or not model_ready:
+            self.push_screen(
+                SetupModal(self.config, config_missing=config_missing),
+                callback=self._on_setup_done,
+            )
+        else:
+            self._warm_model_worker()
+
+    def _on_setup_done(self, chosen_model: str) -> None:
+        """Called when the setup modal dismisses with the chosen model name.
+
+        Always writes the config file — this is the first-run setup, so we
+        want to persist defaults + chosen model regardless of what was selected.
+        """
+        from utilityhub_config import get_config_path, write_config
+        from voicepad_core.config import Config as _Config
+
+        raw = self.config.model_dump(mode="json")
+        raw["transcription_model"] = chosen_model
+
+        try:
+            new_config = _Config(**raw)
+            global_path = get_config_path("voicepad", format="yaml")
+            global_path.parent.mkdir(parents=True, exist_ok=True)
+            write_config(new_config, "voicepad", path=global_path, format="yaml")
+            object.__setattr__(self, "config", new_config)
+            logger.info(f"Config written to {global_path}")
+        except Exception as e:
+            logger.warning(f"Could not write config: {e}")
+
+        self._refresh_config_path_label()
         self._warm_model_worker()
+
+    def _refresh_config_path_label(self) -> None:
+        """Update the settings config path label to reflect current file state."""
+        from utilityhub_config import get_config_path
+
+        with contextlib.suppress(Exception):
+            config_path = get_config_path("voicepad", format="yaml")
+            exists_hint = "" if config_path.exists() else "  [dim red](not yet created)[/]"
+            self.query_one("#settings-config-path", Label).update(f"[dim]config file:[/]  {config_path}{exists_hint}")
 
     # ------------------------------------------------------------------
     # History — pre-populate from disk
@@ -326,10 +542,11 @@ class VoicePadApp(App[None]):
         container = self.query_one("#settings-fields", Static)
         _, meta = get_config_with_metadata()
 
-        # Show the config file path at the top so users know where to find it
+        # Show the config file path at the top — indicate if it exists or not
         config_path = get_config_path("voicepad", format="yaml")
+        exists_hint = "" if config_path.exists() else "  [dim red](not yet created)[/]"
         path_label = Label(
-            f"[dim]config file:[/]  {config_path}",
+            f"[dim]config file:[/]  {config_path}{exists_hint}",
             id="settings-config-path",
         )
         container.mount(path_label)

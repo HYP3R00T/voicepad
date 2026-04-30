@@ -196,13 +196,13 @@ def _trim_trailing_silence(
     return audio[:end]
 
 
-def _load_cpu_fallback(model_name: str) -> tuple[WhisperModel, str, str]:
+def _load_cpu_fallback(model_name: str, download_root: str | None = None) -> tuple[WhisperModel, str, str]:
     """Load model on CPU and cache it. Returns (model, 'cpu', 'int8')."""
     cache_key = (model_name, "cpu", "int8")
     if cache_key in _model_cache:
         return _model_cache[cache_key], "cpu", "int8"
     logger.info(f"Loading '{model_name}' on CPU (int8)")
-    model = WhisperModel(model_name, device="cpu", compute_type="int8")
+    model = WhisperModel(model_name, device="cpu", compute_type="int8", download_root=download_root)
     _model_cache[cache_key] = model
     return model, "cpu", "int8"
 
@@ -214,7 +214,24 @@ def _load_cpu_fallback(model_name: str) -> tuple[WhisperModel, str, str]:
 # ---------------------------------------------------------------------------
 
 
-def model_downloaded(model_name: str) -> bool:
+def _get_repo_id(model_name: str) -> str:
+    """Resolve the HuggingFace repo ID for a model name.
+
+    Uses faster-whisper's own _MODELS dict so non-Systran models
+    (turbo, large-v3-turbo, distil-large-v3.5) resolve correctly.
+    Falls back to the Systran prefix for unknown names.
+    """
+    try:
+        from faster_whisper.utils import _MODELS  # type: ignore[attr-defined]
+
+        if model_name in _MODELS:
+            return _MODELS[model_name]
+    except Exception:
+        pass
+    return f"{_HF_REPO_PREFIX}{model_name}"
+
+
+def model_downloaded(model_name: str, config: Config | None = None) -> bool:
     """Return True if the model weights (model.bin) are in the local cache.
 
     Checks for the actual weight file, not just metadata.
@@ -223,9 +240,14 @@ def model_downloaded(model_name: str) -> bool:
     import os
     from pathlib import Path as _Path
 
-    repo_id = f"{_HF_REPO_PREFIX}{model_name}"
-    hf_home = os.environ.get("HF_HOME", "")
-    cache_root = _Path(hf_home) if hf_home else _Path.home() / ".cache" / "huggingface" / "hub"
+    # Use config's model_cache_path if provided, otherwise fall back to HF default
+    if config is not None:
+        cache_root = config.model_cache_path / "hub"
+    else:
+        hf_home = os.environ.get("HF_HOME", "")
+        cache_root = _Path(hf_home) / "hub" if hf_home else _Path.home() / ".cache" / "huggingface" / "hub"
+
+    repo_id = _get_repo_id(model_name)
     snapshots = cache_root / f"models--{repo_id.replace('/', '--')}" / "snapshots"
 
     if not snapshots.exists():
@@ -236,21 +258,30 @@ def model_downloaded(model_name: str) -> bool:
     return any(snap.is_dir() and (snap / "model.bin").exists() for snap in snapshots.iterdir())
 
 
-def ensure_model_downloaded(model_name: str) -> None:
+def ensure_model_downloaded(model_name: str, config: Config | None = None) -> None:
     """Download the model weights if not already cached. Blocks until complete.
 
     Raises:
         TranscriptionError: If the download fails.
     """
-    if model_downloaded(model_name):
+    if model_downloaded(model_name, config):
         return
 
-    repo_id = f"{_HF_REPO_PREFIX}{model_name}"
+    repo_id = _get_repo_id(model_name)
     logger.info(f"Downloading '{model_name}' from {repo_id}")
+
+    # Pass cache_dir directly — HF_HOME is read at import time by huggingface_hub
+    # and cannot be changed at runtime via os.environ.
+    cache_dir: str | None = None
+    if config is not None:
+        hub_dir = config.model_cache_path / "hub"
+        hub_dir.mkdir(parents=True, exist_ok=True)
+        cache_dir = str(hub_dir)
+
     try:
         snapshot_download(
             repo_id=repo_id,
-            # Skip framework-specific weights we don't need
+            cache_dir=cache_dir,
             ignore_patterns=["*.msgpack", "*.h5", "flax_model*", "tf_model*", "rust_model*"],
         )
     except HfHubHTTPError as e:
@@ -296,8 +327,15 @@ def get_or_load_model(config: Config) -> tuple[WhisperModel, str, str, bool]:
     logger.info(f"Loading '{model_name}' on {device} ({compute})")
     load_start = time.perf_counter()
 
+    # Resolve model download root from config
+    download_root: str | None = None
+    if hasattr(config, "model_cache_path"):
+        model_dir = config.model_cache_path / "hub"
+        model_dir.mkdir(parents=True, exist_ok=True)
+        download_root = str(model_dir)
+
     try:
-        model = WhisperModel(model_name, device=device, compute_type=compute)
+        model = WhisperModel(model_name, device=device, compute_type=compute, download_root=download_root)
         load_ms = (time.perf_counter() - load_start) * 1000
         logger.info(f"Model loaded in {load_ms:.0f}ms — cached as {cache_key}")
         _model_cache[cache_key] = model
@@ -306,7 +344,7 @@ def get_or_load_model(config: Config) -> tuple[WhisperModel, str, str, bool]:
     except RuntimeError as e:
         if _is_cuda_error(e):
             logger.warning(f"CUDA unavailable at load time: {e} — falling back to CPU")
-            model, device, compute = _load_cpu_fallback(model_name)
+            model, device, compute = _load_cpu_fallback(model_name, download_root)
             return model, device, compute, True
         raise TranscriptionError(f"Failed to load model '{model_name}': {e}") from e
     except Exception as e:
@@ -380,7 +418,10 @@ def transcribe_buffer(audio: np.ndarray, config: Config) -> TranscriptionResult:
             # CUDA failed during inference — evict GPU entry, retry on CPU.
             logger.warning(f"CUDA inference error: {e} — retrying on CPU")
             _model_cache.pop((config.transcription_model, device, compute), None)
-            cpu_model, device, compute = _load_cpu_fallback(config.transcription_model)
+            download_root_fb: str | None = None
+            if hasattr(config, "model_cache_path"):
+                download_root_fb = str(config.model_cache_path / "hub")
+            cpu_model, device, compute = _load_cpu_fallback(config.transcription_model, download_root_fb)
             fallback = True
             segments_iter, info = cpu_model.transcribe(
                 audio,
