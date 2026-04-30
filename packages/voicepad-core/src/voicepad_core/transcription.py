@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -258,8 +259,16 @@ def model_downloaded(model_name: str, config: Config | None = None) -> bool:
     return any(snap.is_dir() and (snap / "model.bin").exists() for snap in snapshots.iterdir())
 
 
-def ensure_model_downloaded(model_name: str, config: Config | None = None) -> None:
+def ensure_model_downloaded(
+    model_name: str,
+    config: Config | None = None,
+    on_progress: Callable[[int, int], None] | None = None,
+) -> None:
     """Download the model weights if not already cached. Blocks until complete.
+
+    Args:
+        on_progress: Optional callback(downloaded_bytes, total_bytes) called
+                     during download. total_bytes may be 0 if unknown.
 
     Raises:
         TranscriptionError: If the download fails.
@@ -270,19 +279,41 @@ def ensure_model_downloaded(model_name: str, config: Config | None = None) -> No
     repo_id = _get_repo_id(model_name)
     logger.info(f"Downloading '{model_name}' from {repo_id}")
 
-    # Pass cache_dir directly — HF_HOME is read at import time by huggingface_hub
-    # and cannot be changed at runtime via os.environ.
     cache_dir: str | None = None
     if config is not None:
         hub_dir = config.model_cache_path / "hub"
         hub_dir.mkdir(parents=True, exist_ok=True)
         cache_dir = str(hub_dir)
 
+    # Build a tqdm subclass that forwards byte counts to the callback.
+    # Must subclass real tqdm so huggingface_hub's get_lock() / set_lock()
+    # class-level calls work correctly.
+    tqdm_class = None
+    if on_progress is not None:
+        _cb = on_progress
+        from tqdm.auto import tqdm as _tqdm
+
+        class _ProgressTqdm(_tqdm):  # ty:ignore[unsupported-base]
+            def __init__(self, *args: object, **kwargs: object) -> None:
+                kwargs.setdefault("disable", True)  # suppress console output
+                super().__init__(*args, **kwargs)
+                self._bytes_downloaded = 0
+
+            def update(self, n: int = 1) -> bool | None:
+                result = super().update(n)
+                self._bytes_downloaded += n
+                total = int(self.total or 0)
+                _cb(self._bytes_downloaded, total)
+                return result
+
+        tqdm_class = _ProgressTqdm
+
     try:
         snapshot_download(
             repo_id=repo_id,
             cache_dir=cache_dir,
             ignore_patterns=["*.msgpack", "*.h5", "flax_model*", "tf_model*", "rust_model*"],
+            tqdm_class=tqdm_class,
         )
     except HfHubHTTPError as e:
         raise TranscriptionError(f"Failed to download model '{model_name}': {e}") from e

@@ -271,18 +271,21 @@ def _print_result(result) -> None:
 
 def _format_markdown(wav_path: Path, result) -> str:
     lines = [
-        "# Transcription",
-        "",
-        f"**File:** `{wav_path.name}`",
-        f"**Model:** {result.device} / {result.compute_type}",
-        f"**Language:** {result.language} ({result.language_probability * 100:.1f}% confidence)",
-        f"**Audio duration:** {result.duration_s:.1f}s",
-        f"**Transcription latency:** {result.latency_ms:.0f}ms",
-        "",
+        "---",
+        f"file: {wav_path.name}",
+        f"model: {result.device} / {result.compute_type}",
+        f"language: {result.language} ({result.language_probability * 100:.1f}% confidence)",
+        f"duration: {result.duration_s:.1f}s",
+        f"latency: {result.latency_ms:.0f}ms",
     ]
     if result.fallback_to_cpu:
-        lines += ["> ⚠️ CUDA requested but fell back to CPU.", ""]
-    lines += ["---", "", "## Text", "", result.text or "*(no speech detected)*", ""]
+        lines.append("fallback: cpu")
+    lines += [
+        "---",
+        "",
+        result.text or "*(no speech detected)*",
+        "",
+    ]
     if result.segments:
         lines += ["## Segments", ""]
         for seg in result.segments:

@@ -133,7 +133,7 @@ TabPane {
 
 #history-list-pane {
     border: round $border-blurred;
-    border-title-color: $text-muted;
+    border-title-color: $primary;
     width: 55;
     height: 1fr;
     background: transparent;
@@ -143,6 +143,7 @@ TabPane {
 #history-view-pane {
     border: round $border-blurred;
     border-title-color: $primary;
+    border-title-align: left;
     width: 1fr;
     height: 1fr;
     background: transparent;
@@ -161,14 +162,13 @@ TabPane {
     width: 1fr;
     height: 1fr;
     background: transparent;
-    scrollbar-gutter: auto;
+    scrollbar-gutter: stable;
     scrollbar-size-vertical: 1;
 }
 
-/* Override Markdown's default padding: 0 2 0 2 — remove right padding so
-   content sits flush against the scrollbar with no dead space */
+/* Consistent padding inside the viewer — top/left/right, not bottom (retranscribe btn is there) */
 #history-view-pane MarkdownViewer > Markdown {
-    padding: 0 0 0 2;
+    padding: 1 1 0 2;
 }
 
 #retranscribe-btn {
@@ -176,15 +176,15 @@ TabPane {
     height: 1;
     border: none;
     background: transparent;
-    color: $text-warning;
+    color: $primary;
     text-style: bold;
     margin: 1 2;
     padding: 0 1;
 }
 
 #retranscribe-btn:hover {
-    background: $warning-muted;
-    color: $warning;
+    color: $foreground;
+    background: transparent;
 }
 
 #retranscribe-btn:disabled {
@@ -207,8 +207,8 @@ TabPane {
 #settings-config-path {
     height: 1;
     color: $text-muted;
-    background: $surface;
-    border-left: tall $primary;
+    background: transparent;
+    border-left: tall $border-blurred;
     margin-bottom: 2;
     padding: 0 2;
 }
@@ -417,64 +417,156 @@ InfoModal {
     text-style: bold;
 }
 
-/* ── setup / first-run modal ── */
+/* ── setup wizard modal ── */
 SetupModal {
     align: center middle;
 }
 
-#setup-dialog {
+#wizard-dialog {
     layout: vertical;
-    padding: 3 5;
-    width: 64;
+    padding: 1 2;
+    width: 70;
     height: auto;
+    max-height: 28;
     border: tall $primary;
     background: $background;
 }
 
-#setup-title {
+#wizard-step-indicator {
+    width: 100%;
+    height: 1;
+    text-align: right;
+    color: $text-disabled;
+    margin-bottom: 1;
+}
+
+#wizard-body {
+    layout: vertical;
+    height: auto;
+    width: 100%;
+}
+
+.wizard-title {
     width: 100%;
     height: auto;
     text-align: center;
     color: $foreground;
     text-style: bold;
-    margin-bottom: 2;
+    margin-bottom: 1;
 }
 
-#setup-subtitle {
+.wizard-text {
     width: 100%;
     height: auto;
     text-align: center;
-    color: $text-muted;
-    margin-bottom: 2;
-}
-
-#setup-model-label {
-    width: 100%;
-    height: 1;
-    color: $primary;
+    color: $text;
     margin-bottom: 1;
 }
 
-#setup-model-select {
+.wizard-features {
     width: 100%;
+    height: auto;
+    color: $text;
+    padding: 0 2;
+    border: round $border-blurred;
     margin-bottom: 1;
+    text-align: center;
+    content-align: center middle;
 }
 
-#setup-model-hint {
-    width: 100%;
-    height: 1;
-    color: $text-muted;
-    margin-bottom: 1;
-}
-
-#setup-status {
+.wizard-credit {
     width: 100%;
     height: 1;
     text-align: center;
-    color: $text-muted;
-    margin-bottom: 2;
+    color: $text-disabled;
+    margin-top: 1;
 }
 
-#setup-start-btn {
+.wizard-hint {
     width: 100%;
+    height: auto;
+    color: $text-muted;
+    margin-top: 1;
+}
+
+.wizard-status {
+    width: 100%;
+    height: 1;
+    text-align: center;
+    margin-top: 1;
+}
+
+#wizard-keybindings {
+    width: 100%;
+    height: auto;
+    background: $background;
+    border: round $border-blurred;
+    margin-top: 1;
+    margin-bottom: 1;
+    padding: 0 1;
+}
+
+#wizard-progress {
+    width: 100%;
+    margin-top: 1;
+}
+
+#wizard-progress > Bar {
+    width: 1fr;
+}
+
+#wizard-keybindings > .datatable--header {
+    display: none;
+}
+
+#wizard-model-select, #wizard-device-select {
+    width: 100%;
+    margin-top: 1;
+}
+
+#wizard-nav {
+    layout: horizontal;
+    height: 1;
+    width: 100%;
+    margin-top: 2;
+    padding: 0;
+}
+
+#wizard-back {
+    width: auto;
+    height: 1;
+    border: none;
+    background: transparent;
+    color: $text-muted;
+    padding: 0;
+    margin: 0;
+}
+
+#wizard-back:hover {
+    color: $foreground;
+    background: transparent;
+}
+
+#wizard-spacer {
+    width: 1fr;
+}
+
+#wizard-next {
+    width: auto;
+    height: 1;
+    border: none;
+    background: transparent;
+    color: $primary;
+    text-style: bold;
+    padding: 0;
+    margin: 0;
+}
+
+#wizard-next:hover {
+    color: $foreground;
+    background: transparent;
+}
+
+#wizard-next:disabled {
+    color: $text-disabled;
 }

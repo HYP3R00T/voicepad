@@ -21,6 +21,7 @@ from textual.screen import ModalScreen
 from textual.theme import Theme
 from textual.widgets import (
     Button,
+    DataTable,
     Footer,
     Input,
     Label,
@@ -28,6 +29,7 @@ from textual.widgets import (
     Markdown,
     MarkdownViewer,
     OptionList,
+    ProgressBar,
     Select,
     Static,
     TabbedContent,
@@ -181,150 +183,331 @@ class InfoModal(ModalScreen[None]):
 # ---------------------------------------------------------------------------
 
 
-class SetupModal(ModalScreen[str]):
-    """Shown on first run or when the selected model is not downloaded.
+class SetupModal(ModalScreen[tuple[str, int | None]]):
+    """4-step first-run wizard.
 
-    Lets the user confirm (or change) the model, then downloads it with a
-    progress indicator. Dismisses with the chosen model name when done.
+    Step 0 — Welcome
+    Step 1 — Model selection + download
+    Step 2 — Microphone selection
+    Step 3 — Finish / config info
     """
 
     BINDINGS: list[Binding] = []  # no escape — must complete setup
 
-    def __init__(self, config: Config, config_missing: bool) -> None:
+    _HINTS: dict[str, str] = {
+        "tiny": "~40 MB · fastest · low accuracy · CPU",
+        "tiny.en": "~40 MB · fastest · English only · CPU",
+        "base": "~75 MB · very fast · fair accuracy · CPU",
+        "base.en": "~75 MB · very fast · English only · CPU",
+        "small": "~250 MB · fast · good accuracy · ~1 GB VRAM",
+        "small.en": "~250 MB · fast · English only · ~1 GB VRAM",
+        "medium": "~770 MB · moderate · very good · ~2 GB VRAM",
+        "medium.en": "~770 MB · moderate · English only · ~2 GB VRAM",
+        "large-v1": "~1.5 GB · slow · excellent · ~5 GB VRAM",
+        "large-v2": "~1.5 GB · slow · excellent · ~5 GB VRAM",
+        "large-v3": "~1.5 GB · slow · best accuracy · ~5 GB VRAM",
+        "large": "~1.5 GB · slow · excellent · ~5 GB VRAM",
+        "large-v3-turbo": "~800 MB · recommended · excellent · ~3 GB VRAM",
+        "turbo": "~800 MB · recommended · excellent · ~3 GB VRAM",
+        "distil-small.en": "~135 MB · fast · English only · ~1 GB VRAM",
+        "distil-medium.en": "~395 MB · moderate · English only · ~1 GB VRAM",
+        "distil-large-v2": "~760 MB · fast · English only · ~3 GB VRAM",
+        "distil-large-v3": "~760 MB · fast · English only · ~3 GB VRAM",
+        "distil-large-v3.5": "~760 MB · fast · English only · ~3 GB VRAM",
+    }
+
+    def __init__(self, config: Config) -> None:
         super().__init__()
         self._config = config
-        self._config_missing = config_missing
-        self._downloading = False
-        self._pending_model: str = config.transcription_model
-        self._timer: object | None = None
-        self._dot_count: int = 0
+        self._step: int = 0
         self._chosen_model: str = config.transcription_model
+        self._chosen_device_index: int | None = config.input_device_index
+        self._downloading = False
+
+    # ------------------------------------------------------------------
+    # Layout
+    # ------------------------------------------------------------------
 
     def compose(self) -> ComposeResult:
-        with Static(id="setup-dialog"):
-            yield Static("󰍬  Welcome to VoicePad", id="setup-title")
-
-            if self._config_missing:
-                yield Static(
-                    "No config file found — using defaults.\nYou can change settings later from the Settings tab.",
-                    id="setup-subtitle",
-                )
-            else:
-                yield Static(
-                    "The selected model is not downloaded yet.\nChoose a model and VoicePad will download it now.",
-                    id="setup-subtitle",
-                )
-
-            yield Static("Select a Whisper model:", id="setup-model-label")
-            yield Select(
-                options=[(m, m) for m in VALID_TRANSCRIPTION_MODELS],
-                value=self._config.transcription_model,
-                id="setup-model-select",
-                allow_blank=False,
-            )
-
-            yield Static("", id="setup-model-hint")
-            yield Static("", id="setup-status")
-            yield Button("Download & Start", id="setup-start-btn", variant="primary")
+        with Static(id="wizard-dialog"):
+            yield Static("", id="wizard-step-indicator")
+            yield Static(id="wizard-body")
+            with Static(id="wizard-nav"):
+                yield Button("← Back", id="wizard-back", variant="default")
+                yield Static("", id="wizard-spacer")
+                yield Button("Next →", id="wizard-next", variant="primary")
 
     def on_mount(self) -> None:
-        self._update_hint(self._config.transcription_model)
-        self._timer: object | None = None
+        self._render_step()
 
-    @on(Select.Changed, "#setup-model-select")
+    # ------------------------------------------------------------------
+    # Navigation
+    # ------------------------------------------------------------------
+
+    @on(Button.Pressed, "#wizard-next")
+    def on_next(self) -> None:
+        if self._step == 1 and not self._downloading:
+            # Must download before advancing from step 1
+            self._start_download()
+            return
+        if self._step < 3:
+            self._step += 1
+            self._render_step()
+        else:
+            # Finish
+            self.app.call_after_refresh(self._do_dismiss)
+
+    @on(Button.Pressed, "#wizard-back")
+    def on_back(self) -> None:
+        if self._step > 0:
+            self._step -= 1
+            self._render_step()
+
+    def _do_dismiss(self) -> None:
+        self.dismiss((self._chosen_model, self._chosen_device_index))
+
+    # ------------------------------------------------------------------
+    # Step renderer
+    # ------------------------------------------------------------------
+
+    def _render_step(self) -> None:
+        self.query_one("#wizard-step-indicator", Static).update(f"[dim]Step {self._step + 1} of 4[/]")
+        body = self.query_one("#wizard-body", Static)
+        # Remove all children and remount for the current step
+        for child in list(body.children):
+            child.remove()
+
+        back_btn = self.query_one("#wizard-back", Button)
+        next_btn = self.query_one("#wizard-next", Button)
+        back_btn.display = self._step > 0
+        next_btn.label = "Finish" if self._step == 3 else ("Download & Continue →" if self._step == 1 else "Next →")
+        next_btn.disabled = False
+
+        if self._step == 0:
+            self._mount_step_welcome(body)
+        elif self._step == 1:
+            self._mount_step_model(body)
+        elif self._step == 2:
+            self._mount_step_microphone(body)
+        elif self._step == 3:
+            self._mount_step_finish(body)
+
+        # Always focus the primary action button — never leave focus on Back
+        self.set_timer(0.05, lambda: next_btn.focus())
+
+    # ------------------------------------------------------------------
+    # Step 0 — Welcome
+    # ------------------------------------------------------------------
+
+    def _mount_step_welcome(self, body: Static) -> None:
+        body.mount(Static(f"󰍬  VoicePad  {_APP_VERSION}", classes="wizard-title"))
+        body.mount(
+            Static(
+                "Your private, local-first dictation studio.",
+                classes="wizard-text",
+            )
+        )
+        body.mount(
+            Static(
+                "󰒍  100% local  ·  󰌨  GPU-accelerated  ·  󰍹  no cloud",
+                classes="wizard-features",
+            )
+        )
+        body.mount(
+            Static(
+                "[dim]by Rajesh Das (HYP3R00T)  ·  MIT License[/]",
+                classes="wizard-credit",
+            )
+        )
+
+    # ------------------------------------------------------------------
+    # Step 1 — Model selection + download
+    # ------------------------------------------------------------------
+
+    def _mount_step_model(self, body: Static) -> None:
+        body.mount(Static("Choose a Whisper Model", classes="wizard-title"))
+        body.mount(
+            Static(
+                "[dim]turbo[/] is recommended for most NVIDIA GPU users.",
+                classes="wizard-text",
+            )
+        )
+        body.mount(
+            Select(
+                options=[(m, m) for m in VALID_TRANSCRIPTION_MODELS],
+                value=self._chosen_model,
+                id="wizard-model-select",
+                allow_blank=False,
+            )
+        )
+        body.mount(Static("", id="wizard-model-hint", classes="wizard-hint"))
+        body.mount(Static("", id="wizard-download-status", classes="wizard-status"))
+        bar = ProgressBar(id="wizard-progress", show_eta=False, show_percentage=True)
+        bar.display = False
+        body.mount(bar)
+
+    @on(Select.Changed, "#wizard-model-select")
     def on_model_changed(self, event: Select.Changed) -> None:
         if event.value is not Select.BLANK:
-            self._update_hint(str(event.value))
+            self._chosen_model = str(event.value)
+            with contextlib.suppress(Exception):
+                self.query_one("#wizard-model-hint", Static).update(self._HINTS.get(self._chosen_model, ""))
 
-    def _update_hint(self, model: str) -> None:
-        _hints: dict[str, str] = {
-            "tiny": "~40 MB · fastest · low accuracy · CPU",
-            "tiny.en": "~40 MB · fastest · English only · CPU",
-            "base": "~75 MB · very fast · fair accuracy · CPU",
-            "base.en": "~75 MB · very fast · English only · CPU",
-            "small": "~250 MB · fast · good accuracy · ~1 GB VRAM",
-            "small.en": "~250 MB · fast · English only · ~1 GB VRAM",
-            "medium": "~770 MB · moderate · very good · ~2 GB VRAM",
-            "medium.en": "~770 MB · moderate · English only · ~2 GB VRAM",
-            "large-v1": "~1.5 GB · slow · excellent · ~5 GB VRAM",
-            "large-v2": "~1.5 GB · slow · excellent · ~5 GB VRAM",
-            "large-v3": "~1.5 GB · slow · best accuracy · ~5 GB VRAM",
-            "large": "~1.5 GB · slow · excellent · ~5 GB VRAM",
-            "large-v3-turbo": "~800 MB · recommended · excellent · ~3 GB VRAM",
-            "turbo": "~800 MB · recommended · excellent · ~3 GB VRAM",
-            "distil-small.en": "~135 MB · fast · English only · ~1 GB VRAM",
-            "distil-medium.en": "~395 MB · moderate · English only · ~1 GB VRAM",
-            "distil-large-v2": "~760 MB · fast · English only · ~3 GB VRAM",
-            "distil-large-v3": "~760 MB · fast · English only · ~3 GB VRAM",
-            "distil-large-v3.5": "~760 MB · fast · English only · ~3 GB VRAM",
-        }
-        hint = _hints.get(model, "")
-        self.query_one("#setup-model-hint", Static).update(f"[dim]{hint}[/]" if hint else "")
-
-    @on(Button.Pressed, "#setup-start-btn")
-    def on_start_pressed(self) -> None:
+    def _start_download(self) -> None:
         if self._downloading:
             return
-        sel = self.query_one("#setup-model-select", Select)
-        if sel.value is Select.BLANK:
-            return
-        model = str(sel.value)
         self._downloading = True
-        self._pending_model = model
-        self.query_one("#setup-start-btn", Button).disabled = True
-        self._download_model(model)
+        self.query_one("#wizard-next", Button).disabled = True
+        self._download_model_worker(self._chosen_model)
 
     @work(thread=True, name="setup-download")
-    def _download_model(self, model: str) -> None:
+    def _download_model_worker(self, model: str) -> None:
         from voicepad_core import ensure_model_downloaded, model_downloaded
         from voicepad_core.transcription import TranscriptionError
 
-        self.app.call_from_thread(self._set_setup_status, f"Checking '{model}'…")
+        self.app.call_from_thread(self._set_download_status, f"Checking '{model}'…")
 
         if model_downloaded(model, self._config):
             self.app.call_from_thread(self._on_download_done, model, None)
             return
 
-        self.app.call_from_thread(
-            self._set_setup_status,
-            f"Downloading '{model}'… this may take a few minutes.",
-        )
-        self.app.call_from_thread(self._show_progress)
+        self.app.call_from_thread(self._set_download_status, f"Downloading '{model}'…")
+        self.app.call_from_thread(self._show_progress_bar)
+
+        _last_pct = [-1]  # mutable container for closure
+
+        def _on_progress(downloaded: int, total: int) -> None:
+            if total > 0:
+                pct = min(100, int(downloaded * 100 / total))
+                if pct == _last_pct[0]:
+                    return  # skip — no change, don't flood the event loop
+                _last_pct[0] = pct
+            self.app.call_from_thread(self._update_progress, downloaded, total)
 
         try:
-            ensure_model_downloaded(model, self._config)
+            ensure_model_downloaded(model, self._config, on_progress=_on_progress)
             self.app.call_from_thread(self._on_download_done, model, None)
         except TranscriptionError as e:
             self.app.call_from_thread(self._on_download_done, model, str(e))
 
-    def _show_progress(self) -> None:
-        self._dot_count = 0
+    def _show_progress_bar(self) -> None:
+        with contextlib.suppress(Exception):
+            bar = self.query_one("#wizard-progress", ProgressBar)
+            bar.display = True
+            bar.update(total=100, progress=0)
+        self._last_pct: int = -1
 
-        def _tick() -> None:
-            self._dot_count = (self._dot_count + 1) % 4
-            dots = "." * self._dot_count
-            self._set_setup_status(f"Downloading '{self._pending_model}'{dots}")
+    def _update_progress(self, downloaded: int, total: int) -> None:
+        with contextlib.suppress(Exception):
+            mb_done = downloaded / 1_048_576
+            if total > 0:
+                pct = min(100, int(downloaded * 100 / total))
+                # Only update UI when percentage actually changes
+                if pct == getattr(self, "_last_pct", -1):
+                    return
+                self._last_pct = pct
+                mb_total = total / 1_048_576
+                self.query_one("#wizard-progress", ProgressBar).update(total=100, progress=pct)
+                self._set_download_status(f"Downloading… {mb_done:.0f} / {mb_total:.0f} MB")
+            else:
+                self._set_download_status(f"Downloading… {mb_done:.1f} MB")
 
-        self._timer = self.set_interval(0.5, _tick)
-
-    def _set_setup_status(self, msg: str) -> None:
-        self.query_one("#setup-status", Static).update(msg)
+    def _set_download_status(self, msg: str) -> None:
+        with contextlib.suppress(Exception):
+            self.query_one("#wizard-download-status", Static).update(msg)
 
     def _on_download_done(self, model: str, error: str | None) -> None:
-        if self._timer is not None:
-            self._timer.stop()  # type: ignore[union-attr]
-            self._timer = None
+        self._downloading = False
+        with contextlib.suppress(Exception):
+            self.query_one("#wizard-progress", ProgressBar).display = False
         if error:
-            self._set_setup_status(f"[red]Download failed: {error}[/]")
-            self.query_one("#setup-start-btn", Button).disabled = False
-            self._downloading = False
+            self._set_download_status(f"[red]✕  Download failed: {error}[/]")
+            self.query_one("#wizard-next", Button).disabled = False
         else:
-            self._chosen_model = model
-            self._set_setup_status(f"[green]✓  '{model}' ready — starting…[/]")
-            self.app.call_after_refresh(self._do_dismiss)
+            self._set_download_status(f"[green]✓  '{model}' ready[/]")
+            self._step += 1
+            self.set_timer(0.6, self._render_step)
 
-    def _do_dismiss(self) -> None:
-        self.dismiss(self._chosen_model)
+    # ------------------------------------------------------------------
+    # Step 2 — Microphone
+    # ------------------------------------------------------------------
+
+    def _mount_step_microphone(self, body: Static) -> None:
+        from voicepad.cli.config import _get_input_devices
+
+        body.mount(Static("Select Your Microphone", classes="wizard-title"))
+        body.mount(
+            Static(
+                "[dim]System default[/] works for most setups.",
+                classes="wizard-text",
+            )
+        )
+
+        devices = _get_input_devices()
+        device_options: list[tuple[str, int]] = [("System default", -1)]
+        device_options += [(f"[{d.index}]  {d.name}", d.index) for d in devices]
+
+        current = self._chosen_device_index if self._chosen_device_index is not None else -1
+        valid = {v for _, v in device_options}
+
+        body.mount(
+            Select(
+                options=device_options,
+                value=current if current in valid else -1,
+                id="wizard-device-select",
+                allow_blank=False,
+            )
+        )
+        body.mount(
+            Static(
+                f"[dim]{len(devices)} input device(s) found[/]",
+                classes="wizard-hint",
+            )
+        )
+
+    @on(Select.Changed, "#wizard-device-select")
+    def on_device_changed(self, event: Select.Changed) -> None:
+        if event.value is not Select.BLANK:
+            v = int(event.value)
+            self._chosen_device_index = None if v == -1 else v
+
+    # ------------------------------------------------------------------
+    # Step 3 — Finish
+    # ------------------------------------------------------------------
+
+    def _mount_step_finish(self, body: Static) -> None:
+        from utilityhub_config import get_config_path
+
+        config_path = get_config_path("voicepad", format="yaml")
+        body.mount(Static("󰄬  You're all set!", classes="wizard-title"))
+        body.mount(
+            Static(
+                "VoicePad is ready. Here are the essentials:",
+                classes="wizard-text",
+            )
+        )
+
+        table = DataTable(
+            id="wizard-keybindings",
+            show_header=False,
+            show_cursor=False,
+            zebra_stripes=False,
+        )
+        body.mount(table)
+        table.add_columns("key", "action")
+        table.add_rows([
+            ("Space", "start / stop recording"),
+            ("c", "copy transcription to clipboard"),
+            ("i", "info & links"),
+            ("q", "quit"),
+        ])
+
+        body.mount(
+            Static(
+                f"Tweak anything in the [bold]Settings[/] tab.\n[dim]{config_path}[/]",
+                classes="wizard-hint",
+            )
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -405,7 +588,8 @@ class VoicePadApp(App[None]):
                 hist_list.border_title = "recordings"
                 yield hist_list
 
-                with Static(id="history-view-pane"):
+                with Static(id="history-view-pane") as view_pane:
+                    view_pane.border_title = "transcription"
                     yield MarkdownViewer(
                         _MD_PLACEHOLDER,
                         id="history-viewer",
@@ -460,23 +644,21 @@ class VoicePadApp(App[None]):
 
         if config_missing or not model_ready:
             self.push_screen(
-                SetupModal(self.config, config_missing=config_missing),
+                SetupModal(self.config),
                 callback=self._on_setup_done,
             )
         else:
             self._warm_model_worker()
 
-    def _on_setup_done(self, chosen_model: str) -> None:
-        """Called when the setup modal dismisses with the chosen model name.
-
-        Always writes the config file — this is the first-run setup, so we
-        want to persist defaults + chosen model regardless of what was selected.
-        """
+    def _on_setup_done(self, result: tuple[str, int | None]) -> None:
+        """Called when the setup wizard finishes. Writes config with chosen model + device."""
         from utilityhub_config import get_config_path, write_config
         from voicepad_core.config import Config as _Config
 
+        chosen_model, chosen_device = result
         raw = self.config.model_dump(mode="json")
         raw["transcription_model"] = chosen_model
+        raw["input_device_index"] = chosen_device
 
         try:
             new_config = _Config(**raw)
@@ -489,7 +671,35 @@ class VoicePadApp(App[None]):
             logger.warning(f"Could not write config: {e}")
 
         self._refresh_config_path_label()
+        self._refresh_settings_values()
         self._warm_model_worker()
+
+    def _refresh_settings_values(self) -> None:
+        """Update settings form widget values to match the current config in-place."""
+        with contextlib.suppress(Exception):
+            from voicepad.cli.config import _get_input_devices
+
+            # Update device dropdown
+            devices = _get_input_devices()
+            device_options: list[tuple[str, int]] = [("system default", -1)]
+            device_options += [(f"[{d.index}]  {d.name}", d.index) for d in devices]
+            valid = {v for _, v in device_options}
+            current_idx = self.config.input_device_index if self.config.input_device_index is not None else -1
+            sel_device = self.query_one("#setting-input_device_index", Select)
+            sel_device.set_options(device_options)
+            sel_device.value = current_idx if current_idx in valid else -1
+
+        with contextlib.suppress(Exception):
+            # Update model dropdown
+            sel_model = self.query_one("#setting-transcription_model", Select)
+            sel_model.value = self.config.transcription_model
+
+        with contextlib.suppress(Exception):
+            # Update path inputs
+            from textual.widgets import Input as _Input
+
+            self.query_one("#setting-recordings_path", _Input).value = str(self.config.recordings_path)
+            self.query_one("#setting-markdown_path", _Input).value = str(self.config.markdown_path)
 
     def _refresh_config_path_label(self) -> None:
         """Update the settings config path label to reflect current file state."""
@@ -859,7 +1069,63 @@ class VoicePadApp(App[None]):
     @work(name="md-view")
     async def _load_history_viewer(self, md_path: Path) -> None:
         viewer = self.query_one("#history-viewer", MarkdownViewer)
-        await viewer.go(md_path.resolve())
+        try:
+            raw = md_path.read_text(encoding="utf-8")
+            lines = raw.splitlines()
+
+            # Parse YAML front matter into per-transcription metadata
+            fm_meta: dict[int, dict] = {}
+            wav_name = ""
+            body_lines: list[str] = lines
+
+            if lines and lines[0].strip() == "---":
+                fm_end = next((idx for idx, ln in enumerate(lines[1:], 1) if ln.strip() == "---"), None)
+                if fm_end is not None:
+                    current: dict | None = None
+                    for fl in lines[1:fm_end]:
+                        s = fl.strip()
+                        if s.startswith("file:"):
+                            wav_name = s.split(":", 1)[-1].strip()
+                        elif s.startswith("- n:"):
+                            with contextlib.suppress(Exception):
+                                current = {"n": int(s.split(":")[-1].strip())}
+                        elif current is not None and ":" in s:
+                            k, _, v = s.partition(":")
+                            current[k.strip()] = v.strip()
+                            fm_meta[current["n"]] = current
+                    body_lines = lines[fm_end + 1 :]
+
+            # Rebuild display content: inject metadata after each ## Transcription N heading
+            out: list[str] = []
+            if wav_name:
+                out += [f"**File:** `{wav_name}`", ""]
+
+            for line in body_lines:
+                stripped = line.strip()
+                out.append(line)
+                if stripped.startswith("## Transcription "):
+                    with contextlib.suppress(Exception):
+                        n = int(stripped.split()[-1])
+                        meta = fm_meta.get(n, {})
+                        if meta:
+                            parts = []
+                            if "model" in meta:
+                                parts.append(f"model: {meta['model']}")
+                            if "language" in meta:
+                                parts.append(f"language: {meta['language']}")
+                            if "duration" in meta:
+                                parts.append(f"duration: {meta['duration']}")
+                            if "latency" in meta:
+                                parts.append(f"latency: {meta['latency']}")
+                            if "timestamp" in meta:
+                                parts.append(f"_{meta['timestamp']}_")
+                            if parts:
+                                out.append("")
+                                out.append("*" + " · ".join(parts) + "*")
+
+            await viewer.document.update("\n".join(out))
+        except Exception:
+            await viewer.go(md_path.resolve())
 
     @on(Markdown.LinkClicked)
     def on_markdown_link_clicked(self, event: Markdown.LinkClicked) -> None:
@@ -908,10 +1174,11 @@ class VoicePadApp(App[None]):
             return
 
         if result:
-            # Overwrite markdown and update the entry
+            # Prepend new transcription — never overwrite the existing ones
             out_md = md_path or (self.config.markdown_path / f"{wav_path.stem}.md")
             self.config.markdown_path.mkdir(parents=True, exist_ok=True)
-            out_md.write_text(_format_markdown(wav_path, result), encoding="utf-8")
+            new_content = _prepend_retranscription(out_md, result)
+            out_md.write_text(new_content, encoding="utf-8")
             self._set_status("ready", "ready")
 
             # Update the in-memory entry if it exists
@@ -1003,27 +1270,26 @@ class VoicePadApp(App[None]):
 
 
 def _format_markdown(audio_path: Path, result) -> str:
-    lines = [
-        "# Transcription",
-        "",
-        f"**File:** `{audio_path.name}`",
-        f"**Model:** {result.device} / {result.compute_type}",
-        f"**Language:** {result.language} ({result.language_probability * 100:.1f}%)",
-        f"**Duration:** {result.duration_s:.1f}s",
-        f"**Latency:** {result.latency_ms:.0f}ms",
-        "",
+    """Create a new markdown file with the first transcription."""
+    ts = time.strftime("%Y-%m-%d %H:%M")
+    fm = [
+        "---",
+        f"file: {audio_path.name}",
+        "transcriptions:",
+        "  - n: 1",
+        f"    model: {result.device} / {result.compute_type}",
+        f"    language: {result.language} ({result.language_probability * 100:.1f}%)",
+        f"    duration: {result.duration_s:.1f}s",
+        f"    latency: {result.latency_ms:.0f}ms",
+        f"    timestamp: {ts}",
         "---",
         "",
-        "## Text",
+        "## Transcription 1",
         "",
         result.text or "*(no speech detected)*",
         "",
     ]
-    if result.segments:
-        lines += ["## Segments", ""]
-        for seg in result.segments:
-            lines.append(f"- `[{seg.start:.1f}s → {seg.end:.1f}s]` {seg.text}")
-    return "\n".join(lines) + "\n"
+    return "\n".join(fm)
 
 
 def _format_markdown_streaming(
@@ -1032,86 +1298,178 @@ def _format_markdown_streaming(
     duration_s: float,
     chunks: list[ChunkResult],
 ) -> str:
-    """Format a markdown file for a streaming transcription."""
+    """Create a new markdown file for a streaming transcription."""
     latest_chunk = next((chunk for chunk in reversed(chunks) if chunk.text), None)
     device = latest_chunk.device if latest_chunk else "unknown"
     language = latest_chunk.language if latest_chunk else "en"
     language_probability = latest_chunk.language_probability if latest_chunk else 0.0
     latency_ms = sum(chunk.latency_ms for chunk in chunks)
+    ts = time.strftime("%Y-%m-%d %H:%M")
 
-    lines = [
-        "# Transcription",
-        "",
-        f"**File:** `{wav_path.name}`",
-        f"**Model:** {device} / live",
-        f"**Language:** {language} ({language_probability * 100:.1f}%)",
-        f"**Duration:** {duration_s:.1f}s",
-        f"**Latency:** {latency_ms:.0f}ms",
-        "**Mode:** streaming",
-        "",
+    fm = [
+        "---",
+        f"file: {wav_path.name}",
+        "transcriptions:",
+        "  - n: 1",
+        f"    model: {device} / live",
+        f"    language: {language} ({language_probability * 100:.1f}%)",
+        f"    duration: {duration_s:.1f}s",
+        f"    latency: {latency_ms:.0f}ms",
+        f"    timestamp: {ts}",
         "---",
         "",
-        "## Text",
+        "## Transcription 1",
         "",
         text or "*(no speech detected)*",
         "",
     ]
+    return "\n".join(fm)
 
-    segments = [segment for chunk in chunks for segment in chunk.segments if segment.text]
-    if segments:
-        lines += ["## Segments", ""]
-        for segment in segments:
-            lines.append(f"- `[{segment.start:.1f}s → {segment.end:.1f}s]` {segment.text}")
 
-    return "\n".join(lines) + "\n"
+def _prepend_retranscription(md_path: Path, result) -> str:
+    """Prepend a new transcription to an existing markdown file.
+
+    Reads the existing file, increments the transcription count,
+    adds new metadata entry at the top of the array, and prepends
+    the new text block before the existing ones.
+
+    Returns the new file content.
+    """
+    ts = time.strftime("%Y-%m-%d %H:%M")
+
+    try:
+        existing = md_path.read_text(encoding="utf-8")
+    except Exception:
+        existing = ""
+
+    # Parse existing front matter to find the current max n
+    lines = existing.splitlines()
+    max_n = 0
+    if lines and lines[0].strip() == "---":
+        fm_end = next((idx for idx, ln in enumerate(lines[1:], 1) if ln.strip() == "---"), None)
+        if fm_end is not None:
+            for fl in lines[1:fm_end]:
+                if fl.strip().startswith("- n:"):
+                    with contextlib.suppress(Exception):
+                        max_n = max(max_n, int(fl.strip().split(":")[-1].strip()))
+
+    new_n = max_n + 1
+
+    # Build new front matter entry
+    new_fm_entry = [
+        f"  - n: {new_n}",
+        f"    model: {result.device} / {result.compute_type}",
+        f"    language: {result.language} ({result.language_probability * 100:.1f}%)",
+        f"    duration: {result.duration_s:.1f}s",
+        f"    latency: {result.latency_ms:.0f}ms",
+        f"    timestamp: {ts}",
+    ]
+
+    # Inject new entry right after "transcriptions:" line in front matter
+    new_lines: list[str] = []
+    injected = False
+    if lines and lines[0].strip() == "---":
+        fm_end = next((idx for idx, ln in enumerate(lines[1:], 1) if ln.strip() == "---"), None)
+        if fm_end is not None:
+            for line in lines[: fm_end + 1]:
+                new_lines.append(line)
+                if not injected and line.strip() == "transcriptions:":
+                    new_lines.extend(new_fm_entry)
+                    injected = True
+            body = lines[fm_end + 1 :]
+        else:
+            new_lines = lines
+            body = []
+    else:
+        new_lines = ["---", f"file: {md_path.stem}.wav", "transcriptions:"] + new_fm_entry + ["---"]
+        body = lines
+
+    # Build new content: front matter + new transcription block + existing body
+    new_block = [
+        "",
+        f"## Transcription {new_n}",
+        "",
+        result.text or "*(no speech detected)*",
+        "",
+    ]
+
+    all_lines = new_lines + new_block + ([""] if body and body[0] != "" else []) + body
+    return "\n".join(all_lines)
 
 
 def _parse_markdown_entry(md_path: Path, index: int, recordings_path: Path | None = None) -> SessionEntry | None:
-    """Parse a transcription markdown file back into a SessionEntry for history display.
+    """Parse a transcription markdown file (YAML front matter format) into a SessionEntry.
 
-    recordings_path: where to look for the corresponding WAV file.
-    Falls back to a sibling 'recordings' directory if not provided.
+    Uses the latest transcription (highest n) for the preview text and metadata.
     """
     try:
         content = md_path.read_text(encoding="utf-8")
     except Exception:
         return None
 
+    lines = content.splitlines()
+
+    if not lines or lines[0].strip() != "---":
+        return None
+
+    fm_end = next((idx for idx, ln in enumerate(lines[1:], 1) if ln.strip() == "---"), None)
+    if fm_end is None:
+        return None
+
+    wav_name: str | None = None
+    # Parse transcriptions array — collect all entries, pick the one with highest n
+    entries: list[dict] = []
+    current: dict | None = None
+    for fl in lines[1:fm_end]:
+        stripped = fl.strip()
+        if stripped.startswith("- n:"):
+            if current is not None:
+                entries.append(current)
+            with contextlib.suppress(Exception):
+                current = {"n": int(stripped.split(":")[-1].strip())}
+        elif stripped.startswith("file:"):
+            wav_name = stripped.split(":", 1)[-1].strip()
+        elif current is not None and ":" in stripped:
+            key, _, val = stripped.partition(":")
+            current[key.strip()] = val.strip()
+    if current is not None:
+        entries.append(current)
+
+    if not entries:
+        return None
+
+    latest = max(entries, key=lambda e: e.get("n", 0))
     duration_s = 0.0
     latency_ms = 0.0
     device = "unknown"
-    wav_name: str | None = None
+    with contextlib.suppress(Exception):
+        duration_s = float(latest.get("duration", "0s").rstrip("s"))
+    with contextlib.suppress(Exception):
+        latency_ms = float(latest.get("latency", "0ms").rstrip("ms"))
+    with contextlib.suppress(Exception):
+        device = latest.get("model", "unknown").split("/")[0].strip()
 
-    for line in content.splitlines():
-        if line.startswith("**File:**"):
-            wav_name = line.split("`")[1] if "`" in line else None
-        elif line.startswith("**Duration:**") or line.startswith("**Audio duration:**"):
-            with contextlib.suppress(Exception):
-                duration_s = float(line.split(":**")[1].strip().rstrip("s"))
-        elif line.startswith("**Latency:**") or line.startswith("**Transcription latency:**"):
-            with contextlib.suppress(Exception):
-                latency_ms = float(line.split(":**")[1].strip().rstrip("ms"))
-        elif line.startswith("**Model:**"):
-            with contextlib.suppress(Exception):
-                device = line.split("**Model:**")[1].strip().split("/")[0].strip()
-
-    in_text_section = False
+    # Extract text for the latest transcription block
+    latest_n = latest.get("n", 1)
+    marker = f"## Transcription {latest_n}"
+    body = lines[fm_end + 1 :]
     text_lines: list[str] = []
-    for line in content.splitlines():
-        if line.strip() == "## Text":
-            in_text_section = True
+    in_block = False
+    for line in body:
+        if line.strip() == marker:
+            in_block = True
             continue
-        if in_text_section:
-            if line.startswith("## "):
+        if in_block:
+            # Stop at the next transcription marker
+            if line.strip().startswith("## Transcription "):
                 break
-            if line.strip() and not line.startswith("---"):
-                text_lines.append(line)
-    text = " ".join(text_lines).strip()
+            text_lines.append(line)
+    text = " ".join(ln for ln in text_lines if ln.strip() and ln.strip() != "*(no speech detected)*").strip()
 
-    if not text or text == "*(no speech detected)*":
+    if not text:
         return None
 
-    # Resolve WAV path: check configured recordings_path first, then sibling directory
+    # Resolve WAV path
     wav_path: Path | None = None
     if wav_name:
         candidates: list[Path] = []
@@ -1123,14 +1481,14 @@ def _parse_markdown_entry(md_path: Path, index: int, recordings_path: Path | Non
                 wav_path = candidate
                 break
 
-    timestamp = ""
-    stem = md_path.stem
-    parts = stem.split("_")
-    if len(parts) >= 3:
-        date_part = parts[-2]
-        time_part = parts[-1]
-        with contextlib.suppress(Exception):
-            timestamp = f"{date_part[0:4]}-{date_part[4:6]}-{date_part[6:8]} {time_part[0:2]}:{time_part[2:4]}"
+    timestamp = latest.get("timestamp", "")
+    if not timestamp:
+        parts = md_path.stem.split("_")
+        if len(parts) >= 3:
+            date_part = parts[-2]
+            time_part = parts[-1]
+            with contextlib.suppress(Exception):
+                timestamp = f"{date_part[0:4]}-{date_part[4:6]}-{date_part[6:8]} {time_part[0:2]}:{time_part[2:4]}"
 
     return SessionEntry(
         index=index,
