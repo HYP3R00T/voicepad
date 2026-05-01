@@ -603,13 +603,16 @@ class VoicePadApp(App[None]):
         self.config = config
         self._session: RecordingSession | None = None
         self._streamer: StreamingTranscriber | None = None
-        self._stream_chunks: list[ChunkResult] = []  # accumulated chunks in order
+        self._stream_chunks: list[ChunkResult] = []
         self._entries: list[SessionEntry] = []
         self._record_start: float = 0.0
         self._timer_thread: threading.Thread | None = None
         self._warm_result: ModelWarmResult | None = None
         self._current_text: str = ""
         self._selected_entry_idx: int | None = None
+        self._hotkey_listener: object | None = None  # GlobalHotkeyListener
+        self._hotkey_pending_copy: bool = False
+        self._overlay: object | None = None  # StatusOverlay
 
     # ------------------------------------------------------------------
     # Layout
@@ -671,7 +674,75 @@ class VoicePadApp(App[None]):
         self.theme = _THEME_NAME
         self._load_history_from_disk()
         self._populate_settings()
+        self._start_hotkey_listener()
         self._check_first_run()
+
+    def on_unmount(self) -> None:
+        """Stop the global hotkey listener when the app exits."""
+        if self._hotkey_listener is not None:
+            with contextlib.suppress(Exception):
+                self._hotkey_listener.stop()  # type: ignore[union-attr]
+        if self._overlay is not None:
+            with contextlib.suppress(Exception):
+                self._overlay.stop()  # type: ignore[union-attr]
+
+    # ------------------------------------------------------------------
+    # Global hotkey listener
+    # ------------------------------------------------------------------
+
+    def _start_hotkey_listener(self) -> None:
+        """Start the system-wide hotkey listener and status overlay."""
+        hotkey = getattr(self.config, "global_hotkey", "")
+        if not hotkey:
+            return
+        try:
+            from voicepad.tui.hotkey import GlobalHotkeyListener
+            from voicepad.tui.overlay import StatusOverlay
+
+            self._overlay = StatusOverlay()
+            self._overlay.start()  # type: ignore[union-attr]
+
+            self._hotkey_listener = GlobalHotkeyListener(
+                hotkey=hotkey,
+                on_start=self._hotkey_on_start,
+                on_stop=self._hotkey_on_stop,
+            )
+            self._hotkey_listener.start()  # type: ignore[union-attr]
+            logger.info(f"Global hotkey active: {hotkey}")
+        except Exception as e:
+            logger.warning(f"Could not start global hotkey listener: {e}")
+
+    def _hotkey_on_start(self) -> None:
+        """Called from the hotkey thread when the hotkey is pressed to start."""
+        self.call_from_thread(self._hotkey_start_recording)
+
+    def _hotkey_on_stop(self) -> None:
+        """Called from the hotkey thread when the hotkey is pressed to stop."""
+        self.call_from_thread(self._hotkey_stop_recording)
+
+    def _hotkey_start_recording(self) -> None:
+        """Start recording triggered by global hotkey (runs on main thread)."""
+        if not self._model_ready or self._recording or self._transcribing:
+            return
+        # Switch to record tab so the user can see what's happening
+        with contextlib.suppress(Exception):
+            self.query_one("#tabs", TabbedContent).active = "tab-record"
+        self._overlay_set("recording")
+        self._start_recording()
+
+    def _hotkey_stop_recording(self) -> None:
+        """Stop recording triggered by global hotkey (runs on main thread)."""
+        if not self._recording:
+            return
+        self._hotkey_pending_copy = True  # flag to auto-copy after transcription
+        self._overlay_set("transcribing")
+        self._stop_recording()
+
+    def _overlay_set(self, state: str) -> None:
+        """Update the floating overlay state if it exists."""
+        if self._overlay is not None:
+            with contextlib.suppress(Exception):
+                self._overlay.set_state(state)  # type: ignore[union-attr]
 
     # ------------------------------------------------------------------
     # First-run check
@@ -745,6 +816,11 @@ class VoicePadApp(App[None]):
             self.query_one("#setting-recordings_path", _Input).value = str(self.config.recordings_path)
             self.query_one("#setting-markdown_path", _Input).value = str(self.config.markdown_path)
 
+        with contextlib.suppress(Exception):
+            from textual.widgets import Input as _Input2
+
+            self.query_one("#setting-global_hotkey", _Input2).value = self.config.global_hotkey
+
     def _refresh_config_path_label(self) -> None:
         """Update the settings config path label to reflect current file state."""
         from utilityhub_config import get_config_path
@@ -786,6 +862,7 @@ class VoicePadApp(App[None]):
             "markdown_path": "Where your transcription files are saved",
             "transcription_model": "Whisper model to use for transcription",
             "input_device_index": "Microphone to record from",
+            "global_hotkey": "System-wide hotkey (e.g. <ctrl>+<alt>+v, empty to disable)",
         }
 
         # Build device options once — reused for the Select widget
@@ -903,12 +980,24 @@ class VoicePadApp(App[None]):
             global_path = get_config_path("voicepad", format="yaml")
             write_config(new_config, "voicepad", path=global_path, format="yaml")
 
+            hotkey_changed = new_config.global_hotkey != self.config.global_hotkey
             model_changed = (
                 new_config.transcription_model != self.config.transcription_model
                 or new_config.transcription_device != self.config.transcription_device
                 or new_config.transcription_compute_type != self.config.transcription_compute_type
             )
             object.__setattr__(self, "config", new_config)
+
+            if hotkey_changed:
+                if self._hotkey_listener is not None:
+                    with contextlib.suppress(Exception):
+                        self._hotkey_listener.stop()  # type: ignore[union-attr]
+                if self._overlay is not None:
+                    with contextlib.suppress(Exception):
+                        self._overlay.stop()  # type: ignore[union-attr]
+                self._hotkey_listener = None
+                self._overlay = None
+                self._start_hotkey_listener()
 
             if model_changed and not self._recording and not self._transcribing:
                 from voicepad_core.transcription import _model_cache
@@ -1074,6 +1163,16 @@ class VoicePadApp(App[None]):
             elapsed = time.monotonic() - self._record_start
             self.query_one("#tx-meta", Label).update(f"[dim]{elapsed:.1f}s  ·  streaming[/]")
             self._set_status("ready", "ready")
+            # Auto-copy if triggered by global hotkey
+            if self._hotkey_pending_copy:
+                self._hotkey_pending_copy = False
+                full_text = " ".join(c.text for c in self._stream_chunks).strip()
+                if full_text:
+                    _copy_to_clipboard(full_text)
+                    self._set_status("ready", "ready — copied to clipboard")
+                    self._overlay_set("copied")
+                else:
+                    self._overlay_set("hidden")
 
     def _save_recording(self, audio: np.ndarray) -> None:
         """Save WAV + markdown and add history entry after streaming completes."""

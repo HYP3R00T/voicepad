@@ -130,6 +130,20 @@ class Config(BaseModel):
         ),
     )
 
+    # ------------------------------------------------------------------
+    # Global hotkey
+    # ------------------------------------------------------------------
+
+    global_hotkey: str = Field(
+        default="<ctrl>+<alt>+v",
+        description=(
+            "System-wide hotkey to start/stop recording from any application. "
+            "Press once to start, press again to stop and copy transcription to clipboard. "
+            "Uses pynput key syntax, e.g. '<ctrl>+<alt>+v' or '<ctrl>+<shift>+space'. "
+            "Set to empty string to disable."
+        ),
+    )
+
     @field_validator("recordings_path", "markdown_path", "model_cache_path", mode="before")
     @classmethod
     def expand_paths(cls, v: Path | str) -> Path:
