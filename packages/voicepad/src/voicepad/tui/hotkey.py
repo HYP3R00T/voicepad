@@ -14,7 +14,7 @@ import contextlib
 import logging
 import threading
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     pass
@@ -52,7 +52,7 @@ class GlobalHotkeyListener:
         self._on_start = on_start
         self._on_stop = on_stop
         self._recording = False
-        self._listener: object | None = None
+        self._listener: Any = None
         self._thread: threading.Thread | None = None
 
     def start(self) -> None:
@@ -70,7 +70,7 @@ class GlobalHotkeyListener:
         """Stop the listener."""
         if self._listener is not None:
             with contextlib.suppress(Exception):
-                self._listener.stop()  # type: ignore[union-attr]
+                self._listener.stop()
         logger.info("Global hotkey listener stopped")
 
     def _run(self) -> None:

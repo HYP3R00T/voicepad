@@ -9,6 +9,7 @@ import time
 from dataclasses import dataclass, field
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import soundfile as sf
@@ -573,7 +574,7 @@ class SetupModal(ModalScreen[tuple[str, int | None]]):
     @on(Select.Changed, "#wizard-device-select")
     def on_device_changed(self, event: Select.Changed) -> None:
         if event.value is not Select.BLANK:
-            v = int(event.value)
+            v = int(str(event.value))
             self._chosen_device_index = None if v == -1 else v
 
     # ------------------------------------------------------------------
@@ -675,9 +676,9 @@ class VoicePadApp(App[None]):
         self._warm_result: ModelWarmResult | None = None
         self._current_text: str = ""
         self._selected_entry_idx: int | None = None
-        self._hotkey_listener: object | None = None  # GlobalHotkeyListener
+        self._hotkey_listener: Any = None  # GlobalHotkeyListener
         self._hotkey_pending_copy: bool = False
-        self._overlay: object | None = None  # StatusOverlay
+        self._overlay: Any = None  # StatusOverlay
 
     # ------------------------------------------------------------------
     # Layout
@@ -809,7 +810,7 @@ class VoicePadApp(App[None]):
         """Update the floating overlay state if it exists."""
         if self._overlay is not None:
             with contextlib.suppress(Exception):
-                self._overlay.set_state(state)
+                self._overlay.set_state(state)  # type: ignore[union-attr]
 
     # ------------------------------------------------------------------
     # First-run check
@@ -825,10 +826,12 @@ class VoicePadApp(App[None]):
         model_ready = model_downloaded(self.config.transcription_model, self.config)
 
         if config_missing or not model_ready:
-            self.push_screen(
-                SetupModal(self.config),
-                callback=self._on_setup_done,
-            )
+
+            def _setup_callback(result: tuple[str, int | None] | None) -> None:
+                if result is not None:
+                    self._on_setup_done(result)
+
+            self.push_screen(SetupModal(self.config), callback=_setup_callback)
         else:
             self._warm_model_worker()
 
@@ -1119,7 +1122,7 @@ class VoicePadApp(App[None]):
                 elif field_name == "input_device_index":
                     sel = self.query_one("#setting-input_device_index", Select)
                     if sel.value is not Select.BLANK:
-                        v = int(sel.value)
+                        v = int(str(sel.value))
                         raw[field_name] = None if v == -1 else v
                 else:
                     inp = self.query_one(f"#setting-{field_name}", Input)
@@ -1158,10 +1161,10 @@ class VoicePadApp(App[None]):
             if hotkey_changed:
                 if self._hotkey_listener is not None:
                     with contextlib.suppress(Exception):
-                        self._hotkey_listener.stop()
+                        self._hotkey_listener.stop()  # type: ignore[union-attr]
                 if self._overlay is not None:
                     with contextlib.suppress(Exception):
-                        self._overlay.stop()
+                        self._overlay.stop()  # type: ignore[union-attr]
                 self._hotkey_listener = None
                 self._overlay = None
                 self._start_hotkey_listener()
@@ -1278,8 +1281,11 @@ class VoicePadApp(App[None]):
         self._start_timer()
 
         # Start streaming transcriber — transcribes chunks during recording
+        recorder = self._session._recorder
+        if recorder is None:
+            return
         self._streamer = StreamingTranscriber(
-            recorder=self._session._recorder,
+            recorder=recorder,
             config=self.config,
             on_chunk=lambda chunk: self.call_from_thread(self._on_stream_chunk, chunk),
             on_error=lambda err: self.call_from_thread(self._set_status, "error", err),
@@ -1410,7 +1416,7 @@ class VoicePadApp(App[None]):
     @on(OptionList.OptionSelected, "#history-options")
     def on_history_option_selected(self, event: OptionList.OptionSelected) -> None:
         with contextlib.suppress(Exception):
-            idx = int(event.option.id)
+            idx = int(event.option.id or "-1")
             if 0 <= idx < len(self._entries):
                 self._selected_entry_idx = idx
                 entry = self._entries[idx]
@@ -1584,7 +1590,12 @@ class VoicePadApp(App[None]):
             return
         entry = self._entries[self._selected_entry_idx]
         name = entry.wav_path.stem if entry.wav_path else f"clip-{entry.index + 1}"
-        self.push_screen(DeleteConfirmModal(name), callback=self._on_delete_confirmed)
+
+        def _delete_callback(result: bool | None) -> None:
+            if result is not None:
+                self._on_delete_confirmed(result)
+
+        self.push_screen(DeleteConfirmModal(name), callback=_delete_callback)
 
     def _on_delete_confirmed(self, confirmed: bool) -> None:
         if not confirmed or self._selected_entry_idx is None:
@@ -1674,7 +1685,7 @@ class VoicePadApp(App[None]):
 
     def _refresh_status_label(self) -> None:
         label = self.query_one("#status", Label)
-        if "󰔛" in str(label.renderable):
+        if "󰔛" in str(label.render()):
             label.update("󰔟  transcribing…")
 
     # ------------------------------------------------------------------
