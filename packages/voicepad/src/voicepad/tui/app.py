@@ -674,17 +674,16 @@ class VoicePadApp(App[None]):
         self.theme = _THEME_NAME
         self._load_history_from_disk()
         self._populate_settings()
-        self._start_hotkey_listener()
         self._check_first_run()
 
     def on_unmount(self) -> None:
         """Stop the global hotkey listener when the app exits."""
         if self._hotkey_listener is not None:
             with contextlib.suppress(Exception):
-                self._hotkey_listener.stop()  # type: ignore[union-attr]
+                self._hotkey_listener.stop()
         if self._overlay is not None:
             with contextlib.suppress(Exception):
-                self._overlay.stop()  # type: ignore[union-attr]
+                self._overlay.stop()
 
     # ------------------------------------------------------------------
     # Global hotkey listener
@@ -700,14 +699,14 @@ class VoicePadApp(App[None]):
             from voicepad.tui.overlay import StatusOverlay
 
             self._overlay = StatusOverlay()
-            self._overlay.start()  # type: ignore[union-attr]
+            self._overlay.start()
 
             self._hotkey_listener = GlobalHotkeyListener(
                 hotkey=hotkey,
                 on_start=self._hotkey_on_start,
                 on_stop=self._hotkey_on_stop,
             )
-            self._hotkey_listener.start()  # type: ignore[union-attr]
+            self._hotkey_listener.start()
             logger.info(f"Global hotkey active: {hotkey}")
         except Exception as e:
             logger.warning(f"Could not start global hotkey listener: {e}")
@@ -722,7 +721,10 @@ class VoicePadApp(App[None]):
 
     def _hotkey_start_recording(self) -> None:
         """Start recording triggered by global hotkey (runs on main thread)."""
-        if not self._model_ready or self._recording or self._transcribing:
+        if self._recording or self._transcribing:
+            return
+        if not self._model_ready:
+            self._overlay_set("error")
             return
         # Switch to record tab so the user can see what's happening
         with contextlib.suppress(Exception):
@@ -742,7 +744,7 @@ class VoicePadApp(App[None]):
         """Update the floating overlay state if it exists."""
         if self._overlay is not None:
             with contextlib.suppress(Exception):
-                self._overlay.set_state(state)  # type: ignore[union-attr]
+                self._overlay.set_state(state)
 
     # ------------------------------------------------------------------
     # First-run check
@@ -991,10 +993,10 @@ class VoicePadApp(App[None]):
             if hotkey_changed:
                 if self._hotkey_listener is not None:
                     with contextlib.suppress(Exception):
-                        self._hotkey_listener.stop()  # type: ignore[union-attr]
+                        self._hotkey_listener.stop()
                 if self._overlay is not None:
                     with contextlib.suppress(Exception):
-                        self._overlay.stop()  # type: ignore[union-attr]
+                        self._overlay.stop()
                 self._hotkey_listener = None
                 self._overlay = None
                 self._start_hotkey_listener()
@@ -1040,6 +1042,11 @@ class VoicePadApp(App[None]):
         )
         self._set_status("ready", "ready")
         self._model_ready = True
+
+        # Start the global hotkey listener now that the model is ready
+        # and the Textual event loop is fully running.
+        if self._hotkey_listener is None:
+            self._start_hotkey_listener()
 
     # ------------------------------------------------------------------
     # Tab-aware binding gating
@@ -1238,7 +1245,7 @@ class VoicePadApp(App[None]):
     @on(OptionList.OptionSelected, "#history-options")
     def on_history_option_selected(self, event: OptionList.OptionSelected) -> None:
         with contextlib.suppress(Exception):
-            idx = int(event.option.id)  # type: ignore[arg-type]
+            idx = int(event.option.id)
             if 0 <= idx < len(self._entries):
                 self._selected_entry_idx = idx
                 entry = self._entries[idx]
