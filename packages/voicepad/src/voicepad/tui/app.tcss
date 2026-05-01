@@ -570,3 +570,83 @@ SetupModal {
 #wizard-next:disabled {
     color: $text-disabled;
 }
+
+/* ── delete confirmation modal ── */
+DeleteConfirmModal {
+    align: center middle;
+}
+
+#delete-dialog {
+    layout: vertical;
+    padding: 2 4;
+    width: 52;
+    height: auto;
+    border: tall $error;
+    background: $background;
+}
+
+#delete-title {
+    width: 100%;
+    height: 1;
+    text-align: center;
+    color: $error;
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+#delete-name {
+    width: 100%;
+    height: 1;
+    text-align: center;
+    color: $text-muted;
+    margin-bottom: 1;
+}
+
+#delete-body {
+    width: 100%;
+    height: auto;
+    text-align: center;
+    color: $text;
+    margin-bottom: 2;
+}
+
+#delete-nav {
+    layout: horizontal;
+    height: 1;
+    width: 100%;
+}
+
+#delete-cancel {
+    width: auto;
+    height: 1;
+    border: none;
+    background: transparent;
+    color: $text-muted;
+    padding: 0;
+    margin: 0;
+}
+
+#delete-cancel:hover {
+    color: $foreground;
+    background: transparent;
+}
+
+#delete-spacer {
+    width: 1fr;
+}
+
+#delete-confirm {
+    width: auto;
+    height: 1;
+    border: none;
+    background: transparent;
+    color: $error;
+    text-style: bold;
+    padding: 0;
+    margin: 0;
+}
+
+#delete-confirm:hover {
+    color: $foreground;
+    background: transparent;
+}

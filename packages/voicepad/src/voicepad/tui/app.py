@@ -183,6 +183,46 @@ class InfoModal(ModalScreen[None]):
 # ---------------------------------------------------------------------------
 
 
+class DeleteConfirmModal(ModalScreen[bool]):
+    """Confirmation dialog before deleting a recording."""
+
+    BINDINGS = [
+        Binding("escape", "dismiss_false", "Cancel", show=False),
+        Binding("n", "dismiss_false", "No", show=False),
+    ]
+
+    def __init__(self, entry_name: str) -> None:
+        super().__init__()
+        self._entry_name = entry_name
+
+    def compose(self) -> ComposeResult:
+        with Static(id="delete-dialog"):
+            yield Static("󰆴  Delete recording?", id="delete-title")
+            yield Static(
+                f"[dim]{self._entry_name}[/]",
+                id="delete-name",
+            )
+            yield Static(
+                "This will permanently delete the WAV file\nand its transcription markdown.",
+                id="delete-body",
+            )
+            with Static(id="delete-nav"):
+                yield Button("Cancel", id="delete-cancel")
+                yield Static("", id="delete-spacer")
+                yield Button("Delete", id="delete-confirm")
+
+    def action_dismiss_false(self) -> None:
+        self.dismiss(False)
+
+    @on(Button.Pressed, "#delete-cancel")
+    def on_cancel(self) -> None:
+        self.dismiss(False)
+
+    @on(Button.Pressed, "#delete-confirm")
+    def on_confirm(self) -> None:
+        self.dismiss(True)
+
+
 class SetupModal(ModalScreen[tuple[str, int | None]]):
     """4-step first-run wizard.
 
@@ -539,10 +579,18 @@ class VoicePadApp(App[None]):
     CSS_PATH = "app.tcss"
 
     BINDINGS = [
-        Binding("space", "toggle_recording", "Record / Stop", show=True),
-        Binding("c", "copy_transcription", "Copy", show=True),
+        # Global
         Binding("q", "quit", "Quit", show=True),
         Binding("i", "show_info", "Info", show=True, key_display="i"),
+        # Record tab
+        Binding("space", "toggle_recording", "Record / Stop", show=True),
+        Binding("c", "copy_transcription", "Copy", show=True),
+        # History tab
+        Binding("t", "retranscribe_entry", "Retranscribe", show=True),
+        Binding("d", "delete_entry", "Delete", show=True),
+        # Settings tab
+        Binding("s", "save_settings", "Save", show=True),
+        # Hidden utility
         Binding("r", "reload_model", "Reload model", show=False),
     ]
 
@@ -910,6 +958,28 @@ class VoicePadApp(App[None]):
         self._model_ready = True
 
     # ------------------------------------------------------------------
+    # Tab-aware binding gating
+    # ------------------------------------------------------------------
+
+    def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
+        """Refresh footer bindings whenever the active tab changes."""
+        self.refresh_bindings()
+
+    def check_action(self, action: str, parameters: tuple) -> bool | None:
+        """Show/enable bindings only for the relevant tab."""
+        active = self.query_one("#tabs", TabbedContent).active if self.is_mounted else "tab-record"
+        tab_specific: dict[str, str] = {
+            "toggle_recording": "tab-record",
+            "copy_transcription": "tab-record",
+            "retranscribe_entry": "tab-history",
+            "delete_entry": "tab-history",
+            "save_settings": "tab-settings",
+        }
+        if action in tab_specific:
+            return active == tab_specific[action]
+        return True
+
+    # ------------------------------------------------------------------
     # Record / stop
     # ------------------------------------------------------------------
 
@@ -1220,6 +1290,80 @@ class VoicePadApp(App[None]):
         self._set_status("transcribing", "reloading model…")
         self.query_one("#header-model", Label).update("[dim]model:[/] loading…")
         self._warm_model_worker()
+
+    def action_delete_entry(self) -> None:
+        """Show delete confirmation for the selected history entry."""
+        active = self.query_one("#tabs", TabbedContent).active
+        if active != "tab-history" or self._selected_entry_idx is None:
+            return
+        self._show_delete_confirm()
+
+    def action_retranscribe_entry(self) -> None:
+        """Retranscribe the selected history entry via keyboard shortcut."""
+        if self._selected_entry_idx is None or not self._model_ready:
+            return
+        entry = self._entries[self._selected_entry_idx]
+        if entry.wav_path and entry.wav_path.exists():
+            self.query_one("#retranscribe-btn", Button).disabled = True
+            self._retranscribe_file(entry.wav_path, entry.md_path)
+
+    def action_save_settings(self) -> None:
+        """Save settings via keyboard shortcut."""
+        self.query_one("#settings-save-btn", Button).press()
+
+    def _show_delete_confirm(self) -> None:
+        if self._selected_entry_idx is None:
+            return
+        entry = self._entries[self._selected_entry_idx]
+        name = entry.wav_path.stem if entry.wav_path else f"clip-{entry.index + 1}"
+        self.push_screen(DeleteConfirmModal(name), callback=self._on_delete_confirmed)
+
+    def _on_delete_confirmed(self, confirmed: bool) -> None:
+        if not confirmed or self._selected_entry_idx is None:
+            return
+        entry = self._entries[self._selected_entry_idx]
+
+        # Delete files from disk
+        with contextlib.suppress(Exception):
+            if entry.wav_path and entry.wav_path.exists():
+                entry.wav_path.unlink()
+        with contextlib.suppress(Exception):
+            if entry.md_path and entry.md_path.exists():
+                entry.md_path.unlink()
+
+        # Remove from in-memory list
+        del self._entries[self._selected_entry_idx]
+        self._selected_entry_idx = None
+
+        # Rebuild the OptionList from scratch
+        ol = self.query_one("#history-options", OptionList)
+        ol.clear_options()
+        for new_idx, e in enumerate(self._entries):
+            e = SessionEntry(
+                index=new_idx,
+                wav_path=e.wav_path,
+                md_path=e.md_path,
+                duration_s=e.duration_s,
+                text=e.text,
+                latency_ms=e.latency_ms,
+                device=e.device,
+                timestamp=e.timestamp,
+            )
+            self._entries[new_idx] = e
+            name = e.wav_path.stem if e.wav_path else f"clip-{new_idx + 1}"
+            label = (
+                f"[bold]{e.timestamp}[/]  [dim]{name}[/]\n"
+                f"  [dim]{e.duration_s:.1f}s · {e.latency_ms:.0f}ms · {e.device}[/]"
+            )
+            ol.add_option(Option(label, id=str(new_idx)))
+
+        # Clear the viewer and disable action buttons
+        self.query_one("#retranscribe-btn", Button).disabled = True
+        with contextlib.suppress(Exception):
+            self.run_worker(
+                self.query_one("#history-viewer", MarkdownViewer).document.update(_MD_PLACEHOLDER),
+                name="md-clear",
+            )
 
     def action_copy_transcription(self) -> None:
         if not self._current_text:
