@@ -39,12 +39,19 @@ class ModelWarmResult:
 
 
 def warm_model(config: Config) -> ModelWarmResult:
-    """Load the model into VRAM. Blocks until complete."""
-    from voicepad_core import get_or_load_model
+    """Download (if needed) then load the model into VRAM. Blocks until complete."""
+    from voicepad_core import ensure_model_downloaded, get_or_load_model, model_downloaded
+    from voicepad_core.transcription import TranscriptionError
 
     try:
+        if not model_downloaded(config.transcription_model, config):
+            logger.info(f"Model '{config.transcription_model}' not cached — downloading")
+            ensure_model_downloaded(config.transcription_model, config)
         _, device, compute, fallback = get_or_load_model(config)
         return ModelWarmResult(device=device, compute_type=compute, fallback=fallback)
+    except TranscriptionError as e:
+        logger.error(f"Model download failed: {e}")
+        return ModelWarmResult(device="cpu", compute_type="int8", fallback=True, error=str(e))
     except Exception as e:
         logger.error(f"Model warm failed: {e}")
         return ModelWarmResult(device="cpu", compute_type="int8", fallback=True, error=str(e))

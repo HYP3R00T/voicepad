@@ -543,6 +543,7 @@ class VoicePadApp(App[None]):
         Binding("c", "copy_transcription", "Copy", show=True),
         Binding("q", "quit", "Quit", show=True),
         Binding("i", "show_info", "Info", show=True, key_display="i"),
+        Binding("r", "reload_model", "Reload model", show=False),
     ]
 
     _model_ready: reactive[bool] = reactive(False)
@@ -1018,7 +1019,9 @@ class VoicePadApp(App[None]):
                 self.config.markdown_path.mkdir(parents=True, exist_ok=True)
                 duration_s = len(audio) / 16000
                 md_path.write_text(
-                    _format_markdown_streaming(wav_path, full_text, duration_s, self._stream_chunks),
+                    _format_markdown_streaming(
+                        wav_path, full_text, duration_s, self._stream_chunks, self.config.transcription_model
+                    ),
                     encoding="utf-8",
                 )
             except Exception:
@@ -1177,7 +1180,7 @@ class VoicePadApp(App[None]):
             # Prepend new transcription — never overwrite the existing ones
             out_md = md_path or (self.config.markdown_path / f"{wav_path.stem}.md")
             self.config.markdown_path.mkdir(parents=True, exist_ok=True)
-            new_content = _prepend_retranscription(out_md, result)
+            new_content = _prepend_retranscription(out_md, result, self.config.transcription_model)
             out_md.write_text(new_content, encoding="utf-8")
             self._set_status("ready", "ready")
 
@@ -1205,6 +1208,18 @@ class VoicePadApp(App[None]):
     def action_show_info(self) -> None:
         """Show the info modal with app details and sponsor information."""
         self.push_screen(InfoModal())
+
+    def action_reload_model(self) -> None:
+        """Re-download (if needed) and reload the current model."""
+        if self._recording or self._transcribing:
+            return
+        from voicepad_core.transcription import _model_cache
+
+        _model_cache.clear()
+        self._model_ready = False
+        self._set_status("transcribing", "reloading model…")
+        self.query_one("#header-model", Label).update("[dim]model:[/] loading…")
+        self._warm_model_worker()
 
     def action_copy_transcription(self) -> None:
         if not self._current_text:
@@ -1269,15 +1284,20 @@ class VoicePadApp(App[None]):
 # ---------------------------------------------------------------------------
 
 
-def _format_markdown(audio_path: Path, result) -> str:
+def _format_markdown(audio_path: Path, result, model_name: str = "") -> str:
     """Create a new markdown file with the first transcription."""
     ts = time.strftime("%Y-%m-%d %H:%M")
+    model_str = (
+        f"{model_name} · {result.device} / {result.compute_type}"
+        if model_name
+        else f"{result.device} / {result.compute_type}"
+    )
     fm = [
         "---",
         f"file: {audio_path.name}",
         "transcriptions:",
         "  - n: 1",
-        f"    model: {result.device} / {result.compute_type}",
+        f"    model: {model_str}",
         f"    language: {result.language} ({result.language_probability * 100:.1f}%)",
         f"    duration: {result.duration_s:.1f}s",
         f"    latency: {result.latency_ms:.0f}ms",
@@ -1297,6 +1317,7 @@ def _format_markdown_streaming(
     text: str,
     duration_s: float,
     chunks: list[ChunkResult],
+    model_name: str = "",
 ) -> str:
     """Create a new markdown file for a streaming transcription."""
     latest_chunk = next((chunk for chunk in reversed(chunks) if chunk.text), None)
@@ -1305,13 +1326,14 @@ def _format_markdown_streaming(
     language_probability = latest_chunk.language_probability if latest_chunk else 0.0
     latency_ms = sum(chunk.latency_ms for chunk in chunks)
     ts = time.strftime("%Y-%m-%d %H:%M")
+    model_str = f"{model_name} · {device} / live" if model_name else f"{device} / live"
 
     fm = [
         "---",
         f"file: {wav_path.name}",
         "transcriptions:",
         "  - n: 1",
-        f"    model: {device} / live",
+        f"    model: {model_str}",
         f"    language: {language} ({language_probability * 100:.1f}%)",
         f"    duration: {duration_s:.1f}s",
         f"    latency: {latency_ms:.0f}ms",
@@ -1326,7 +1348,7 @@ def _format_markdown_streaming(
     return "\n".join(fm)
 
 
-def _prepend_retranscription(md_path: Path, result) -> str:
+def _prepend_retranscription(md_path: Path, result, model_name: str = "") -> str:
     """Prepend a new transcription to an existing markdown file.
 
     Reads the existing file, increments the transcription count,
@@ -1356,9 +1378,14 @@ def _prepend_retranscription(md_path: Path, result) -> str:
     new_n = max_n + 1
 
     # Build new front matter entry
+    model_str = (
+        f"{model_name} · {result.device} / {result.compute_type}"
+        if model_name
+        else f"{result.device} / {result.compute_type}"
+    )
     new_fm_entry = [
         f"  - n: {new_n}",
-        f"    model: {result.device} / {result.compute_type}",
+        f"    model: {model_str}",
         f"    language: {result.language} ({result.language_probability * 100:.1f}%)",
         f"    duration: {result.duration_s:.1f}s",
         f"    latency: {result.latency_ms:.0f}ms",

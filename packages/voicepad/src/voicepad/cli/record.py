@@ -198,7 +198,7 @@ def start_recording(
         md_path = config.markdown_path / f"{wav_path.stem}.md"
         try:
             config.markdown_path.mkdir(parents=True, exist_ok=True)
-            md_path.write_text(_format_markdown(wav_path, result), encoding="utf-8")
+            md_path.write_text(_format_markdown(wav_path, result, config.transcription_model), encoding="utf-8")
             typer.echo(f"      markdown: {md_path}")
         except Exception as e:
             typer.secho(f"[WARN] Could not save markdown: {e}", fg=typer.colors.YELLOW)
@@ -269,25 +269,30 @@ def _print_result(result) -> None:
         typer.secho("  [!] CUDA not available — ran on CPU", fg=typer.colors.YELLOW)
 
 
-def _format_markdown(wav_path: Path, result) -> str:
+def _format_markdown(wav_path: Path, result, model_name: str = "") -> str:
+    model_str = (
+        f"{model_name} · {result.device} / {result.compute_type}"
+        if model_name
+        else f"{result.device} / {result.compute_type}"
+    )
     lines = [
         "---",
         f"file: {wav_path.name}",
-        f"model: {result.device} / {result.compute_type}",
-        f"language: {result.language} ({result.language_probability * 100:.1f}% confidence)",
-        f"duration: {result.duration_s:.1f}s",
-        f"latency: {result.latency_ms:.0f}ms",
+        "transcriptions:",
+        "  - n: 1",
+        f"    model: {model_str}",
+        f"    language: {result.language} ({result.language_probability * 100:.1f}%)",
+        f"    duration: {result.duration_s:.1f}s",
+        f"    latency: {result.latency_ms:.0f}ms",
     ]
     if result.fallback_to_cpu:
-        lines.append("fallback: cpu")
+        lines.append("    fallback: cpu")
     lines += [
         "---",
+        "",
+        "## Transcription 1",
         "",
         result.text or "*(no speech detected)*",
         "",
     ]
-    if result.segments:
-        lines += ["## Segments", ""]
-        for seg in result.segments:
-            lines.append(f"- `[{seg.start:.1f}s → {seg.end:.1f}s]` {seg.text}")
     return "\n".join(lines) + "\n"
