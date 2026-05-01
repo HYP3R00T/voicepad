@@ -645,11 +645,6 @@ class VoicePadApp(App[None]):
                         show_table_of_contents=False,
                         open_links=False,
                     )
-                    yield Button(
-                        "⟳  retranscribe",
-                        id="retranscribe-btn",
-                        disabled=True,
-                    )
 
             # ── Tab 3: Settings ────────────────────────────────────
             with TabPane("  settings  ", id="tab-settings"):
@@ -970,9 +965,6 @@ class VoicePadApp(App[None]):
                 ol.highlighted = ol.option_count - 1
                 last_entry = self._entries[-1]
                 self._selected_entry_idx = last_entry.index
-                self.query_one("#retranscribe-btn", Button).disabled = (
-                    not self._model_ready or last_entry.wav_path is None
-                )
                 if last_entry.md_path and last_entry.md_path.exists():
                     self._load_history_viewer(last_entry.md_path)
         self.refresh_bindings()
@@ -1151,7 +1143,6 @@ class VoicePadApp(App[None]):
             if 0 <= idx < len(self._entries):
                 self._selected_entry_idx = idx
                 entry = self._entries[idx]
-                self.query_one("#retranscribe-btn", Button).disabled = not self._model_ready or entry.wav_path is None
                 self.refresh_bindings()
                 if entry.md_path and entry.md_path.exists():
                     self._load_history_viewer(entry.md_path)
@@ -1231,15 +1222,6 @@ class VoicePadApp(App[None]):
     # Retranscribe (history tab)
     # ------------------------------------------------------------------
 
-    @on(Button.Pressed, "#retranscribe-btn")
-    def on_retranscribe_btn_pressed(self) -> None:
-        if self._selected_entry_idx is None or not self._model_ready:
-            return
-        entry = self._entries[self._selected_entry_idx]
-        if entry.wav_path and entry.wav_path.exists():
-            self.query_one("#retranscribe-btn", Button).disabled = True
-            self._retranscribe_file(entry.wav_path, entry.md_path)
-
     @work(thread=True, name="retranscribe")
     def _retranscribe_file(self, wav_path: Path, md_path: Path | None) -> None:
         from voicepad_core.transcription import transcribe_buffer
@@ -1258,7 +1240,6 @@ class VoicePadApp(App[None]):
         self.call_from_thread(self._on_retranscribe_done, wav_path, md_path, result, error)
 
     def _on_retranscribe_done(self, wav_path: Path, md_path: Path | None, result, error: str | None) -> None:
-        self.query_one("#retranscribe-btn", Button).disabled = False
         if error:
             self._set_status("error", error)
             return
@@ -1321,7 +1302,6 @@ class VoicePadApp(App[None]):
             return
         entry = self._entries[self._selected_entry_idx]
         if entry.wav_path and entry.wav_path.exists():
-            self.query_one("#retranscribe-btn", Button).disabled = True
             self._retranscribe_file(entry.wav_path, entry.md_path)
 
     def action_save_settings(self) -> None:
@@ -1375,7 +1355,6 @@ class VoicePadApp(App[None]):
             ol.add_option(Option(label, id=str(new_idx)))
 
         # Clear the viewer and disable action buttons
-        self.query_one("#retranscribe-btn", Button).disabled = True
         self.refresh_bindings()
         with contextlib.suppress(Exception):
             self.run_worker(

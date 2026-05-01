@@ -171,26 +171,6 @@ TabPane {
     padding: 1 1 0 2;
 }
 
-#retranscribe-btn {
-    width: auto;
-    height: 1;
-    border: none;
-    background: transparent;
-    color: $primary;
-    text-style: bold;
-    margin: 1 2;
-    padding: 0 1;
-}
-
-#retranscribe-btn:hover {
-    color: $foreground;
-    background: transparent;
-}
-
-#retranscribe-btn:disabled {
-    color: $text-disabled;
-}
-
 /* ── settings tab ── */
 #settings-scroll {
     height: 1fr;
