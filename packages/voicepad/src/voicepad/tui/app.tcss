@@ -630,3 +630,29 @@ DeleteConfirmModal {
     color: $foreground;
     background: transparent;
 }
+
+/* ── hotkey picker ── */
+.hotkey-mod-row {
+    layout: horizontal;
+    height: auto;
+    width: 100%;
+    margin-top: 1;
+    margin-bottom: 1;
+}
+
+.hotkey-checkbox {
+    width: auto;
+    margin-right: 2;
+    background: transparent;
+}
+
+.hotkey-key-select {
+    width: 24;
+    margin-bottom: 1;
+}
+
+.hotkey-preview {
+    height: 1;
+    color: $text-muted;
+    margin-top: 0;
+}

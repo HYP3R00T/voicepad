@@ -21,6 +21,7 @@ from textual.screen import ModalScreen
 from textual.theme import Theme
 from textual.widgets import (
     Button,
+    Checkbox,
     DataTable,
     Footer,
     Input,
@@ -59,6 +60,70 @@ try:
     _APP_VERSION = f"v{_pkg_version('voicepad')}"
 except Exception:
     _APP_VERSION = "dev"
+
+# ---------------------------------------------------------------------------
+# Hotkey picker helpers
+# ---------------------------------------------------------------------------
+
+# Keys available in the hotkey picker (pynput names for special keys,
+# plain chars for letters/digits)
+_HOTKEY_KEYS: list[str] = [
+    *"abcdefghijklmnopqrstuvwxyz",
+    *"0123456789",
+    "f1",
+    "f2",
+    "f3",
+    "f4",
+    "f5",
+    "f6",
+    "f7",
+    "f8",
+    "f9",
+    "f10",
+    "f11",
+    "f12",
+    "space",
+    "tab",
+    "enter",
+    "backspace",
+    "delete",
+    "insert",
+    "home",
+    "end",
+    "page_up",
+    "page_down",
+    "up",
+    "down",
+    "left",
+    "right",
+]
+
+_MOD_TO_PYNPUT = {"ctrl": "<ctrl>", "alt": "<alt>", "shift": "<shift>", "cmd": "<cmd>"}
+
+
+def _parse_hotkey_str(hotkey: str) -> tuple[list[str], str]:
+    """Parse '<ctrl>+<alt>+v' → (['ctrl', 'alt'], 'v')."""
+    mods: list[str] = []
+    key = "v"
+    for part in hotkey.lower().split("+"):
+        part = part.strip().strip("<>")
+        if part in _MOD_TO_PYNPUT:
+            mods.append(part)
+        elif part:
+            key = part
+    return mods, key
+
+
+def _build_hotkey_str(mods: list[str], key: str) -> str:
+    """Build '<ctrl>+<alt>+v' from (['ctrl', 'alt'], 'v')."""
+    if not key:
+        return ""
+    parts = [_MOD_TO_PYNPUT[m] for m in mods if m in _MOD_TO_PYNPUT]
+    # Single-char keys don't need angle brackets; special keys do
+    key_part = key if len(key) == 1 else f"<{key}>"
+    parts.append(key_part)
+    return "+".join(parts)
+
 
 # ---------------------------------------------------------------------------
 # Theme — Catppuccin Mocha with blue primary instead of pink
@@ -819,9 +884,14 @@ class VoicePadApp(App[None]):
             self.query_one("#setting-markdown_path", _Input).value = str(self.config.markdown_path)
 
         with contextlib.suppress(Exception):
-            from textual.widgets import Input as _Input2
-
-            self.query_one("#setting-global_hotkey", _Input2).value = self.config.global_hotkey
+            # Sync hotkey picker from config
+            mods, key = _parse_hotkey_str(self.config.global_hotkey)
+            for mod_id in ("ctrl", "alt", "shift", "cmd"):
+                self.query_one(f"#hotkey-mod-{mod_id}", Checkbox).value = mod_id in mods
+            sel = self.query_one("#hotkey-key-select", Select)
+            if key in _HOTKEY_KEYS:
+                sel.value = key
+            self._update_hotkey_preview()
 
     def _refresh_config_path_label(self) -> None:
         """Update the settings config path label to reflect current file state."""
@@ -864,7 +934,6 @@ class VoicePadApp(App[None]):
             "markdown_path": "Where your transcription files are saved",
             "transcription_model": "Whisper model to use for transcription",
             "input_device_index": "Microphone to record from",
-            "global_hotkey": "System-wide hotkey (e.g. <ctrl>+<alt>+v, empty to disable)",
         }
 
         # Build device options once — reused for the Select widget
@@ -929,6 +998,99 @@ class VoicePadApp(App[None]):
             container.mount(row)
             row.mount(key_label, widget)
 
+        # ── Hotkey picker ──────────────────────────────────────────────
+        hotkey_label = Label(
+            "[bold]global_hotkey[/]  [dim]—  System-wide record/stop shortcut[/]",
+            classes="settings-key",
+        )
+        hotkey_row = Static(classes="settings-row", id="hotkey-row")
+        container.mount(hotkey_row)
+        hotkey_row.mount(hotkey_label)
+
+        # Parse current hotkey into modifiers + key
+        mods, key_char = _parse_hotkey_str(self.config.global_hotkey)
+
+        mod_row = Static(classes="hotkey-mod-row", id="hotkey-mod-row")
+        hotkey_row.mount(mod_row)
+
+        _modifiers = [("Ctrl", "ctrl"), ("Alt", "alt"), ("Shift", "shift"), ("Win", "cmd")]
+        for label_text, mod_id in _modifiers:
+            cb = Checkbox(
+                label_text,
+                value=(mod_id in mods),
+                id=f"hotkey-mod-{mod_id}",
+                classes="hotkey-checkbox",
+            )
+            mod_row.mount(cb)
+
+        key_options = [(k, k) for k in _HOTKEY_KEYS]
+        current_key = key_char if key_char in _HOTKEY_KEYS else "v"
+        key_select = Select(
+            options=key_options,
+            value=current_key,
+            id="hotkey-key-select",
+            classes="hotkey-key-select",
+            allow_blank=False,
+        )
+        hotkey_row.mount(key_select)
+
+        preview = _build_hotkey_str(mods, current_key)
+        hotkey_row.mount(
+            Label(
+                f"[dim]{preview or 'disabled'}[/]",
+                id="hotkey-preview",
+                classes="hotkey-preview",
+            )
+        )
+
+    def _get_hotkey_from_picker(self) -> str:
+        """Read the hotkey picker widgets and return the pynput hotkey string."""
+        mods: list[str] = []
+        for mod_id in ("ctrl", "alt", "shift", "cmd"):
+            with contextlib.suppress(Exception):
+                if self.query_one(f"#hotkey-mod-{mod_id}", Checkbox).value:
+                    mods.append(mod_id)
+        key = "v"
+        with contextlib.suppress(Exception):
+            sel = self.query_one("#hotkey-key-select", Select)
+            if sel.value is not Select.BLANK:
+                key = str(sel.value)
+        return _build_hotkey_str(mods, key)
+
+    def _update_hotkey_preview(self) -> None:
+        """Refresh the preview label from current picker state."""
+        with contextlib.suppress(Exception):
+            preview = self._get_hotkey_from_picker()
+            self.query_one("#hotkey-preview", Label).update(f"[dim]{preview or 'disabled'}[/]")
+
+    def _get_hotkey_from_picker(self) -> str:
+        """Read modifier checkboxes + key dropdown and return pynput hotkey string."""
+        mods: list[str] = []
+        for mod_id in ("ctrl", "alt", "shift", "cmd"):
+            with contextlib.suppress(Exception):
+                if self.query_one(f"#hotkey-mod-{mod_id}", Checkbox).value:
+                    mods.append(mod_id)
+        key = "v"
+        with contextlib.suppress(Exception):
+            sel = self.query_one("#hotkey-key-select", Select)
+            if sel.value is not Select.BLANK:
+                key = str(sel.value)
+        return _build_hotkey_str(mods, key)
+
+    def _update_hotkey_preview(self) -> None:
+        """Refresh the preview label from current picker state."""
+        with contextlib.suppress(Exception):
+            preview = self._get_hotkey_from_picker()
+            self.query_one("#hotkey-preview", Label).update(f"[dim]{preview or 'disabled'}[/]")
+
+    @on(Checkbox.Changed, ".hotkey-checkbox")
+    def on_hotkey_checkbox_changed(self) -> None:
+        self._update_hotkey_preview()
+
+    @on(Select.Changed, "#hotkey-key-select")
+    def on_hotkey_key_changed(self) -> None:
+        self._update_hotkey_preview()
+
     @on(Button.Pressed, "#settings-save-btn")
     def on_settings_save(self) -> None:
         """Read user-facing inputs, merge with existing config, write to voicepad.yaml."""
@@ -942,6 +1104,9 @@ class VoicePadApp(App[None]):
 
         # Start from current config values (preserves hidden fields)
         raw = self.config.model_dump(mode="json")
+
+        # Read global hotkey from the picker widgets
+        raw["global_hotkey"] = self._get_hotkey_from_picker()
 
         for field_name in user_fields:
             field_info = _Config.model_fields.get(field_name)
