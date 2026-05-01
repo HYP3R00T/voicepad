@@ -18,15 +18,15 @@ logger = logging.getLogger(__name__)
 
 State = Literal["recording", "transcribing", "copied", "error", "hidden"]
 
-# Pill appearance
-_BG = "#1e1e2e"  # Catppuccin Mocha base
-_FG = "#cdd6f4"  # foreground
+# Pill appearance — light background so it pops on dark desktops
+_BG = "#eff1f5"  # Catppuccin Latte base (near-white)
+_FG = "#4c4f69"  # Catppuccin Latte text (dark)
 _COLORS: dict[State, str] = {
-    "recording": "#f28fad",  # red
-    "transcribing": "#fae3b0",  # yellow
-    "copied": "#abe9b3",  # green
-    "error": "#f28fad",  # red
-    "hidden": "#cdd6f4",
+    "recording": "#d20f39",  # Catppuccin Latte red
+    "transcribing": "#df8e1d",  # Catppuccin Latte yellow
+    "copied": "#40a02b",  # Catppuccin Latte green
+    "error": "#d20f39",  # Catppuccin Latte red
+    "hidden": "#4c4f69",
 }
 _LABELS: dict[State, str] = {
     "recording": "● Recording…",
@@ -38,6 +38,34 @@ _LABELS: dict[State, str] = {
 _AUTO_HIDE_AFTER_S = 2.0  # hide "Copied" / "Error" after this many seconds
 
 
+def _draw_pill(canvas: object, x1: int, y1: int, x2: int, y2: int, r: int, **kw: object) -> None:
+    """Draw a rounded rectangle (pill) on a tkinter Canvas."""
+    import tkinter as tk
+
+    c = canvas  # type: ignore[assignment]
+    fill = str(kw.get("fill", ""))
+    outline = str(kw.get("outline", ""))
+    lw = kw.get("width", 1)
+    # Filled body (two overlapping rectangles)
+    c.create_rectangle(x1 + r, y1, x2 - r, y2, fill=fill, outline=fill)
+    c.create_rectangle(x1, y1 + r, x2, y2 - r, fill=fill, outline=fill)
+    # Four filled corner circles
+    c.create_oval(x1, y1, x1 + 2 * r, y1 + 2 * r, fill=fill, outline=fill)
+    c.create_oval(x2 - 2 * r, y1, x2, y1 + 2 * r, fill=fill, outline=fill)
+    c.create_oval(x1, y2 - 2 * r, x1 + 2 * r, y2, fill=fill, outline=fill)
+    c.create_oval(x2 - 2 * r, y2 - 2 * r, x2, y2, fill=fill, outline=fill)
+    # Border arcs
+    c.create_arc(x1, y1, x1 + 2 * r, y1 + 2 * r, start=90, extent=90, style=tk.ARC, outline=outline, width=lw)
+    c.create_arc(x2 - 2 * r, y1, x2, y1 + 2 * r, start=0, extent=90, style=tk.ARC, outline=outline, width=lw)
+    c.create_arc(x1, y2 - 2 * r, x1 + 2 * r, y2, start=180, extent=90, style=tk.ARC, outline=outline, width=lw)
+    c.create_arc(x2 - 2 * r, y2 - 2 * r, x2, y2, start=270, extent=90, style=tk.ARC, outline=outline, width=lw)
+    # Straight border edges
+    c.create_line(x1 + r, y1, x2 - r, y1, fill=outline, width=lw)
+    c.create_line(x1 + r, y2, x2 - r, y2, fill=outline, width=lw)
+    c.create_line(x1, y1 + r, x1, y2 - r, fill=outline, width=lw)
+    c.create_line(x2, y1 + r, x2, y2 - r, fill=outline, width=lw)
+
+
 class StatusOverlay:
     """Borderless floating pill shown during hotkey recording sessions.
 
@@ -47,6 +75,7 @@ class StatusOverlay:
 
     def __init__(self) -> None:
         self._root: object | None = None
+        self._canvas: object | None = None
         self._label: object | None = None
         self._state: State = "hidden"
         self._hide_timer: object | None = None
@@ -93,17 +122,21 @@ class StatusOverlay:
             root.attributes("-alpha", 0.92)
             root.configure(bg=_BG)
 
-            # Pill label
+            # Use a Canvas to draw a rounded-rectangle pill shape
+            canvas = tk.Canvas(root, bg=_BG, highlightthickness=0)
+            canvas.pack()
+            self._canvas = canvas
+
+            # Label drawn over the canvas
             label = tk.Label(
                 root,
                 text="",
-                font=("Segoe UI", 11, "bold"),
+                font=("Segoe UI", 12, "bold"),
                 bg=_BG,
                 fg=_FG,
-                padx=18,
-                pady=8,
+                padx=20,
+                pady=9,
             )
-            label.pack()
             self._label = label
 
             # Position: bottom-center
@@ -153,10 +186,28 @@ class StatusOverlay:
             self._root.withdraw()  # type: ignore[union-attr]
             return
 
-        # Update label text and colour
         text = _LABELS.get(state, "")
         color = _COLORS.get(state, _FG)
-        self._label.configure(text=text, fg=color)  # type: ignore[union-attr]
+
+        # Measure text size to size the pill
+        self._label.configure(text=text, fg=color, bg=_BG)  # type: ignore[union-attr]
+        self._root.update_idletasks()  # type: ignore[union-attr]
+        lw = self._label.winfo_reqwidth()  # type: ignore[union-attr]
+        lh = self._label.winfo_reqheight()  # type: ignore[union-attr]
+
+        r = lh // 2  # radius = half the height for a true pill
+        w = lw
+        h = lh
+
+        # Resize canvas and draw rounded rect
+        canvas = self._canvas  # type: ignore[union-attr]
+        canvas.configure(width=w, height=h)
+        canvas.delete("all")
+        _draw_pill(canvas, 0, 0, w, h, r, fill=_BG, outline=color, width=2)
+
+        # Place label centred on canvas
+        canvas.create_window(w // 2, h // 2, window=self._label)  # type: ignore[union-attr]
+
         self._reposition()
         self._root.deiconify()  # type: ignore[union-attr]
         self._root.lift()  # type: ignore[union-attr]
