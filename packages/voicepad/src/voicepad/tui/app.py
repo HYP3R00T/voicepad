@@ -963,10 +963,22 @@ class VoicePadApp(App[None]):
 
     def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
         """Refresh footer bindings whenever the active tab changes."""
+        # Auto-select the latest history entry when switching to history tab
+        if str(event.tab.id) == "tab-history" and self._entries and self._selected_entry_idx is None:
+            ol = self.query_one("#history-options", OptionList)
+            if ol.option_count > 0:
+                ol.highlighted = ol.option_count - 1
+                last_entry = self._entries[-1]
+                self._selected_entry_idx = last_entry.index
+                self.query_one("#retranscribe-btn", Button).disabled = (
+                    not self._model_ready or last_entry.wav_path is None
+                )
+                if last_entry.md_path and last_entry.md_path.exists():
+                    self._load_history_viewer(last_entry.md_path)
         self.refresh_bindings()
 
     def check_action(self, action: str, parameters: tuple) -> bool | None:
-        """Show/enable bindings only for the relevant tab."""
+        """Show/enable bindings only for the relevant tab and context."""
         active = self.query_one("#tabs", TabbedContent).active if self.is_mounted else "tab-record"
         tab_specific: dict[str, str] = {
             "toggle_recording": "tab-record",
@@ -976,7 +988,11 @@ class VoicePadApp(App[None]):
             "save_settings": "tab-settings",
         }
         if action in tab_specific:
-            return active == tab_specific[action]
+            if active != tab_specific[action]:
+                return False
+            # t and d also require an entry to be selected
+            if action in ("retranscribe_entry", "delete_entry"):
+                return self._selected_entry_idx is not None
         return True
 
     # ------------------------------------------------------------------
@@ -1136,6 +1152,7 @@ class VoicePadApp(App[None]):
                 self._selected_entry_idx = idx
                 entry = self._entries[idx]
                 self.query_one("#retranscribe-btn", Button).disabled = not self._model_ready or entry.wav_path is None
+                self.refresh_bindings()
                 if entry.md_path and entry.md_path.exists():
                     self._load_history_viewer(entry.md_path)
 
@@ -1359,6 +1376,7 @@ class VoicePadApp(App[None]):
 
         # Clear the viewer and disable action buttons
         self.query_one("#retranscribe-btn", Button).disabled = True
+        self.refresh_bindings()
         with contextlib.suppress(Exception):
             self.run_worker(
                 self.query_one("#history-viewer", MarkdownViewer).document.update(_MD_PLACEHOLDER),
