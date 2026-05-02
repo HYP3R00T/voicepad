@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from utilityhub_config import expand_path, load_settings
 
 # ---------------------------------------------------------------------------
@@ -61,15 +61,15 @@ class Config(BaseModel):
     # ------------------------------------------------------------------
 
     recordings_path: Path = Field(
-        default=Path("~/.config/voicepad/data/recordings"),
+        default_factory=lambda: expand_path("~/.config/voicepad/data/recordings"),
         description="Directory where WAV recordings are saved.",
     )
     markdown_path: Path = Field(
-        default=Path("~/.config/voicepad/data/markdown"),
+        default_factory=lambda: expand_path("~/.config/voicepad/data/markdown"),
         description="Directory where markdown transcriptions are saved.",
     )
     model_cache_path: Path = Field(
-        default=Path("~/.config/voicepad/models"),
+        default_factory=lambda: expand_path("~/.config/voicepad/models"),
         description="Directory where Whisper model weights are cached.",
     )
 
@@ -149,6 +149,17 @@ class Config(BaseModel):
     def expand_paths(cls, v: Path | str) -> Path:
         """Expand ~ and environment variables in path fields."""
         return expand_path(str(v) if isinstance(v, Path) else v)
+
+    @model_validator(mode="after")
+    def ensure_paths_expanded(self) -> Config:
+        """Ensure all paths are expanded, even if defaults weren't properly expanded."""
+        # This is a safety check for the default values
+        for path_field in ("recordings_path", "markdown_path", "model_cache_path"):
+            current_path = getattr(self, path_field)
+            expanded = expand_path(str(current_path))
+            # Re-assign via object.__setattr__ because the model is frozen
+            object.__setattr__(self, path_field, expanded)
+        return self
 
 
 def get_config(cwd: Path | None = None, app_name: str = "voicepad") -> Config:

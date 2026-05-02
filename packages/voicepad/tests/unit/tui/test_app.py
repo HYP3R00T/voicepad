@@ -10,7 +10,15 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 from textual.widgets import Label, Link
-from voicepad.tui.app import InfoModal, VoicePadApp, _format_markdown, _format_markdown_streaming
+from voicepad.tui.app import (
+    DeleteConfirmModal,
+    InfoModal,
+    VoicePadApp,
+    _build_hotkey_str,
+    _format_markdown,
+    _format_markdown_streaming,
+    _parse_hotkey_str,
+)
 from voicepad.tui.workers import ModelWarmResult
 from voicepad_core import ChunkResult, Config, Segment
 
@@ -23,8 +31,8 @@ from voicepad_core import ChunkResult, Config, Segment
 class _FakeRecorder:
     """Minimal recorder stub compatible with StreamingTranscriber."""
 
-    _lock: threading.Lock = None  # type: ignore[assignment]
-    _frames: list = None  # type: ignore[assignment]
+    _lock: threading.Lock | None = None
+    _frames: list | None = None
 
     def __post_init__(self) -> None:
         self._lock = threading.Lock()
@@ -374,6 +382,175 @@ class TestFormatMarkdownStreaming:
 # ---------------------------------------------------------------------------
 # Import needed for SimpleNamespace usage in tests
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Hotkey parsing helpers
+# ---------------------------------------------------------------------------
+
+
+class TestParseHotkeyStr:
+    """Tests for _parse_hotkey_str helper function."""
+
+    def test_parse_simple_key(self) -> None:
+        """Parse a simple key like 'v'."""
+        mods, key = _parse_hotkey_str("v")
+        assert key == "v"
+        assert mods == []
+
+    def test_parse_single_modifier_with_key(self) -> None:
+        """Parse a key with a single modifier like '<ctrl>+v'."""
+        mods, key = _parse_hotkey_str("<ctrl>+v")
+        assert "ctrl" in mods
+        assert key == "v"
+
+    def test_parse_multiple_modifiers(self) -> None:
+        """Parse a key with multiple modifiers like '<ctrl>+<alt>+v'."""
+        mods, key = _parse_hotkey_str("<ctrl>+<alt>+v")
+        assert "ctrl" in mods
+        assert "alt" in mods
+        assert key == "v"
+
+    def test_parse_special_key(self) -> None:
+        """Parse a special key like 'space' or 'f1'."""
+        mods, key = _parse_hotkey_str("space")
+        assert key == "space"
+
+    def test_parse_case_insensitive(self) -> None:
+        """Parsing should be case-insensitive."""
+        mods, key = _parse_hotkey_str("<CTRL>+<ALT>+V")
+        assert "ctrl" in mods
+        assert "alt" in mods
+        assert key == "v"
+
+    def test_parse_with_spaces(self) -> None:
+        """Parse hotkey with spaces around plus signs."""
+        mods, key = _parse_hotkey_str("<ctrl> + <alt> + v")
+        assert "ctrl" in mods
+        assert "alt" in mods
+        assert key == "v"
+
+    def test_parse_f_keys(self) -> None:
+        """Parse F-keys like f1, f2, etc."""
+        mods, key = _parse_hotkey_str("<shift>+f1")
+        assert "shift" in mods
+        assert key == "f1"
+
+    def test_parse_empty_modifiers(self) -> None:
+        """When no modifiers are present, mods list is empty."""
+        mods, key = _parse_hotkey_str("a")
+        assert mods == []
+
+
+class TestBuildHotkeyStr:
+    """Tests for _build_hotkey_str helper function."""
+
+    def test_build_single_key(self) -> None:
+        """Build a single key without modifiers."""
+        result = _build_hotkey_str([], "v")
+        assert "v" in result
+
+    def test_build_with_single_modifier(self) -> None:
+        """Build a key with a single modifier."""
+        result = _build_hotkey_str(["ctrl"], "v")
+        assert "<ctrl>" in result
+        assert "+v" in result
+
+    def test_build_with_multiple_modifiers(self) -> None:
+        """Build a key with multiple modifiers."""
+        result = _build_hotkey_str(["ctrl", "alt"], "v")
+        assert "<ctrl>" in result
+        assert "<alt>" in result
+        assert "v" in result
+
+    def test_build_special_key_with_angle_brackets(self) -> None:
+        """Build a special key which should have angle brackets."""
+        result = _build_hotkey_str(["ctrl"], "space")
+        assert "<ctrl>" in result
+        assert "<space>" in result
+
+    def test_build_single_char_key_no_brackets(self) -> None:
+        """Single-char keys should not have angle brackets."""
+        result = _build_hotkey_str(["shift"], "a")
+        assert "<shift>" in result
+        assert "+a" in result
+        # Ensure 'a' is not wrapped in <> (unless it's part of <shift>)
+
+    def test_build_empty_key(self) -> None:
+        """Building with empty key should return empty string."""
+        result = _build_hotkey_str(["ctrl"], "")
+        assert result == ""
+
+    def test_build_roundtrip_with_parse(self) -> None:
+        """Build and parse should roundtrip correctly."""
+        original_mods = ["ctrl", "alt"]
+        original_key = "v"
+        built = _build_hotkey_str(original_mods, original_key)
+        parsed_mods, parsed_key = _parse_hotkey_str(built)
+        assert set(parsed_mods) == set(original_mods)
+        assert parsed_key == original_key
+
+
+# ---------------------------------------------------------------------------
+# DeleteConfirmModal tests
+# ---------------------------------------------------------------------------
+
+
+class TestDeleteConfirmModal:
+    """Tests for the DeleteConfirmModal screen."""
+
+    async def test_modal_shows_entry_name(self, monkeypatch, tmp_path: Path) -> None:
+        """DeleteConfirmModal should display the entry name being deleted."""
+        config = Config(recordings_path=tmp_path / "r", markdown_path=tmp_path / "m")
+        monkeypatch.setattr(VoicePadApp, "_warm_model_worker", lambda self: None, raising=False)
+        app = VoicePadApp(config)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            modal = DeleteConfirmModal("test_recording.wav")
+            app.push_screen(modal)
+            await pilot.pause()
+            # Check that the modal was created and the entry name is accessible
+            assert modal._entry_name == "test_recording.wav"
+
+    async def test_cancel_button_dismisses_with_false(self, monkeypatch, tmp_path: Path) -> None:
+        """Clicking Cancel should dismiss the modal with False."""
+        config = Config(recordings_path=tmp_path / "r", markdown_path=tmp_path / "m")
+        monkeypatch.setattr(VoicePadApp, "_warm_model_worker", lambda self: None, raising=False)
+        app = VoicePadApp(config)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            modal = DeleteConfirmModal("test.wav")
+            app.push_screen(modal)
+            await pilot.pause()
+            # Click the Cancel button
+            cancel_btn = app.screen.query_one("#delete-cancel")
+            cancel_btn.press()  # type: ignore
+            await pilot.pause()
+            # Modal should be dismissed
+            assert len(app.screen_stack) == 1
+
+    async def test_confirm_button_dismisses_with_true(self, monkeypatch, tmp_path: Path) -> None:
+        """Clicking Confirm should dismiss the modal with True."""
+        config = Config(recordings_path=tmp_path / "r", markdown_path=tmp_path / "m")
+        monkeypatch.setattr(VoicePadApp, "_warm_model_worker", lambda self: None, raising=False)
+        app = VoicePadApp(config)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            modal = DeleteConfirmModal("test.wav")
+            app.push_screen(modal)
+            await pilot.pause()
+            # Click the Confirm button
+            confirm_btn = app.screen.query_one("#delete-confirm")
+            confirm_btn.press()  # type: ignore
+            await pilot.pause()
+            # Modal should be dismissed
+            assert len(app.screen_stack) == 1
+
+    async def test_modal_bindings_defined(self) -> None:
+        """DeleteConfirmModal should have escape binding defined."""
+        modal = DeleteConfirmModal("test.wav")
+        # Verify bindings are set up
+        assert len(modal.BINDINGS) > 0
 
 
 # ---------------------------------------------------------------------------

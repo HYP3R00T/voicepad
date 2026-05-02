@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -32,7 +33,7 @@ class TestAudioDevice:
         """AudioDevice is a frozen dataclass."""
         dev = AudioDevice(index=0, name="Mic", channels=2, sample_rate=16000)
         with pytest.raises(dataclasses.FrozenInstanceError):
-            dev.index = 99  # type: ignore[misc]
+            dev.index = 99  # type: ignore
 
 
 # ---------------------------------------------------------------------------
@@ -111,7 +112,7 @@ class TestListInputDevicesCommand:
     def test_lists_available_devices(self) -> None:
         """When devices are found, they are printed to stdout."""
         fake_devices = [AudioDevice(index=0, name="Test Mic", channels=1, sample_rate=44100)]
-        mock_config = Config(recordings_path="data/recordings", markdown_path="data/markdown")
+        mock_config = Config(recordings_path=Path("data/recordings"), markdown_path=Path("data/markdown"))
 
         with (
             patch("voicepad.cli.config._get_input_devices", return_value=fake_devices),
@@ -128,8 +129,8 @@ class TestListInputDevicesCommand:
         """When a device matches the configured index, it is marked in the output."""
         fake_devices = [AudioDevice(index=1, name="Configured Mic", channels=1, sample_rate=44100)]
         mock_config = Config(
-            recordings_path="data/recordings",
-            markdown_path="data/markdown",
+            recordings_path=Path("data/recordings"),
+            markdown_path=Path("data/markdown"),
             input_device_index=1,
         )
 
@@ -152,7 +153,7 @@ class TestListInputDevicesCommand:
 class TestShowConfigCommand:
     def test_show_config_exits_zero(self) -> None:
         """show_config exits with code 0 on success."""
-        mock_config = Config(recordings_path="data/recordings", markdown_path="data/markdown")
+        mock_config = Config(recordings_path=Path("data/recordings"), markdown_path=Path("data/markdown"))
         mock_meta = MagicMock()
         mock_meta.per_field = None
 
@@ -165,7 +166,7 @@ class TestShowConfigCommand:
 
     def test_show_config_prints_field_names(self) -> None:
         """show_config output includes known config field names."""
-        mock_config = Config(recordings_path="data/recordings", markdown_path="data/markdown")
+        mock_config = Config(recordings_path=Path("data/recordings"), markdown_path=Path("data/markdown"))
         mock_meta = MagicMock()
         mock_meta.per_field = None
 
@@ -178,7 +179,7 @@ class TestShowConfigCommand:
 
     def test_show_config_with_env_source(self) -> None:
         """When a field comes from an env var, the source column shows 'env var'."""
-        mock_config = Config(recordings_path="data/recordings", markdown_path="data/markdown")
+        mock_config = Config(recordings_path=Path("data/recordings"), markdown_path=Path("data/markdown"))
         field_src = MagicMock()
         field_src.source = "env"
         field_src.source_path = None

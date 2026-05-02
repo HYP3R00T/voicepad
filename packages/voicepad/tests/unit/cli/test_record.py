@@ -147,7 +147,7 @@ class TestWaitForQuit:
 class TestShowInfoCommand:
     def test_info_exits_zero(self) -> None:
         """The info command exits with code 0."""
-        mock_config = Config(recordings_path="data/recordings", markdown_path="data/markdown")
+        mock_config = Config(recordings_path=Path("data/recordings"), markdown_path=Path("data/markdown"))
         with patch("voicepad.cli.record.get_config", return_value=mock_config):
             result = runner.invoke(record_app, ["info"])
         assert result.exit_code == 0
@@ -155,8 +155,8 @@ class TestShowInfoCommand:
     def test_info_shows_model_name(self) -> None:
         """The info command shows the transcription model name."""
         mock_config = Config(
-            recordings_path="data/recordings",
-            markdown_path="data/markdown",
+            recordings_path=Path("data/recordings"),
+            markdown_path=Path("data/markdown"),
             transcription_model="tiny",
         )
         with patch("voicepad.cli.record.get_config", return_value=mock_config):
@@ -165,14 +165,14 @@ class TestShowInfoCommand:
 
     def test_info_shows_recordings_path(self) -> None:
         """The info command shows the recordings path."""
-        mock_config = Config(recordings_path="data/recordings", markdown_path="data/markdown")
+        mock_config = Config(recordings_path=Path("data/recordings"), markdown_path=Path("data/markdown"))
         with patch("voicepad.cli.record.get_config", return_value=mock_config):
             result = runner.invoke(record_app, ["info"])
         assert "recordings" in result.output
 
     def test_info_shows_device_constants(self) -> None:
         """The info command shows the device and compute type constants."""
-        mock_config = Config(recordings_path="data/recordings", markdown_path="data/markdown")
+        mock_config = Config(recordings_path=Path("data/recordings"), markdown_path=Path("data/markdown"))
         with patch("voicepad.cli.record.get_config", return_value=mock_config):
             result = runner.invoke(record_app, ["info"])
         # DEVICE and COMPUTE_TYPE constants should appear
