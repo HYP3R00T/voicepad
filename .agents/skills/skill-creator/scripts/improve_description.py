@@ -14,7 +14,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from scripts.utils import parse_skill_md
+from scripts.utils import parse_skill_md  # ty:ignore[unresolved-import]
 
 
 def _call_claude(prompt: str, model: str | None, timeout: int = 300) -> str:

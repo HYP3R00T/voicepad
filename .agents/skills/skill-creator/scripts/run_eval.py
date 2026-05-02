@@ -16,7 +16,7 @@ import uuid
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
-from scripts.utils import parse_skill_md
+from scripts.utils import parse_skill_md  # ty:ignore[unresolved-import]
 
 
 def find_project_root() -> Path:
@@ -102,16 +102,22 @@ def run_single_query(
         try:
             while time.time() - start_time < timeout:
                 if process.poll() is not None:
-                    remaining = process.stdout.read()
-                    if remaining:
-                        buffer += remaining.decode("utf-8", errors="replace")
+                    stdout = process.stdout
+                    if stdout is not None:
+                        remaining = stdout.read()
+                        if remaining:
+                            buffer += remaining.decode("utf-8", errors="replace")
                     break
 
-                ready, _, _ = select.select([process.stdout], [], [], 1.0)
+                stdout = process.stdout
+                if stdout is None:
+                    break
+
+                ready, _, _ = select.select([stdout], [], [], 1.0)
                 if not ready:
                     continue
 
-                chunk = os.read(process.stdout.fileno(), 8192)
+                chunk = os.read(stdout.fileno(), 8192)
                 if not chunk:
                     break
                 buffer += chunk.decode("utf-8", errors="replace")
