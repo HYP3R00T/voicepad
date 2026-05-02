@@ -46,7 +46,9 @@ def populate_settings_form(
 
     # Create field widgets
     for field_name, hint in user_fields.items():
-        field_info = config.model_fields.get(field_name)
+        # Use the Config *class* model_fields to avoid accessing Pydantic
+        # metadata on an instance (deprecated in Pydantic v3).
+        field_info = type(config).model_fields.get(field_name)
         if field_info is None:
             continue
         current_val = getattr(config, field_name)
