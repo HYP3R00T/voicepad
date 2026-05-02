@@ -6,7 +6,6 @@ import contextlib
 import logging
 import threading
 import time
-from dataclasses import dataclass, field
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
 from typing import Any
@@ -18,20 +17,15 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import VerticalScroll
 from textual.reactive import reactive
-from textual.screen import ModalScreen
-from textual.theme import Theme
 from textual.widgets import (
     Button,
     Checkbox,
-    DataTable,
     Footer,
     Input,
     Label,
-    Link,
     Markdown,
     MarkdownViewer,
     OptionList,
-    ProgressBar,
     Select,
     Static,
     TabbedContent,
@@ -49,6 +43,19 @@ from voicepad_core import (
 from voicepad_core.config import Config
 from voicepad_core.config.settings import get_config_with_metadata
 
+from voicepad.tui.modals import DeleteConfirmModal, InfoModal, SetupModal
+from voicepad.tui.models import SessionEntry
+from voicepad.tui.theme import CATPPUCCIN_MOCHA_BLUE as _CATPPUCCIN_MOCHA_BLUE
+from voicepad.tui.theme import MD_PLACEHOLDER as _MD_PLACEHOLDER
+from voicepad.tui.theme import THEME_NAME as _THEME_NAME
+from voicepad.tui.utils.clipboard import copy_to_clipboard as _copy_to_clipboard
+from voicepad.tui.utils.hotkey_utils import HOTKEY_KEYS as _HOTKEY_KEYS
+from voicepad.tui.utils.hotkey_utils import build_hotkey_str as _build_hotkey_str
+from voicepad.tui.utils.hotkey_utils import parse_hotkey_str as _parse_hotkey_str
+from voicepad.tui.utils.markdown import format_markdown as _format_markdown  # noqa: F401 (re-exported for tests)
+from voicepad.tui.utils.markdown import format_markdown_streaming as _format_markdown_streaming
+from voicepad.tui.utils.markdown import parse_markdown_entry as _parse_markdown_entry
+from voicepad.tui.utils.markdown import prepend_retranscription as _prepend_retranscription
 from voicepad.tui.workers import ModelWarmResult, RecordingSession
 
 logger = logging.getLogger(__name__)
@@ -61,577 +68,6 @@ try:
     _APP_VERSION = f"v{_pkg_version('voicepad')}"
 except Exception:
     _APP_VERSION = "dev"
-
-# ---------------------------------------------------------------------------
-# Hotkey picker helpers
-# ---------------------------------------------------------------------------
-
-# Keys available in the hotkey picker (pynput names for special keys,
-# plain chars for letters/digits)
-_HOTKEY_KEYS: list[str] = [
-    *"abcdefghijklmnopqrstuvwxyz",
-    *"0123456789",
-    "f1",
-    "f2",
-    "f3",
-    "f4",
-    "f5",
-    "f6",
-    "f7",
-    "f8",
-    "f9",
-    "f10",
-    "f11",
-    "f12",
-    "space",
-    "tab",
-    "enter",
-    "backspace",
-    "delete",
-    "insert",
-    "home",
-    "end",
-    "page_up",
-    "page_down",
-    "up",
-    "down",
-    "left",
-    "right",
-]
-
-_MOD_TO_PYNPUT = {"ctrl": "<ctrl>", "alt": "<alt>", "shift": "<shift>", "cmd": "<cmd>"}
-
-
-def _parse_hotkey_str(hotkey: str) -> tuple[list[str], str]:
-    """Parse '<ctrl>+<alt>+v' → (['ctrl', 'alt'], 'v')."""
-    mods: list[str] = []
-    key = "v"
-    for part in hotkey.lower().split("+"):
-        part = part.strip().strip("<>")
-        if part in _MOD_TO_PYNPUT:
-            mods.append(part)
-        elif part:
-            key = part
-    return mods, key
-
-
-def _build_hotkey_str(mods: list[str], key: str) -> str:
-    """Build '<ctrl>+<alt>+v' from (['ctrl', 'alt'], 'v')."""
-    if not key:
-        return ""
-    parts = [_MOD_TO_PYNPUT[m] for m in mods if m in _MOD_TO_PYNPUT]
-    # Single-char keys don't need angle brackets; special keys do
-    key_part = key if len(key) == 1 else f"<{key}>"
-    parts.append(key_part)
-    return "+".join(parts)
-
-
-# ---------------------------------------------------------------------------
-# Theme — Catppuccin Mocha with blue primary instead of pink
-# ---------------------------------------------------------------------------
-
-_THEME_NAME = "catppuccin-mocha-blue"
-
-_CATPPUCCIN_MOCHA_BLUE = Theme(
-    name=_THEME_NAME,
-    primary="#89b4fa",  # Catppuccin Mocha Blue
-    secondary="#74c7ec",  # Catppuccin Mocha Sapphire
-    warning="#FAE3B0",
-    error="#F28FAD",
-    success="#ABE9B3",
-    accent="#fab387",
-    foreground="#cdd6f4",
-    background="#181825",
-    surface="#313244",
-    panel="#45475a",
-    variables={
-        "input-cursor-foreground": "#11111b",
-        "input-cursor-background": "#f5e0dc",
-        "input-selection-background": "#9399b2 30%",
-        "border": "#89b4fa",
-        "border-blurred": "#585b70",
-        "footer-background": "#45475a",
-        "footer-key-foreground": "#89b4fa",
-        "block-cursor-foreground": "#1e1e2e",
-        "block-cursor-text-style": "none",
-        "button-color-foreground": "#181825",
-    },
-)
-
-
-_MD_PLACEHOLDER = """\
-# voicepad
-
-Select a recording from the list on the left to view its full transcription here.
-
-Use the **⟳ retranscribe** button to re-run the model on the selected recording.
-"""
-
-# ---------------------------------------------------------------------------
-# Info Modal Screen
-# ---------------------------------------------------------------------------
-
-
-class InfoModal(ModalScreen[None]):
-    """Modal screen showing app info, version, and sponsor information."""
-
-    BINDINGS = [
-        Binding("escape", "dismiss", "Close", show=False),
-        Binding("i", "dismiss", "Close", show=False),
-    ]
-
-    def compose(self) -> ComposeResult:
-        with Static(id="info-dialog"):
-            # ── 1. Header ─────────────────────────────────────────
-            yield Static("󰍬  VoicePad", id="info-title")
-
-            # ── 2. Tagline ────────────────────────────────────────
-            yield Static(
-                "Your voice, your data.\nTranscription that never leaves your machine.",
-                id="info-subtitle",
-            )
-
-            # ── 3. Features box ───────────────────────────────────
-            with Static(id="info-guarantees"):
-                yield Static("󰒍  Fully local processing", classes="guarantee-line")
-                yield Static("󰌨  GPU-accelerated transcription", classes="guarantee-line")
-                yield Static("󰍹  No cloud. No tracking. No data leaks.", classes="guarantee-line")
-
-            # ── 4. Philosophy ─────────────────────────────────────
-            yield Static(
-                "Built with 󰋑 using Python, Textual, and Whisper",
-                id="info-philosophy",
-            )
-
-            # ── 5. Separator ──────────────────────────────────────
-            yield Static("", id="info-divider")
-
-            # ── 6. CTA ────────────────────────────────────────────
-            yield Static("Support the project", id="info-sponsor-title")
-            with Static(id="info-links"):
-                yield Link(
-                    "󰊤  Star on GitHub",
-                    url="https://github.com/HYP3R00T/voicepad",
-                    id="github-link",
-                )
-                yield Static("  ", classes="link-separator")
-                yield Link(
-                    "󰋑  Sponsor Me",
-                    url="https://github.com/sponsors/HYP3R00T",
-                    id="sponsor-link",
-                )
-
-            # ── 7. Micro text ─────────────────────────────────────
-            yield Static(
-                "Privacy-first tools grow through community support.",
-                id="info-microcopy",
-            )
-
-            # ── 8. Metadata ───────────────────────────────────────
-            yield Static(
-                f"{_APP_VERSION}  •  Rajesh Das (HYP3R00T)  •  MIT License",
-                id="info-meta",
-            )
-
-            # ── 9. Separator ──────────────────────────────────────
-            yield Static("", id="info-divider2")
-
-            # ── 10. Close ─────────────────────────────────────────
-            yield Button("Close", variant="default", id="info-close-btn")
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        """Close the modal when button is pressed."""
-        self.dismiss()
-
-
-# ---------------------------------------------------------------------------
-# First-run / Setup Modal
-# ---------------------------------------------------------------------------
-
-
-class DeleteConfirmModal(ModalScreen[bool]):
-    """Confirmation dialog before deleting a recording."""
-
-    BINDINGS = [
-        Binding("escape", "dismiss_false", "Cancel", show=False),
-        Binding("n", "dismiss_false", "No", show=False),
-    ]
-
-    def __init__(self, entry_name: str) -> None:
-        super().__init__()
-        self._entry_name = entry_name
-
-    def compose(self) -> ComposeResult:
-        with Static(id="delete-dialog"):
-            yield Static("󰆴  Delete recording?", id="delete-title")
-            yield Static(
-                f"[dim]{self._entry_name}[/]",
-                id="delete-name",
-            )
-            yield Static(
-                "This will permanently delete the WAV file\nand its transcription markdown.",
-                id="delete-body",
-            )
-            with Static(id="delete-nav"):
-                yield Button("Cancel", id="delete-cancel")
-                yield Static("", id="delete-spacer")
-                yield Button("Delete", id="delete-confirm")
-
-    def action_dismiss_false(self) -> None:
-        self.dismiss(False)
-
-    @on(Button.Pressed, "#delete-cancel")
-    def on_cancel(self) -> None:
-        self.dismiss(False)
-
-    @on(Button.Pressed, "#delete-confirm")
-    def on_confirm(self) -> None:
-        self.dismiss(True)
-
-
-class SetupModal(ModalScreen[tuple[str, int | None]]):
-    """4-step first-run wizard.
-
-    Step 0 — Welcome
-    Step 1 — Model selection + download
-    Step 2 — Microphone selection
-    Step 3 — Finish / config info
-    """
-
-    BINDINGS: list[Binding] = []  # no escape — must complete setup
-
-    _HINTS: dict[str, str] = {
-        "tiny": "~40 MB · fastest · low accuracy · CPU",
-        "tiny.en": "~40 MB · fastest · English only · CPU",
-        "base": "~75 MB · very fast · fair accuracy · CPU",
-        "base.en": "~75 MB · very fast · English only · CPU",
-        "small": "~250 MB · fast · good accuracy · ~1 GB VRAM",
-        "small.en": "~250 MB · fast · English only · ~1 GB VRAM",
-        "medium": "~770 MB · moderate · very good · ~2 GB VRAM",
-        "medium.en": "~770 MB · moderate · English only · ~2 GB VRAM",
-        "large-v1": "~1.5 GB · slow · excellent · ~5 GB VRAM",
-        "large-v2": "~1.5 GB · slow · excellent · ~5 GB VRAM",
-        "large-v3": "~1.5 GB · slow · best accuracy · ~5 GB VRAM",
-        "large": "~1.5 GB · slow · excellent · ~5 GB VRAM",
-        "large-v3-turbo": "~800 MB · recommended · excellent · ~3 GB VRAM",
-        "turbo": "~800 MB · recommended · excellent · ~3 GB VRAM",
-        "distil-small.en": "~135 MB · fast · English only · ~1 GB VRAM",
-        "distil-medium.en": "~395 MB · moderate · English only · ~1 GB VRAM",
-        "distil-large-v2": "~760 MB · fast · English only · ~3 GB VRAM",
-        "distil-large-v3": "~760 MB · fast · English only · ~3 GB VRAM",
-        "distil-large-v3.5": "~760 MB · fast · English only · ~3 GB VRAM",
-    }
-
-    def __init__(self, config: Config) -> None:
-        super().__init__()
-        self._config = config
-        self._step: int = 0
-        self._chosen_model: str = config.transcription_model
-        self._chosen_device_index: int | None = config.input_device_index
-        self._downloading = False
-
-    # ------------------------------------------------------------------
-    # Layout
-    # ------------------------------------------------------------------
-
-    def compose(self) -> ComposeResult:
-        with Static(id="wizard-dialog"):
-            yield Static("", id="wizard-step-indicator")
-            yield Static(id="wizard-body")
-            with Static(id="wizard-nav"):
-                yield Button("← Back", id="wizard-back", variant="default")
-                yield Static("", id="wizard-spacer")
-                yield Button("Next →", id="wizard-next", variant="primary")
-
-    def on_mount(self) -> None:
-        self._render_step()
-
-    # ------------------------------------------------------------------
-    # Navigation
-    # ------------------------------------------------------------------
-
-    @on(Button.Pressed, "#wizard-next")
-    def on_next(self) -> None:
-        if self._step == 1 and not self._downloading:
-            # Must download before advancing from step 1
-            self._start_download()
-            return
-        if self._step < 3:
-            self._step += 1
-            self._render_step()
-        else:
-            # Finish
-            self.app.call_after_refresh(self._do_dismiss)
-
-    @on(Button.Pressed, "#wizard-back")
-    def on_back(self) -> None:
-        if self._step > 0:
-            self._step -= 1
-            self._render_step()
-
-    def _do_dismiss(self) -> None:
-        self.dismiss((self._chosen_model, self._chosen_device_index))
-
-    # ------------------------------------------------------------------
-    # Step renderer
-    # ------------------------------------------------------------------
-
-    def _render_step(self) -> None:
-        self.query_one("#wizard-step-indicator", Static).update(f"[dim]Step {self._step + 1} of 4[/]")
-        body = self.query_one("#wizard-body", Static)
-        # Remove all children and remount for the current step
-        for child in list(body.children):
-            child.remove()
-
-        back_btn = self.query_one("#wizard-back", Button)
-        next_btn = self.query_one("#wizard-next", Button)
-        back_btn.display = self._step > 0
-        next_btn.label = "Finish" if self._step == 3 else ("Download & Continue →" if self._step == 1 else "Next →")
-        next_btn.disabled = False
-
-        if self._step == 0:
-            self._mount_step_welcome(body)
-        elif self._step == 1:
-            self._mount_step_model(body)
-        elif self._step == 2:
-            self._mount_step_microphone(body)
-        elif self._step == 3:
-            self._mount_step_finish(body)
-
-        # Always focus the primary action button — never leave focus on Back
-        self.set_timer(0.05, lambda: next_btn.focus())
-
-    # ------------------------------------------------------------------
-    # Step 0 — Welcome
-    # ------------------------------------------------------------------
-
-    def _mount_step_welcome(self, body: Static) -> None:
-        body.mount(Static(f"󰍬  VoicePad  {_APP_VERSION}", classes="wizard-title"))
-        body.mount(
-            Static(
-                "Your private, local-first dictation studio.",
-                classes="wizard-text",
-            )
-        )
-        body.mount(
-            Static(
-                "󰒍  100% local  ·  󰌨  GPU-accelerated  ·  󰍹  no cloud",
-                classes="wizard-features",
-            )
-        )
-        body.mount(
-            Static(
-                "[dim]by Rajesh Das (HYP3R00T)  ·  MIT License[/]",
-                classes="wizard-credit",
-            )
-        )
-
-    # ------------------------------------------------------------------
-    # Step 1 — Model selection + download
-    # ------------------------------------------------------------------
-
-    def _mount_step_model(self, body: Static) -> None:
-        body.mount(Static("Choose a Whisper Model", classes="wizard-title"))
-        body.mount(
-            Static(
-                "[dim]turbo[/] is recommended for most NVIDIA GPU users.",
-                classes="wizard-text",
-            )
-        )
-        body.mount(
-            Select(
-                options=[(m, m) for m in VALID_TRANSCRIPTION_MODELS],
-                value=self._chosen_model,
-                id="wizard-model-select",
-                allow_blank=False,
-            )
-        )
-        body.mount(Static("", id="wizard-model-hint", classes="wizard-hint"))
-        body.mount(Static("", id="wizard-download-status", classes="wizard-status"))
-        bar = ProgressBar(id="wizard-progress", show_eta=False, show_percentage=True)
-        bar.display = False
-        body.mount(bar)
-
-    @on(Select.Changed, "#wizard-model-select")
-    def on_model_changed(self, event: Select.Changed) -> None:
-        if event.value is not Select.BLANK:
-            self._chosen_model = str(event.value)
-            with contextlib.suppress(Exception):
-                self.query_one("#wizard-model-hint", Static).update(self._HINTS.get(self._chosen_model, ""))
-
-    def _start_download(self) -> None:
-        if self._downloading:
-            return
-        self._downloading = True
-        self.query_one("#wizard-next", Button).disabled = True
-        self._download_model_worker(self._chosen_model)
-
-    @work(thread=True, name="setup-download")
-    def _download_model_worker(self, model: str) -> None:
-        from voicepad_core import ensure_model_downloaded, model_downloaded
-        from voicepad_core.transcription import TranscriptionError
-
-        self.app.call_from_thread(self._set_download_status, f"Checking '{model}'…")
-
-        if model_downloaded(model, self._config):
-            self.app.call_from_thread(self._on_download_done, model, None)
-            return
-
-        self.app.call_from_thread(self._set_download_status, f"Downloading '{model}'…")
-        self.app.call_from_thread(self._show_progress_bar)
-
-        _last_pct = [-1]  # mutable container for closure
-
-        def _on_progress(downloaded: int, total: int) -> None:
-            if total > 0:
-                pct = min(100, int(downloaded * 100 / total))
-                if pct == _last_pct[0]:
-                    return  # skip — no change, don't flood the event loop
-                _last_pct[0] = pct
-            self.app.call_from_thread(self._update_progress, downloaded, total)
-
-        try:
-            ensure_model_downloaded(model, self._config, on_progress=_on_progress)
-            self.app.call_from_thread(self._on_download_done, model, None)
-        except TranscriptionError as e:
-            self.app.call_from_thread(self._on_download_done, model, str(e))
-
-    def _show_progress_bar(self) -> None:
-        with contextlib.suppress(Exception):
-            bar = self.query_one("#wizard-progress", ProgressBar)
-            bar.display = True
-            bar.update(total=100, progress=0)
-        self._last_pct: int = -1
-
-    def _update_progress(self, downloaded: int, total: int) -> None:
-        with contextlib.suppress(Exception):
-            mb_done = downloaded / 1_048_576
-            if total > 0:
-                pct = min(100, int(downloaded * 100 / total))
-                # Only update UI when percentage actually changes
-                if pct == getattr(self, "_last_pct", -1):
-                    return
-                self._last_pct = pct
-                mb_total = total / 1_048_576
-                self.query_one("#wizard-progress", ProgressBar).update(total=100, progress=pct)
-                self._set_download_status(f"Downloading… {mb_done:.0f} / {mb_total:.0f} MB")
-            else:
-                self._set_download_status(f"Downloading… {mb_done:.1f} MB")
-
-    def _set_download_status(self, msg: str) -> None:
-        with contextlib.suppress(Exception):
-            self.query_one("#wizard-download-status", Static).update(msg)
-
-    def _on_download_done(self, model: str, error: str | None) -> None:
-        self._downloading = False
-        with contextlib.suppress(Exception):
-            self.query_one("#wizard-progress", ProgressBar).display = False
-        if error:
-            self._set_download_status(f"[red]✕  Download failed: {error}[/]")
-            self.query_one("#wizard-next", Button).disabled = False
-        else:
-            self._set_download_status(f"[green]✓  '{model}' ready[/]")
-            self._step += 1
-            self.set_timer(0.6, self._render_step)
-
-    # ------------------------------------------------------------------
-    # Step 2 — Microphone
-    # ------------------------------------------------------------------
-
-    def _mount_step_microphone(self, body: Static) -> None:
-        from voicepad.cli.config import _get_input_devices
-
-        body.mount(Static("Select Your Microphone", classes="wizard-title"))
-        body.mount(
-            Static(
-                "[dim]System default[/] works for most setups.",
-                classes="wizard-text",
-            )
-        )
-
-        devices = _get_input_devices()
-        device_options: list[tuple[str, int]] = [("System default", -1)]
-        device_options += [(f"[{d.index}]  {d.name}", d.index) for d in devices]
-
-        current = self._chosen_device_index if self._chosen_device_index is not None else -1
-        valid = {v for _, v in device_options}
-
-        body.mount(
-            Select(
-                options=device_options,
-                value=current if current in valid else -1,
-                id="wizard-device-select",
-                allow_blank=False,
-            )
-        )
-        body.mount(
-            Static(
-                f"[dim]{len(devices)} input device(s) found[/]",
-                classes="wizard-hint",
-            )
-        )
-
-    @on(Select.Changed, "#wizard-device-select")
-    def on_device_changed(self, event: Select.Changed) -> None:
-        if event.value is not Select.BLANK:
-            v = int(str(event.value))
-            self._chosen_device_index = None if v == -1 else v
-
-    # ------------------------------------------------------------------
-    # Step 3 — Finish
-    # ------------------------------------------------------------------
-
-    def _mount_step_finish(self, body: Static) -> None:
-        from utilityhub_config import get_config_path
-
-        config_path = get_config_path("voicepad", format="yaml")
-        body.mount(Static("󰄬  You're all set!", classes="wizard-title"))
-        body.mount(
-            Static(
-                "VoicePad is ready. Here are the essentials:",
-                classes="wizard-text",
-            )
-        )
-
-        table = DataTable(
-            id="wizard-keybindings",
-            show_header=False,
-            show_cursor=False,
-            zebra_stripes=False,
-        )
-        body.mount(table)
-        table.add_columns("key", "action")
-        table.add_rows([
-            ("Space", "start / stop recording"),
-            ("c", "copy transcription to clipboard"),
-            ("i", "info & links"),
-            ("q", "quit"),
-        ])
-
-        body.mount(
-            Static(
-                f"Tweak anything in the [bold]Settings[/] tab.\n[dim]{config_path}[/]",
-                classes="wizard-hint",
-            )
-        )
-
-
-# ---------------------------------------------------------------------------
-# Data
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class SessionEntry:
-    index: int
-    wav_path: Path | None
-    md_path: Path | None
-    duration_s: float
-    text: str
-    latency_ms: float
-    device: str
-    timestamp: str = field(default_factory=lambda: time.strftime("%Y-%m-%d %H:%M"))
-
 
 # ---------------------------------------------------------------------------
 # App
@@ -730,7 +166,7 @@ class VoicePadApp(App[None]):
         tx = self.query_one("#transcription", Static)
         tx.mount(Label("speak and press space to begin…", id="tx-text", classes="placeholder"))
         tx.mount(Label("", id="tx-meta"))
-        tx.mount(Button("⎘  copy", id="tx-copy-btn", disabled=True))
+        tx.mount(Button("\U000f0191  copy", id="tx-copy-btn", disabled=True))
 
         # ── Tab 2: history ──
         hist_list = self.query_one("#history-list-pane", Static)
@@ -1047,26 +483,6 @@ class VoicePadApp(App[None]):
         )
 
     def _get_hotkey_from_picker(self) -> str:
-        """Read the hotkey picker widgets and return the pynput hotkey string."""
-        mods: list[str] = []
-        for mod_id in ("ctrl", "alt", "shift", "cmd"):
-            with contextlib.suppress(Exception):
-                if self.query_one(f"#hotkey-mod-{mod_id}", Checkbox).value:
-                    mods.append(mod_id)
-        key = "v"
-        with contextlib.suppress(Exception):
-            sel = self.query_one("#hotkey-key-select", Select)
-            if sel.value is not Select.BLANK:
-                key = str(sel.value)
-        return _build_hotkey_str(mods, key)
-
-    def _update_hotkey_preview(self) -> None:
-        """Refresh the preview label from current picker state."""
-        with contextlib.suppress(Exception):
-            preview = self._get_hotkey_from_picker()
-            self.query_one("#hotkey-preview", Label).update(f"[dim]{preview or 'disabled'}[/]")
-
-    def _get_hotkey_from_picker(self) -> str:
         """Read modifier checkboxes + key dropdown and return pynput hotkey string."""
         mods: list[str] = []
         for mod_id in ("ctrl", "alt", "shift", "cmd"):
@@ -1139,7 +555,7 @@ class VoicePadApp(App[None]):
                         raw[field_name] = val_str
 
         if errors:
-            status.update(f"[red]✕  {'; '.join(errors)}[/]")
+            status.update(f"[red]\U000f0156  {'; '.join(errors)}[/]")
             return
 
         try:
@@ -1177,13 +593,13 @@ class VoicePadApp(App[None]):
                 self._set_status("transcribing", "loading model…")
                 self.query_one("#header-model", Label).update("[dim]M:[/] loading…")
                 self._warm_model_worker()
-                status.update("[green]✓  saved — reloading model[/]")
+                status.update("[green]\U000f012c  saved — reloading model[/]")
             else:
-                status.update("[green]✓  saved[/]")
+                status.update("[green]\U000f012c  saved[/]")
 
             self.set_timer(3.0, lambda: status.update(""))
         except Exception as e:
-            status.update(f"[red]✕  {e}[/]")
+            status.update(f"[red]\U000f0156  {e}[/]")
 
     # ------------------------------------------------------------------
     # Model warm-up
@@ -1650,8 +1066,8 @@ class VoicePadApp(App[None]):
         _copy_to_clipboard(self._current_text)
         with contextlib.suppress(Exception):
             btn = self.query_one("#tx-copy-btn", Button)
-            btn.label = "✓  copied"
-            self.set_timer(1.5, lambda: setattr(btn, "label", "⎘  copy"))
+            btn.label = "\U000f012c  copied"
+            self.set_timer(1.5, lambda: setattr(btn, "label", "\U000f0191  copy"))
 
     @on(Button.Pressed, "#tx-copy-btn")
     def on_copy_btn_pressed(self) -> None:
@@ -1700,271 +1116,6 @@ class VoicePadApp(App[None]):
         if state:
             label.add_class(state)
         label.update(f"{dot}  {message}")
-
-
-# ---------------------------------------------------------------------------
-# Markdown formatter / parser
-# ---------------------------------------------------------------------------
-
-
-def _format_markdown(audio_path: Path, result, model_name: str = "") -> str:
-    """Create a new markdown file with the first transcription."""
-    ts = time.strftime("%Y-%m-%d %H:%M")
-    model_str = (
-        f"{model_name} · {result.device} / {result.compute_type}"
-        if model_name
-        else f"{result.device} / {result.compute_type}"
-    )
-    fm = [
-        "---",
-        f"file: {audio_path.name}",
-        "transcriptions:",
-        "  - n: 1",
-        f"    model: {model_str}",
-        f"    language: {result.language} ({result.language_probability * 100:.1f}%)",
-        f"    duration: {result.duration_s:.1f}s",
-        f"    latency: {result.latency_ms:.0f}ms",
-        f"    timestamp: {ts}",
-        "---",
-        "",
-        "## Transcription 1",
-        "",
-        result.text or "*(no speech detected)*",
-        "",
-    ]
-    return "\n".join(fm)
-
-
-def _format_markdown_streaming(
-    wav_path: Path,
-    text: str,
-    duration_s: float,
-    chunks: list[ChunkResult],
-    model_name: str = "",
-) -> str:
-    """Create a new markdown file for a streaming transcription."""
-    latest_chunk = next((chunk for chunk in reversed(chunks) if chunk.text), None)
-    device = latest_chunk.device if latest_chunk else "unknown"
-    language = latest_chunk.language if latest_chunk else "en"
-    language_probability = latest_chunk.language_probability if latest_chunk else 0.0
-    latency_ms = sum(chunk.latency_ms for chunk in chunks)
-    ts = time.strftime("%Y-%m-%d %H:%M")
-    model_str = f"{model_name} · {device} / live" if model_name else f"{device} / live"
-
-    fm = [
-        "---",
-        f"file: {wav_path.name}",
-        "transcriptions:",
-        "  - n: 1",
-        f"    model: {model_str}",
-        f"    language: {language} ({language_probability * 100:.1f}%)",
-        f"    duration: {duration_s:.1f}s",
-        f"    latency: {latency_ms:.0f}ms",
-        f"    timestamp: {ts}",
-        "---",
-        "",
-        "## Transcription 1",
-        "",
-        text or "*(no speech detected)*",
-        "",
-    ]
-    return "\n".join(fm)
-
-
-def _prepend_retranscription(md_path: Path, result, model_name: str = "") -> str:
-    """Prepend a new transcription to an existing markdown file.
-
-    Reads the existing file, increments the transcription count,
-    adds new metadata entry at the top of the array, and prepends
-    the new text block before the existing ones.
-
-    Returns the new file content.
-    """
-    ts = time.strftime("%Y-%m-%d %H:%M")
-
-    try:
-        existing = md_path.read_text(encoding="utf-8")
-    except Exception:
-        existing = ""
-
-    # Parse existing front matter to find the current max n
-    lines = existing.splitlines()
-    max_n = 0
-    if lines and lines[0].strip() == "---":
-        fm_end = next((idx for idx, ln in enumerate(lines[1:], 1) if ln.strip() == "---"), None)
-        if fm_end is not None:
-            for fl in lines[1:fm_end]:
-                if fl.strip().startswith("- n:"):
-                    with contextlib.suppress(Exception):
-                        max_n = max(max_n, int(fl.strip().split(":")[-1].strip()))
-
-    new_n = max_n + 1
-
-    # Build new front matter entry
-    model_str = (
-        f"{model_name} · {result.device} / {result.compute_type}"
-        if model_name
-        else f"{result.device} / {result.compute_type}"
-    )
-    new_fm_entry = [
-        f"  - n: {new_n}",
-        f"    model: {model_str}",
-        f"    language: {result.language} ({result.language_probability * 100:.1f}%)",
-        f"    duration: {result.duration_s:.1f}s",
-        f"    latency: {result.latency_ms:.0f}ms",
-        f"    timestamp: {ts}",
-    ]
-
-    # Inject new entry right after "transcriptions:" line in front matter
-    new_lines: list[str] = []
-    injected = False
-    if lines and lines[0].strip() == "---":
-        fm_end = next((idx for idx, ln in enumerate(lines[1:], 1) if ln.strip() == "---"), None)
-        if fm_end is not None:
-            for line in lines[: fm_end + 1]:
-                new_lines.append(line)
-                if not injected and line.strip() == "transcriptions:":
-                    new_lines.extend(new_fm_entry)
-                    injected = True
-            body = lines[fm_end + 1 :]
-        else:
-            new_lines = lines
-            body = []
-    else:
-        new_lines = ["---", f"file: {md_path.stem}.wav", "transcriptions:"] + new_fm_entry + ["---"]
-        body = lines
-
-    # Build new content: front matter + new transcription block + existing body
-    new_block = [
-        "",
-        f"## Transcription {new_n}",
-        "",
-        result.text or "*(no speech detected)*",
-        "",
-    ]
-
-    all_lines = new_lines + new_block + ([""] if body and body[0] != "" else []) + body
-    return "\n".join(all_lines)
-
-
-def _parse_markdown_entry(md_path: Path, index: int, recordings_path: Path | None = None) -> SessionEntry | None:
-    """Parse a transcription markdown file (YAML front matter format) into a SessionEntry.
-
-    Uses the latest transcription (highest n) for the preview text and metadata.
-    """
-    try:
-        content = md_path.read_text(encoding="utf-8")
-    except Exception:
-        return None
-
-    lines = content.splitlines()
-
-    if not lines or lines[0].strip() != "---":
-        return None
-
-    fm_end = next((idx for idx, ln in enumerate(lines[1:], 1) if ln.strip() == "---"), None)
-    if fm_end is None:
-        return None
-
-    wav_name: str | None = None
-    # Parse transcriptions array — collect all entries, pick the one with highest n
-    entries: list[dict] = []
-    current: dict | None = None
-    for fl in lines[1:fm_end]:
-        stripped = fl.strip()
-        if stripped.startswith("- n:"):
-            if current is not None:
-                entries.append(current)
-            with contextlib.suppress(Exception):
-                current = {"n": int(stripped.split(":")[-1].strip())}
-        elif stripped.startswith("file:"):
-            wav_name = stripped.split(":", 1)[-1].strip()
-        elif current is not None and ":" in stripped:
-            key, _, val = stripped.partition(":")
-            current[key.strip()] = val.strip()
-    if current is not None:
-        entries.append(current)
-
-    if not entries:
-        return None
-
-    latest = max(entries, key=lambda e: e.get("n", 0))
-    duration_s = 0.0
-    latency_ms = 0.0
-    device = "unknown"
-    with contextlib.suppress(Exception):
-        duration_s = float(latest.get("duration", "0s").rstrip("s"))
-    with contextlib.suppress(Exception):
-        latency_ms = float(latest.get("latency", "0ms").rstrip("ms"))
-    with contextlib.suppress(Exception):
-        device = latest.get("model", "unknown").split("/")[0].strip()
-
-    # Extract text for the latest transcription block
-    latest_n = latest.get("n", 1)
-    marker = f"## Transcription {latest_n}"
-    body = lines[fm_end + 1 :]
-    text_lines: list[str] = []
-    in_block = False
-    for line in body:
-        if line.strip() == marker:
-            in_block = True
-            continue
-        if in_block:
-            # Stop at the next transcription marker
-            if line.strip().startswith("## Transcription "):
-                break
-            text_lines.append(line)
-    text = " ".join(ln for ln in text_lines if ln.strip() and ln.strip() != "*(no speech detected)*").strip()
-
-    if not text:
-        return None
-
-    # Resolve WAV path
-    wav_path: Path | None = None
-    if wav_name:
-        candidates: list[Path] = []
-        if recordings_path is not None:
-            candidates.append(recordings_path / wav_name)
-        candidates.append(md_path.parent.parent / "recordings" / wav_name)
-        for candidate in candidates:
-            if candidate.exists():
-                wav_path = candidate
-                break
-
-    timestamp = latest.get("timestamp", "")
-    if not timestamp:
-        parts = md_path.stem.split("_")
-        if len(parts) >= 3:
-            date_part = parts[-2]
-            time_part = parts[-1]
-            with contextlib.suppress(Exception):
-                timestamp = f"{date_part[0:4]}-{date_part[4:6]}-{date_part[6:8]} {time_part[0:2]}:{time_part[2:4]}"
-
-    return SessionEntry(
-        index=index,
-        wav_path=wav_path,
-        md_path=md_path,
-        duration_s=duration_s,
-        text=text,
-        latency_ms=latency_ms,
-        device=device,
-        timestamp=timestamp,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Clipboard helper
-# ---------------------------------------------------------------------------
-
-
-def _copy_to_clipboard(text: str) -> None:
-    """Copy text to the system clipboard using pyperclip (cross-platform)."""
-    try:
-        import pyperclip
-
-        pyperclip.copy(text)
-    except Exception as e:
-        logger.warning(f"Clipboard copy failed: {e}")
 
 
 # ---------------------------------------------------------------------------
