@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
+from voicepad_core import AudioRecorder
 from voicepad_core.config import Config
 from voicepad_core.streaming import (
     MIN_CHUNK_S,
@@ -37,7 +38,7 @@ def _silence(seconds: float) -> np.ndarray:
     return np.zeros(int(SAMPLE_RATE * seconds), dtype=np.float32)
 
 
-class _FakeRecorder:
+class _FakeRecorder(AudioRecorder):
     """Minimal recorder stub that exposes _lock and _frames."""
 
     def __init__(self, audio: np.ndarray | None = None) -> None:
@@ -104,6 +105,7 @@ class TestStreamingTranscriberLifecycle:
         )
         st.start()
         st.stop()
+        assert st._thread is not None
         assert not st._thread.is_alive()
 
     def test_stop_sets_stop_event(self, tmp_path: Path) -> None:

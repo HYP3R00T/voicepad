@@ -4,9 +4,18 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
-from voicepad_core.config import Config, get_config, get_config_with_metadata
+from voicepad_core.config import Config as ConfigModel
+from voicepad_core.config import get_config, get_config_with_metadata
+
+
+def make_config(*args: Any, **kwargs: Any) -> ConfigModel:
+    return ConfigModel(*args, **kwargs)
+
+
+Config = make_config
 
 
 class TestConfigExpandPaths:
@@ -129,7 +138,7 @@ class TestGetConfig:
     def test_get_config_returns_config_instance(self) -> None:
         """get_config() returns a Config instance."""
         config = get_config()
-        assert isinstance(config, Config)
+        assert isinstance(config, ConfigModel)
 
     def test_get_config_has_defaults(self) -> None:
         """get_config() returns a config with default values."""
@@ -148,12 +157,12 @@ class TestGetConfigWithMetadata:
     def test_get_config_with_metadata_config_is_config_instance(self) -> None:
         """The first element of the tuple is a Config instance."""
         config, _ = get_config_with_metadata()
-        assert isinstance(config, Config)
+        assert isinstance(config, ConfigModel)
 
     def test_get_config_with_metadata_second_element_is_dict(self) -> None:
         """The second element of the tuple is metadata (a dict-like object)."""
         config, metadata = get_config_with_metadata()
-        assert isinstance(config, Config)
+        assert isinstance(config, ConfigModel)
         assert metadata is not None
 
 
