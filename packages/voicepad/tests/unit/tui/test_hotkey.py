@@ -1,4 +1,4 @@
-"""Tests for voicepad.tui.hotkey."""
+"""Tests for GlobalHotkeyListener."""
 
 from __future__ import annotations
 
@@ -8,73 +8,99 @@ from voicepad.tui.hotkey import GlobalHotkeyListener, _parse_hotkey
 
 
 class TestParseHotkey:
-    """Tests for _parse_hotkey helper function."""
+    """Test suite for _parse_hotkey function."""
 
-    def test_parse_valid_hotkey(self) -> None:
-        """_parse_hotkey returns the hotkey string if non-empty."""
-        result = _parse_hotkey("<ctrl>+v")
+    def test_parse_hotkey_returns_non_empty_string(self) -> None:
+        """_parse_hotkey returns the string if non-empty."""
+        result = _parse_hotkey("<ctrl>+<alt>+v")
+        assert result == "<ctrl>+<alt>+v"
+
+    def test_parse_hotkey_strips_whitespace(self) -> None:
+        """_parse_hotkey strips leading and trailing whitespace."""
+        result = _parse_hotkey("  <ctrl>+v  ")
         assert result == "<ctrl>+v"
 
-    def test_parse_empty_string(self) -> None:
+    def test_parse_hotkey_returns_none_for_empty_string(self) -> None:
         """_parse_hotkey returns None for empty string."""
         result = _parse_hotkey("")
         assert result is None
 
-    def test_parse_whitespace_only(self) -> None:
+    def test_parse_hotkey_returns_none_for_whitespace_only(self) -> None:
         """_parse_hotkey returns None for whitespace-only string."""
         result = _parse_hotkey("   ")
         assert result is None
 
-    def test_parse_strips_whitespace(self) -> None:
-        """_parse_hotkey strips leading/trailing whitespace."""
-        result = _parse_hotkey("  <ctrl>+v  ")
-        assert result == "<ctrl>+v"
-
 
 class TestGlobalHotkeyListener:
-    """Tests for GlobalHotkeyListener class."""
+    """Test suite for GlobalHotkeyListener class."""
 
-    def test_listener_initializes_with_callbacks(self) -> None:
-        """GlobalHotkeyListener stores callbacks and initial state."""
+    def test_init_stores_callbacks(self) -> None:
+        """GlobalHotkeyListener stores hotkey and callbacks."""
         on_start = MagicMock()
         on_stop = MagicMock()
-        listener = GlobalHotkeyListener("<ctrl>+v", on_start, on_stop)
 
-        assert listener._hotkey_str == "<ctrl>+v"
-        assert listener._on_start is on_start
-        assert listener._on_stop is on_stop
+        listener = GlobalHotkeyListener(
+            hotkey="<ctrl>+<alt>+v",
+            on_start=on_start,
+            on_stop=on_stop,
+        )
+
+        assert listener._hotkey_str == "<ctrl>+<alt>+v"
+        assert listener._on_start == on_start
+        assert listener._on_stop == on_stop
         assert listener._recording is False
-
-    def test_start_with_empty_hotkey_logs_and_returns(self) -> None:
-        """When hotkey is empty, start() logs a message and returns without starting thread."""
-        on_start = MagicMock()
-        on_stop = MagicMock()
-        listener = GlobalHotkeyListener("", on_start, on_stop)
-
-        with patch("voicepad.tui.hotkey.logger") as mock_logger:
-            listener.start()
-
-        mock_logger.info.assert_called_once()
+        assert listener._listener is None
         assert listener._thread is None
 
-    def test_start_with_valid_hotkey_starts_thread(self) -> None:
-        """When hotkey is valid, start() starts a daemon thread."""
+    @patch("voicepad.tui.hotkey.logger")
+    def test_start_with_empty_hotkey_does_nothing(self, mock_logger: MagicMock) -> None:
+        """start() does nothing if hotkey is empty."""
         on_start = MagicMock()
         on_stop = MagicMock()
-        listener = GlobalHotkeyListener("<ctrl>+v", on_start, on_stop)
+
+        listener = GlobalHotkeyListener(
+            hotkey="",
+            on_start=on_start,
+            on_stop=on_stop,
+        )
+
+        listener.start()
+
+        assert listener._thread is None
+        mock_logger.info.assert_called_once()
+        assert "disabled" in str(mock_logger.info.call_args).lower()
+
+    @patch("voicepad.tui.hotkey.logger")
+    def test_start_creates_daemon_thread(self, mock_logger: MagicMock) -> None:
+        """start() creates a daemon thread."""
+        on_start = MagicMock()
+        on_stop = MagicMock()
+
+        listener = GlobalHotkeyListener(
+            hotkey="<ctrl>+v",
+            on_start=on_start,
+            on_stop=on_stop,
+        )
 
         with patch.object(listener, "_run"):
             listener.start()
 
-        assert listener._thread is not None
-        assert listener._thread.daemon is True
-        listener._thread.join(timeout=1.0)
+            assert listener._thread is not None
+            assert listener._thread.daemon is True
+            assert listener._thread.name == "hotkey-listener"
+            mock_logger.info.assert_called()
 
-    def test_stop_calls_listener_stop(self) -> None:
-        """When stop() is called, the pynput listener is stopped."""
+    @patch("voicepad.tui.hotkey.logger")
+    def test_stop_stops_listener(self, mock_logger: MagicMock) -> None:
+        """stop() stops the pynput listener."""
         on_start = MagicMock()
         on_stop = MagicMock()
-        listener = GlobalHotkeyListener("<ctrl>+v", on_start, on_stop)
+
+        listener = GlobalHotkeyListener(
+            hotkey="<ctrl>+v",
+            on_start=on_start,
+            on_stop=on_stop,
+        )
 
         mock_pynput_listener = MagicMock()
         listener._listener = mock_pynput_listener
@@ -82,171 +108,263 @@ class TestGlobalHotkeyListener:
         listener.stop()
 
         mock_pynput_listener.stop.assert_called_once()
+        mock_logger.info.assert_called_once()
+        assert "stopped" in str(mock_logger.info.call_args).lower()
 
-    def test_stop_gracefully_handles_no_listener(self) -> None:
-        """When stop() is called before start(), it does not raise an exception."""
+    @patch("voicepad.tui.hotkey.logger")
+    def test_stop_handles_exception_gracefully(self, mock_logger: MagicMock) -> None:
+        """stop() handles exceptions when stopping listener."""
         on_start = MagicMock()
         on_stop = MagicMock()
-        listener = GlobalHotkeyListener("<ctrl>+v", on_start, on_stop)
+
+        listener = GlobalHotkeyListener(
+            hotkey="<ctrl>+v",
+            on_start=on_start,
+            on_stop=on_stop,
+        )
+
+        mock_pynput_listener = MagicMock()
+        mock_pynput_listener.stop.side_effect = Exception("Stop failed")
+        listener._listener = mock_pynput_listener
 
         # Should not raise
         listener.stop()
 
-    def test_on_activate_toggles_recording_and_calls_callbacks(self) -> None:
-        """When hotkey is pressed, _on_activate toggles recording and calls appropriate callback."""
+        mock_logger.info.assert_called_once()
+
+    @patch("voicepad.tui.hotkey.logger")
+    def test_stop_when_listener_is_none(self, mock_logger: MagicMock) -> None:
+        """stop() works when listener is None."""
         on_start = MagicMock()
         on_stop = MagicMock()
-        listener = GlobalHotkeyListener("<ctrl>+v", on_start, on_stop)
 
-        # Patch pynput.keyboard at the point it is imported inside _run()
-        mock_kb = MagicMock()
-        mock_pynput_listener = MagicMock()
-        captured = {}
+        listener = GlobalHotkeyListener(
+            hotkey="<ctrl>+v",
+            on_start=on_start,
+            on_stop=on_stop,
+        )
 
-        def capture_hotkeys(hotkey_map: dict) -> object:
-            captured["map"] = hotkey_map
-            return mock_pynput_listener
+        # Should not raise
+        listener.stop()
 
-        mock_kb.GlobalHotKeys.side_effect = capture_hotkeys
+        mock_logger.info.assert_called_once()
 
-        with (
-            patch.dict("sys.modules", {"pynput": MagicMock(), "pynput.keyboard": mock_kb}),
-            patch("pynput.keyboard", mock_kb),
-        ):
-            listener._run()
-
-        # GlobalHotKeys should have been called with a hotkey map
-        assert mock_kb.GlobalHotKeys.called
-
-    def test_on_activate_first_press_calls_on_start(self) -> None:
-        """First hotkey press calls on_start callback."""
+    @patch("pynput.keyboard")
+    @patch("voicepad.tui.hotkey.logger")
+    def test_run_creates_global_hotkeys(self, mock_logger: MagicMock, mock_keyboard: MagicMock) -> None:
+        """_run() creates GlobalHotKeys with correct mapping."""
         on_start = MagicMock()
         on_stop = MagicMock()
-        listener = GlobalHotkeyListener("<ctrl>+v", on_start, on_stop)
 
-        assert listener._recording is False
+        listener = GlobalHotkeyListener(
+            hotkey="<ctrl>+v",
+            on_start=on_start,
+            on_stop=on_stop,
+        )
 
-        # Simulate the first activation (same logic as _on_activate in hotkey.py)
-        if listener._recording:
-            listener._recording = False
-            listener._on_stop()
-        else:
-            listener._recording = True
-            listener._on_start()
+        mock_global_hotkeys = MagicMock()
+        mock_keyboard.GlobalHotKeys.return_value = mock_global_hotkeys
 
+        listener._run()
+
+        # Verify GlobalHotKeys was created with a mapping
+        mock_keyboard.GlobalHotKeys.assert_called_once()
+        hotkey_map = mock_keyboard.GlobalHotKeys.call_args[0][0]
+        assert "<ctrl>+v" in hotkey_map
+        assert callable(hotkey_map["<ctrl>+v"])
+
+        # Verify run was called
+        mock_global_hotkeys.run.assert_called_once()
+
+    @patch("pynput.keyboard")
+    def test_run_with_empty_hotkey_returns_early(self, mock_keyboard: MagicMock) -> None:
+        """_run() returns early if hotkey is empty."""
+        on_start = MagicMock()
+        on_stop = MagicMock()
+
+        listener = GlobalHotkeyListener(
+            hotkey="",
+            on_start=on_start,
+            on_stop=on_stop,
+        )
+
+        listener._run()
+
+        mock_keyboard.GlobalHotKeys.assert_not_called()
+
+    @patch("pynput.keyboard")
+    @patch("voicepad.tui.hotkey.logger")
+    def test_run_handles_import_error(self, mock_logger: MagicMock, mock_keyboard: MagicMock) -> None:
+        """_run() handles pynput import errors."""
+        on_start = MagicMock()
+        on_stop = MagicMock()
+
+        listener = GlobalHotkeyListener(
+            hotkey="<ctrl>+v",
+            on_start=on_start,
+            on_stop=on_stop,
+        )
+
+        mock_keyboard.GlobalHotKeys.side_effect = ImportError("pynput not installed")
+
+        listener._run()
+
+        mock_logger.error.assert_called_once()
+        assert "failed" in str(mock_logger.error.call_args).lower()
+
+    @patch("pynput.keyboard")
+    def test_hotkey_activation_toggles_recording(self, mock_keyboard: MagicMock) -> None:
+        """Hotkey activation toggles recording state."""
+        on_start = MagicMock()
+        on_stop = MagicMock()
+
+        listener = GlobalHotkeyListener(
+            hotkey="<ctrl>+v",
+            on_start=on_start,
+            on_stop=on_stop,
+        )
+
+        # Capture the activation callback
+        activation_callback = None
+
+        def capture_callback(hotkey_map):
+            nonlocal activation_callback
+            activation_callback = hotkey_map["<ctrl>+v"]
+            mock_listener = MagicMock()
+            mock_listener.run = MagicMock()  # Don't actually run
+            return mock_listener
+
+        mock_keyboard.GlobalHotKeys.side_effect = capture_callback
+
+        listener._run()
+
+        assert activation_callback is not None
+        assert callable(activation_callback)
+
+        # First press: start recording
+        activation_callback()
         assert listener._recording is True
         on_start.assert_called_once()
         on_stop.assert_not_called()
 
-    def test_on_activate_second_press_calls_on_stop(self) -> None:
-        """Second hotkey press calls on_stop callback."""
-        on_start = MagicMock()
-        on_stop = MagicMock()
-        listener = GlobalHotkeyListener("<ctrl>+v", on_start, on_stop)
-
-        # Simulate recording is already in progress
-        listener._recording = True
-
-        # Simulate the second activation
-        if listener._recording:
-            listener._recording = False
-            listener._on_stop()
-        else:
-            listener._recording = True
-            listener._on_start()
-
+        # Second press: stop recording
+        activation_callback()
         assert listener._recording is False
+        on_start.assert_called_once()  # Still only once
         on_stop.assert_called_once()
-        on_start.assert_not_called()
 
-    def test_on_activate_handles_callback_exception(self) -> None:
-        """When on_start raises, _on_activate logs the error and does not propagate."""
-        on_start = MagicMock(side_effect=RuntimeError("callback failed"))
+    @patch("pynput.keyboard")
+    @patch("voicepad.tui.hotkey.logger")
+    def test_hotkey_activation_handles_on_start_error(self, mock_logger: MagicMock, mock_keyboard: MagicMock) -> None:
+        """Hotkey activation handles errors in on_start callback."""
+        on_start = MagicMock(side_effect=Exception("Start failed"))
         on_stop = MagicMock()
-        listener = GlobalHotkeyListener("<ctrl>+v", on_start, on_stop)
 
-        # Patch pynput so _run() can execute and register _on_activate
-        mock_kb = MagicMock()
-        captured_callback: list = []
+        listener = GlobalHotkeyListener(
+            hotkey="<ctrl>+v",
+            on_start=on_start,
+            on_stop=on_stop,
+        )
 
-        def capture_hotkeys(hotkey_map: dict) -> object:
-            captured_callback.extend(hotkey_map.values())
-            # Return a mock that calls run() immediately then stops
-            m = MagicMock()
-            m.run.side_effect = lambda: None
-            return m
+        # Capture the activation callback
+        activation_callback = None
 
-        mock_kb.GlobalHotKeys.side_effect = capture_hotkeys
+        def capture_callback(hotkey_map):
+            nonlocal activation_callback
+            activation_callback = hotkey_map["<ctrl>+v"]
+            mock_listener = MagicMock()
+            mock_listener.run = MagicMock()
+            return mock_listener
 
-        with (
-            patch.dict("sys.modules", {"pynput": MagicMock(), "pynput.keyboard": mock_kb}),
-            patch("pynput.keyboard", mock_kb),
-            patch("voicepad.tui.hotkey.logger") as mock_logger,
-        ):
-            listener._run()
+        mock_keyboard.GlobalHotKeys.side_effect = capture_callback
 
-            # Manually invoke the captured _on_activate callback
-            if captured_callback:
-                activate = captured_callback[0]
-                activate()  # first press — triggers on_start which raises
-                # logger.error should have been called
-                mock_logger.error.assert_called()
+        listener._run()
 
-    def test_listener_logging_on_start(self) -> None:
-        """When start() is called with a valid hotkey, a log message is emitted."""
+        assert activation_callback is not None
+        # Should not raise
+        activation_callback()
+
+        mock_logger.error.assert_called()
+        assert "on_start" in str(mock_logger.error.call_args).lower()
+
+    @patch("pynput.keyboard")
+    @patch("voicepad.tui.hotkey.logger")
+    def test_hotkey_activation_handles_on_stop_error(self, mock_logger: MagicMock, mock_keyboard: MagicMock) -> None:
+        """Hotkey activation handles errors in on_stop callback."""
+        on_start = MagicMock()
+        on_stop = MagicMock(side_effect=Exception("Stop failed"))
+
+        listener = GlobalHotkeyListener(
+            hotkey="<ctrl>+v",
+            on_start=on_start,
+            on_stop=on_stop,
+        )
+
+        # Capture the activation callback
+        activation_callback = None
+
+        def capture_callback(hotkey_map):
+            nonlocal activation_callback
+            activation_callback = hotkey_map["<ctrl>+v"]
+            mock_listener = MagicMock()
+            mock_listener.run = MagicMock()
+            return mock_listener
+
+        mock_keyboard.GlobalHotKeys.side_effect = capture_callback
+
+        listener._run()
+
+        assert activation_callback is not None
+        # Start recording first
+        activation_callback()
+        assert listener._recording is True
+
+        # Stop recording - should handle error
+        activation_callback()
+
+        mock_logger.error.assert_called()
+        assert "on_stop" in str(mock_logger.error.call_args).lower()
+
+    @patch("pynput.keyboard")
+    @patch("voicepad.tui.hotkey.logger")
+    def test_multiple_activations_toggle_correctly(self, mock_logger: MagicMock, mock_keyboard: MagicMock) -> None:
+        """Multiple hotkey activations toggle recording correctly."""
         on_start = MagicMock()
         on_stop = MagicMock()
-        listener = GlobalHotkeyListener("<ctrl>+v", on_start, on_stop)
 
-        with patch("voicepad.tui.hotkey.logger") as mock_logger:
-            with patch.object(listener, "_run"):
-                listener.start()
+        listener = GlobalHotkeyListener(
+            hotkey="<ctrl>+v",
+            on_start=on_start,
+            on_stop=on_stop,
+        )
 
-            assert any("started" in str(c).lower() for c in mock_logger.info.call_args_list)
+        # Capture the activation callback
+        activation_callback = None
 
-    def test_listener_logging_on_stop(self) -> None:
-        """When stop() is called, a log message is emitted."""
-        on_start = MagicMock()
-        on_stop = MagicMock()
-        listener = GlobalHotkeyListener("<ctrl>+v", on_start, on_stop)
+        def capture_callback(hotkey_map):
+            nonlocal activation_callback
+            activation_callback = hotkey_map["<ctrl>+v"]
+            mock_listener = MagicMock()
+            mock_listener.run = MagicMock()
+            return mock_listener
 
-        with patch("voicepad.tui.hotkey.logger") as mock_logger:
-            listener._listener = MagicMock()
-            listener.stop()
+        mock_keyboard.GlobalHotKeys.side_effect = capture_callback
 
-            assert any("stopped" in str(c).lower() for c in mock_logger.info.call_args_list)
+        listener._run()
 
-    def test_run_returns_when_hotkey_empty(self) -> None:
-        """When hotkey is empty, _run() returns immediately without creating a pynput listener."""
-        on_start = MagicMock()
-        on_stop = MagicMock()
-        listener = GlobalHotkeyListener("", on_start, on_stop)
+        assert activation_callback is not None
+        # Multiple toggles
+        activation_callback()  # Start
+        assert listener._recording is True
 
-        mock_kb = MagicMock()
-        with (
-            patch.dict("sys.modules", {"pynput": MagicMock(), "pynput.keyboard": mock_kb}),
-            patch("pynput.keyboard", mock_kb),
-        ):
-            listener._run()
+        activation_callback()  # Stop
+        assert listener._recording is False
 
-        # No pynput listener should be created
-        assert listener._listener is None
-        mock_kb.GlobalHotKeys.assert_not_called()
+        activation_callback()  # Start again
+        assert listener._recording is True
 
-    def test_run_handles_exception_in_pynput(self) -> None:
-        """When pynput raises an exception, _run() logs the error."""
-        on_start = MagicMock()
-        on_stop = MagicMock()
-        listener = GlobalHotkeyListener("<ctrl>+v", on_start, on_stop)
+        activation_callback()  # Stop again
+        assert listener._recording is False
 
-        mock_kb = MagicMock()
-        mock_kb.GlobalHotKeys.side_effect = RuntimeError("pynput error")
-
-        with (
-            patch.dict("sys.modules", {"pynput": MagicMock(), "pynput.keyboard": mock_kb}),
-            patch("pynput.keyboard", mock_kb),
-            patch("voicepad.tui.hotkey.logger") as mock_logger,
-        ):
-            listener._run()
-
-            mock_logger.error.assert_called_once()
+        assert on_start.call_count == 2
+        assert on_stop.call_count == 2

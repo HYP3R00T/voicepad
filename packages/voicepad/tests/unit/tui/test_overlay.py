@@ -1,114 +1,166 @@
-"""Tests for voicepad.tui.overlay."""
+"""Tests for overlay.py module."""
 
 from __future__ import annotations
 
-import threading
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, Mock, patch
 
-from voicepad.tui.overlay import StatusOverlay, _draw_pill
+from voicepad.tui.overlay import (
+    _AUTO_HIDE_AFTER_S,
+    _BG,
+    _COLORS,
+    _FG,
+    _LABELS,
+    State,
+    StatusOverlay,
+    _draw_pill,
+)
+
+
+class TestConstants:
+    """Test module-level constants."""
+
+    def test_bg_color_is_string(self) -> None:
+        assert isinstance(_BG, str)
+        assert _BG.startswith("#")
+
+    def test_fg_color_is_string(self) -> None:
+        assert isinstance(_FG, str)
+        assert _FG.startswith("#")
+
+    def test_colors_dict_has_all_states(self) -> None:
+        expected_states: list[State] = ["recording", "transcribing", "copied", "error", "hidden"]
+        for state in expected_states:
+            assert state in _COLORS
+            assert isinstance(_COLORS[state], str)
+            assert _COLORS[state].startswith("#")
+
+    def test_labels_dict_has_all_states(self) -> None:
+        expected_states: list[State] = ["recording", "transcribing", "copied", "error", "hidden"]
+        for state in expected_states:
+            assert state in _LABELS
+            assert isinstance(_LABELS[state], str)
+
+    def test_recording_label_contains_recording_text(self) -> None:
+        assert "Recording" in _LABELS["recording"]
+
+    def test_transcribing_label_contains_transcribing_text(self) -> None:
+        assert "Transcribing" in _LABELS["transcribing"]
+
+    def test_copied_label_contains_copied_text(self) -> None:
+        assert "Copied" in _LABELS["copied"]
+
+    def test_error_label_contains_error_text(self) -> None:
+        assert "Error" in _LABELS["error"]
+
+    def test_hidden_label_is_empty(self) -> None:
+        assert _LABELS["hidden"] == ""
+
+    def test_auto_hide_after_is_positive_float(self) -> None:
+        assert isinstance(_AUTO_HIDE_AFTER_S, float)
+        assert _AUTO_HIDE_AFTER_S > 0
 
 
 class TestDrawPill:
-    """Tests for _draw_pill helper function."""
+    """Test _draw_pill function."""
 
-    def _make_mock_canvas(self) -> tuple[MagicMock, list, list, list, list]:
-        """Return a mock canvas and call-capture lists for each drawing method."""
-        canvas = MagicMock()
-        rect_calls: list = []
-        oval_calls: list = []
-        arc_calls: list = []
-        line_calls: list = []
-        canvas.create_rectangle.side_effect = lambda *a, **kw: rect_calls.append((a, kw))
-        canvas.create_oval.side_effect = lambda *a, **kw: oval_calls.append((a, kw))
-        canvas.create_arc.side_effect = lambda *a, **kw: arc_calls.append((a, kw))
-        canvas.create_line.side_effect = lambda *a, **kw: line_calls.append((a, kw))
-        return canvas, rect_calls, oval_calls, arc_calls, line_calls
+    def test_draw_pill_creates_rectangles(self) -> None:
+        mock_canvas = MagicMock()
+        _draw_pill(mock_canvas, 0, 0, 100, 50, 10, fill="#000000", outline="#ffffff", width=2)
 
-    def test_draw_pill_calls_canvas_methods(self) -> None:
-        """_draw_pill() calls various canvas methods to draw a rounded rectangle."""
-        canvas, rect_calls, oval_calls, arc_calls, line_calls = self._make_mock_canvas()
+        # Should create rectangles for the pill body
+        assert mock_canvas.create_rectangle.call_count >= 2
 
-        # Patch tkinter.ARC so _draw_pill's style=tk.ARC reference resolves
-        with patch("tkinter.ARC", "arc"):
-            _draw_pill(canvas, 10, 10, 100, 50, 10, fill="red", outline="blue", width=2)
+    def test_draw_pill_creates_ovals(self) -> None:
+        mock_canvas = MagicMock()
+        _draw_pill(mock_canvas, 0, 0, 100, 50, 10, fill="#000000", outline="#ffffff", width=2)
 
-        assert len(rect_calls) > 0
-        assert len(oval_calls) > 0
-        assert len(arc_calls) > 0
-        assert len(line_calls) > 0
+        # Should create 4 corner ovals
+        assert mock_canvas.create_oval.call_count == 4
 
-    def test_draw_pill_with_custom_colors(self) -> None:
-        """_draw_pill() respects fill and outline colors."""
-        canvas, rect_calls, oval_calls, arc_calls, line_calls = self._make_mock_canvas()
-        all_calls: list = []
-        canvas.create_rectangle.side_effect = lambda *a, **kw: all_calls.append((a, kw))
-        canvas.create_oval.side_effect = lambda *a, **kw: all_calls.append((a, kw))
-        canvas.create_arc.side_effect = lambda *a, **kw: all_calls.append((a, kw))
-        canvas.create_line.side_effect = lambda *a, **kw: all_calls.append((a, kw))
+    def test_draw_pill_creates_arcs(self) -> None:
+        mock_canvas = MagicMock()
+        _draw_pill(mock_canvas, 0, 0, 100, 50, 10, fill="#000000", outline="#ffffff", width=2)
 
-        with patch("tkinter.ARC", "arc"):
-            _draw_pill(canvas, 10, 10, 100, 50, 10, fill="green", outline="yellow")
+        # Should create 4 corner arcs for borders
+        assert mock_canvas.create_arc.call_count == 4
 
-        assert any("green" in str(kw.get("fill", "")) for _, kw in all_calls)
+    def test_draw_pill_creates_lines(self) -> None:
+        mock_canvas = MagicMock()
+        _draw_pill(mock_canvas, 0, 0, 100, 50, 10, fill="#000000", outline="#ffffff", width=2)
 
+        # Should create 4 straight border lines
+        assert mock_canvas.create_line.call_count == 4
 
-def _make_overlay_with_mocks() -> tuple[StatusOverlay, MagicMock, MagicMock, MagicMock]:
-    """Create a StatusOverlay with all three required internals mocked.
+    def test_draw_pill_uses_fill_color(self) -> None:
+        mock_canvas = MagicMock()
+        _draw_pill(mock_canvas, 0, 0, 100, 50, 10, fill="#123456", outline="#ffffff", width=2)
 
-    _apply_state guards on ``_root is None or _label is None or _canvas is None``
-    so all three must be set for any state-transition test to exercise real logic.
-    """
-    overlay = StatusOverlay()
-    mock_root = MagicMock()
-    mock_canvas = MagicMock()
-    mock_label = MagicMock()
+        # Check that fill color is used in create_rectangle calls
+        calls = mock_canvas.create_rectangle.call_args_list
+        assert any("#123456" in str(call) for call in calls)
 
-    # Simulate realistic return values so _apply_state can compute pill size
-    mock_label.winfo_reqwidth.return_value = 120
-    mock_label.winfo_reqheight.return_value = 30
+    def test_draw_pill_uses_outline_color(self) -> None:
+        mock_canvas = MagicMock()
+        _draw_pill(mock_canvas, 0, 0, 100, 50, 10, fill="#000000", outline="#abcdef", width=2)
 
-    overlay._root = mock_root
-    overlay._canvas = mock_canvas
-    overlay._label = mock_label
-    return overlay, mock_root, mock_canvas, mock_label
+        # Check that outline color is used in create_line calls
+        calls = mock_canvas.create_line.call_args_list
+        assert any("#abcdef" in str(call) for call in calls)
 
 
 class TestStatusOverlay:
-    """Tests for StatusOverlay class."""
+    """Test StatusOverlay class."""
 
-    def test_overlay_initializes_with_hidden_state(self) -> None:
-        """StatusOverlay initializes with hidden state and no window."""
+    def test_init_creates_overlay(self) -> None:
         overlay = StatusOverlay()
-
-        assert overlay._state == "hidden"
         assert overlay._root is None
         assert overlay._canvas is None
         assert overlay._label is None
+        assert overlay._state == "hidden"
+        assert overlay._hide_timer is None
+        assert overlay._thread is None
 
-    def test_start_creates_thread(self) -> None:
-        """start() creates a daemon thread."""
+    def test_init_creates_ready_event(self) -> None:
+        overlay = StatusOverlay()
+        assert overlay._ready is not None
+        assert not overlay._ready.is_set()
+
+    @patch("voicepad.tui.overlay.threading.Thread")
+    def test_start_creates_daemon_thread(self, mock_thread_class: Mock) -> None:
+        mock_thread = MagicMock()
+        mock_thread_class.return_value = mock_thread
+        overlay = StatusOverlay()
+        overlay._ready.set()  # Prevent waiting
+
+        overlay.start()
+
+        mock_thread_class.assert_called_once()
+        call_kwargs = mock_thread_class.call_args[1]
+        assert call_kwargs["daemon"] is True
+        assert call_kwargs["name"] == "overlay"
+        assert callable(call_kwargs["target"])
+        mock_thread.start.assert_called_once()
+
+    @patch("voicepad.tui.overlay.threading.Thread")
+    def test_start_waits_for_ready_event(self, mock_thread_class: Mock) -> None:
+        mock_thread = MagicMock()
+        mock_thread_class.return_value = mock_thread
         overlay = StatusOverlay()
 
-        with patch.object(overlay, "_run"):
-            overlay.start()
+        # Manually set ready to simulate thread completion
+        overlay._ready.set()
 
-            assert overlay._thread is not None
-            assert overlay._thread.daemon is True
+        overlay.start()
 
-    def test_start_waits_for_ready(self) -> None:
-        """start() waits for _ready event with timeout."""
+        # Should have waited for ready event
+        assert overlay._ready.is_set()
+
+    def test_stop_does_nothing_when_root_is_none(self) -> None:
         overlay = StatusOverlay()
+        # Should not raise an exception
+        overlay.stop()
 
-        def mock_run() -> None:
-            overlay._ready.set()
-
-        with patch.object(overlay, "_run", side_effect=mock_run):
-            overlay.start()
-
-            assert overlay._ready.is_set()
-
-    def test_stop_destroys_window(self) -> None:
-        """stop() schedules window destruction."""
+    def test_stop_calls_destroy_on_root(self) -> None:
         overlay = StatusOverlay()
         mock_root = MagicMock()
         overlay._root = mock_root
@@ -116,16 +168,26 @@ class TestStatusOverlay:
         overlay.stop()
 
         mock_root.after.assert_called_once()
+        # Verify that destroy is scheduled
+        call_args = mock_root.after.call_args
+        assert call_args[0][0] == 0
+        assert callable(call_args[0][1])
 
-    def test_stop_handles_no_root(self) -> None:
-        """stop() gracefully handles case where _root is None."""
+    def test_stop_handles_exception_gracefully(self) -> None:
         overlay = StatusOverlay()
-        overlay._root = None
+        mock_root = MagicMock()
+        mock_root.after.side_effect = RuntimeError("Tk error")
+        overlay._root = mock_root
 
-        overlay.stop()  # should not raise
+        # Should not raise an exception
+        overlay.stop()
 
-    def test_set_state_updates_state_when_root_exists(self) -> None:
-        """set_state() schedules a state update when root window exists."""
+    def test_set_state_does_nothing_when_root_is_none(self) -> None:
+        overlay = StatusOverlay()
+        # Should not raise an exception
+        overlay.set_state("recording")
+
+    def test_set_state_schedules_update_on_root(self) -> None:
         overlay = StatusOverlay()
         mock_root = MagicMock()
         overlay._root = mock_root
@@ -133,148 +195,299 @@ class TestStatusOverlay:
         overlay.set_state("recording")
 
         mock_root.after.assert_called_once()
+        call_args = mock_root.after.call_args
+        assert call_args[0][0] == 0
+        assert callable(call_args[0][1])
 
-    def test_set_state_does_nothing_when_no_root(self) -> None:
-        """set_state() does nothing when root window doesn't exist."""
+    def test_set_state_handles_exception_gracefully(self) -> None:
         overlay = StatusOverlay()
-        overlay._root = None
+        mock_root = MagicMock()
+        mock_root.after.side_effect = RuntimeError("Tk error")
+        overlay._root = mock_root
 
-        overlay.set_state("recording")  # should not raise
+        # Should not raise an exception
+        overlay.set_state("recording")
 
-    def test_state_transitions_recording(self) -> None:
-        """Transitioning to 'recording' state configures the label."""
-        overlay, mock_root, mock_canvas, mock_label = _make_overlay_with_mocks()
+    @patch("tkinter.Tk")
+    @patch("tkinter.Canvas")
+    @patch("tkinter.Label")
+    def test_run_creates_tk_root(self, mock_label_class: Mock, mock_canvas_class: Mock, mock_tk_class: Mock) -> None:
+        mock_root = MagicMock()
+        mock_tk_class.return_value = mock_root
+        mock_canvas_class.return_value = MagicMock()
+        mock_label_class.return_value = MagicMock()
+        mock_root.mainloop.side_effect = lambda: None
 
+        overlay = StatusOverlay()
+        overlay._run()
+
+        mock_tk_class.assert_called_once()
+        assert overlay._root is mock_root
+
+    @patch("tkinter.Tk")
+    @patch("tkinter.Canvas")
+    @patch("tkinter.Label")
+    def test_run_configures_window_attributes(
+        self, mock_label_class: Mock, mock_canvas_class: Mock, mock_tk_class: Mock
+    ) -> None:
+        mock_root = MagicMock()
+        mock_tk_class.return_value = mock_root
+        mock_canvas_class.return_value = MagicMock()
+        mock_label_class.return_value = MagicMock()
+        mock_root.mainloop.side_effect = lambda: None
+
+        overlay = StatusOverlay()
+        overlay._run()
+
+        mock_root.overrideredirect.assert_called_once_with(True)
+        # Check that attributes were set
+        assert mock_root.attributes.call_count >= 2
+
+    @patch("tkinter.Tk")
+    @patch("tkinter.Canvas")
+    @patch("tkinter.Label")
+    def test_run_creates_canvas(self, mock_label_class: Mock, mock_canvas_class: Mock, mock_tk_class: Mock) -> None:
+        mock_root = MagicMock()
+        mock_canvas = MagicMock()
+        mock_tk_class.return_value = mock_root
+        mock_canvas_class.return_value = mock_canvas
+        mock_label_class.return_value = MagicMock()
+        mock_root.mainloop.side_effect = lambda: None
+
+        overlay = StatusOverlay()
+        overlay._run()
+
+        mock_canvas_class.assert_called_once()
+        assert overlay._canvas is mock_canvas
+        mock_canvas.pack.assert_called_once()
+
+    @patch("tkinter.Tk")
+    @patch("tkinter.Canvas")
+    @patch("tkinter.Label")
+    def test_run_creates_label(self, mock_label_class: Mock, mock_canvas_class: Mock, mock_tk_class: Mock) -> None:
+        mock_root = MagicMock()
+        mock_label = MagicMock()
+        mock_tk_class.return_value = mock_root
+        mock_canvas_class.return_value = MagicMock()
+        mock_label_class.return_value = mock_label
+        mock_root.mainloop.side_effect = lambda: None
+
+        overlay = StatusOverlay()
+        overlay._run()
+
+        mock_label_class.assert_called_once()
+        assert overlay._label is mock_label
+
+    @patch("tkinter.Tk")
+    @patch("tkinter.Canvas")
+    @patch("tkinter.Label")
+    def test_run_starts_hidden(self, mock_label_class: Mock, mock_canvas_class: Mock, mock_tk_class: Mock) -> None:
+        mock_root = MagicMock()
+        mock_tk_class.return_value = mock_root
+        mock_canvas_class.return_value = MagicMock()
+        mock_label_class.return_value = MagicMock()
+        mock_root.mainloop.side_effect = lambda: None
+
+        overlay = StatusOverlay()
+        overlay._run()
+
+        mock_root.withdraw.assert_called_once()
+
+    @patch("tkinter.Tk")
+    @patch("tkinter.Canvas")
+    @patch("tkinter.Label")
+    def test_run_sets_ready_event(self, mock_label_class: Mock, mock_canvas_class: Mock, mock_tk_class: Mock) -> None:
+        mock_root = MagicMock()
+        mock_tk_class.return_value = mock_root
+        mock_canvas_class.return_value = MagicMock()
+        mock_label_class.return_value = MagicMock()
+        mock_root.mainloop.side_effect = lambda: None
+
+        overlay = StatusOverlay()
+        overlay._run()
+
+        assert overlay._ready.is_set()
+
+    @patch("tkinter.Tk")
+    def test_run_handles_exception_and_sets_ready(self, mock_tk_class: Mock) -> None:
+        mock_tk_class.side_effect = RuntimeError("Tk init failed")
+
+        overlay = StatusOverlay()
+        overlay._run()
+
+        # Should set ready event even on error
+        assert overlay._ready.is_set()
+
+    def test_reposition_does_nothing_when_root_is_none(self) -> None:
+        overlay = StatusOverlay()
+        # Should not raise an exception
+        overlay._reposition()
+
+    def test_reposition_calculates_center_position(self) -> None:
+        overlay = StatusOverlay()
+        mock_root = MagicMock()
+        mock_root.winfo_screenwidth.return_value = 1920
+        mock_root.winfo_screenheight.return_value = 1080
+        mock_root.winfo_reqwidth.return_value = 200
+        mock_root.winfo_reqheight.return_value = 50
+        overlay._root = mock_root
+
+        overlay._reposition()
+
+        mock_root.update_idletasks.assert_called()
+        mock_root.geometry.assert_called_once()
+        # Check that geometry string contains calculated position
+        geometry_call = mock_root.geometry.call_args[0][0]
+        assert "200x50" in geometry_call
+        assert "+" in geometry_call
+
+    def test_reposition_handles_exception_gracefully(self) -> None:
+        overlay = StatusOverlay()
+        mock_root = MagicMock()
+        mock_root.update_idletasks.side_effect = RuntimeError("Tk error")
+        overlay._root = mock_root
+
+        # Should not raise an exception
+        overlay._reposition()
+
+    def test_apply_state_does_nothing_when_widgets_are_none(self) -> None:
+        overlay = StatusOverlay()
+        # Should not raise an exception
         overlay._apply_state("recording")
 
-        mock_label.configure.assert_called()
-
-    def test_state_transitions_transcribing(self) -> None:
-        """Transitioning to 'transcribing' state configures the label."""
-        overlay, mock_root, mock_canvas, mock_label = _make_overlay_with_mocks()
-
-        overlay._apply_state("transcribing")
-
-        mock_label.configure.assert_called()
-
-    def test_state_transitions_copied(self) -> None:
-        """Transitioning to 'copied' state configures the label."""
-        overlay, mock_root, mock_canvas, mock_label = _make_overlay_with_mocks()
-
-        overlay._apply_state("copied")
-
-        mock_label.configure.assert_called()
-
-    def test_state_transitions_error(self) -> None:
-        """Transitioning to 'error' state configures the label."""
-        overlay, mock_root, mock_canvas, mock_label = _make_overlay_with_mocks()
-
-        overlay._apply_state("error")
-
-        mock_label.configure.assert_called()
-
-    def test_state_transitions_hidden(self) -> None:
-        """Transitioning to 'hidden' state withdraws the root window."""
-        overlay, mock_root, mock_canvas, mock_label = _make_overlay_with_mocks()
+    def test_apply_state_withdraws_window_for_hidden_state(self) -> None:
+        overlay = StatusOverlay()
+        mock_root = MagicMock()
+        mock_canvas = MagicMock()
+        mock_label = MagicMock()
+        overlay._root = mock_root
+        overlay._canvas = mock_canvas
+        overlay._label = mock_label
 
         overlay._apply_state("hidden")
 
         mock_root.withdraw.assert_called_once()
-
-    def test_auto_hide_timer_set_for_temporary_states(self) -> None:
-        """'copied' and 'error' states schedule an auto-hide timer."""
-        overlay, mock_root, mock_canvas, mock_label = _make_overlay_with_mocks()
-
-        overlay._apply_state("copied")
-
-        mock_root.after.assert_called()
-
-    def test_state_change_updates_correctly(self) -> None:
-        """Multiple state changes are tracked in _state."""
-        overlay, mock_root, mock_canvas, mock_label = _make_overlay_with_mocks()
-
-        overlay._apply_state("recording")
-        assert overlay._state == "recording"
-
-        overlay._apply_state("transcribing")
-        assert overlay._state == "transcribing"
-
-        overlay._apply_state("hidden")
         assert overlay._state == "hidden"
 
-    def test_thread_safety_of_state_updates(self) -> None:
-        """set_state() can be called from multiple threads safely."""
+    def test_apply_state_cancels_hide_timer(self) -> None:
         overlay = StatusOverlay()
         mock_root = MagicMock()
+        mock_canvas = MagicMock()
+        mock_label = MagicMock()
         overlay._root = mock_root
+        overlay._canvas = mock_canvas
+        overlay._label = mock_label
+        overlay._hide_timer = "timer_id"
 
-        def call_set_state() -> None:
-            overlay.set_state("recording")
+        overlay._apply_state("hidden")
 
-        threads = [threading.Thread(target=call_set_state) for _ in range(5)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
+        mock_root.after_cancel.assert_called_once_with("timer_id")
+        assert overlay._hide_timer is None
 
-        assert mock_root.after.call_count >= 5
-
-    def test_run_creates_tk_window(self) -> None:
-        """_run() sets _ready regardless of whether Tk succeeds or fails."""
-        overlay = StatusOverlay()
-
-        # _run() sets _ready.set() in both the success and except paths.
-        # Patch tkinter.Tk to raise immediately so _run() exits via the except branch.
-        with patch("tkinter.Tk", side_effect=RuntimeError("no display")):
-            overlay._run()
-
-        assert overlay._ready.is_set()
-
-    def test_overlay_window_properties(self) -> None:
-        """StatusOverlay window reference is accessible after _root is set."""
+    def test_apply_state_updates_label_text_and_color(self) -> None:
         overlay = StatusOverlay()
         mock_root = MagicMock()
+        mock_canvas = MagicMock()
+        mock_label = MagicMock()
+        mock_label.winfo_reqwidth.return_value = 150
+        mock_label.winfo_reqheight.return_value = 40
         overlay._root = mock_root
-
-        assert overlay._root is not None
-
-    def test_multiple_start_stop_cycles(self) -> None:
-        """Overlay can be started and stopped multiple times."""
-        overlay = StatusOverlay()
-
-        with patch.object(overlay, "_run"):
-            overlay.start()
-            assert overlay._thread is not None
-
-            overlay.stop()
-
-            overlay.start()
-            assert overlay._thread is not None
-
-    def test_hide_timer_callback(self) -> None:
-        """Auto-hide timer is scheduled for 'copied' state."""
-        overlay, mock_root, mock_canvas, mock_label = _make_overlay_with_mocks()
-
-        overlay._apply_state("copied")
-
-        assert mock_root.after.called
-
-    def test_exception_handling_in_apply_state(self) -> None:
-        """_apply_state returns immediately when root or label is None."""
-        overlay = StatusOverlay()
-        overlay._label = None
-        overlay._root = None
-
-        overlay._apply_state("recording")  # should not raise
-
-    def test_label_configuration_values(self) -> None:
-        """Label is configured with text and fg color when state is applied."""
-        overlay, mock_root, mock_canvas, mock_label = _make_overlay_with_mocks()
+        overlay._canvas = mock_canvas
+        overlay._label = mock_label
 
         overlay._apply_state("recording")
 
-        # configure() should have been called with at least text= and fg=
-        assert mock_label.configure.called
-        call_kwargs = mock_label.configure.call_args[1]
-        assert "text" in call_kwargs
-        assert "fg" in call_kwargs
+        # Check that label was configured with recording text and color
+        mock_label.configure.assert_called()
+        config_call = mock_label.configure.call_args[1]
+        assert _LABELS["recording"] in str(config_call["text"])
+        assert _COLORS["recording"] in str(config_call["fg"])
+
+    def test_apply_state_shows_window(self) -> None:
+        overlay = StatusOverlay()
+        mock_root = MagicMock()
+        mock_canvas = MagicMock()
+        mock_label = MagicMock()
+        mock_label.winfo_reqwidth.return_value = 150
+        mock_label.winfo_reqheight.return_value = 40
+        overlay._root = mock_root
+        overlay._canvas = mock_canvas
+        overlay._label = mock_label
+
+        overlay._apply_state("recording")
+
+        mock_root.deiconify.assert_called_once()
+        mock_root.lift.assert_called_once()
+
+    def test_apply_state_schedules_auto_hide_for_copied(self) -> None:
+        overlay = StatusOverlay()
+        mock_root = MagicMock()
+        mock_canvas = MagicMock()
+        mock_label = MagicMock()
+        mock_label.winfo_reqwidth.return_value = 150
+        mock_label.winfo_reqheight.return_value = 40
+        overlay._root = mock_root
+        overlay._canvas = mock_canvas
+        overlay._label = mock_label
+
+        overlay._apply_state("copied")
+
+        # Should schedule auto-hide
+        mock_root.after.assert_called()
+        after_calls = [call for call in mock_root.after.call_args_list if call[0][0] > 0]
+        assert len(after_calls) > 0
+        # Check delay is approximately correct (in milliseconds)
+        delay_ms = after_calls[0][0][0]
+        assert delay_ms == int(_AUTO_HIDE_AFTER_S * 1000)
+
+    def test_apply_state_schedules_auto_hide_for_error(self) -> None:
+        overlay = StatusOverlay()
+        mock_root = MagicMock()
+        mock_canvas = MagicMock()
+        mock_label = MagicMock()
+        mock_label.winfo_reqwidth.return_value = 150
+        mock_label.winfo_reqheight.return_value = 40
+        overlay._root = mock_root
+        overlay._canvas = mock_canvas
+        overlay._label = mock_label
+
+        overlay._apply_state("error")
+
+        # Should schedule auto-hide
+        mock_root.after.assert_called()
+        after_calls = [call for call in mock_root.after.call_args_list if call[0][0] > 0]
+        assert len(after_calls) > 0
+
+    def test_apply_state_does_not_auto_hide_for_recording(self) -> None:
+        overlay = StatusOverlay()
+        mock_root = MagicMock()
+        mock_canvas = MagicMock()
+        mock_label = MagicMock()
+        mock_label.winfo_reqwidth.return_value = 150
+        mock_label.winfo_reqheight.return_value = 40
+        overlay._root = mock_root
+        overlay._canvas = mock_canvas
+        overlay._label = mock_label
+
+        overlay._apply_state("recording")
+
+        # Should not schedule auto-hide (only update_idletasks calls with 0)
+        after_calls = [call for call in mock_root.after.call_args_list if call[0][0] > 0]
+        assert len(after_calls) == 0
+
+    def test_apply_state_does_not_auto_hide_for_transcribing(self) -> None:
+        overlay = StatusOverlay()
+        mock_root = MagicMock()
+        mock_canvas = MagicMock()
+        mock_label = MagicMock()
+        mock_label.winfo_reqwidth.return_value = 150
+        mock_label.winfo_reqheight.return_value = 40
+        overlay._root = mock_root
+        overlay._canvas = mock_canvas
+        overlay._label = mock_label
+
+        overlay._apply_state("transcribing")
+
+        # Should not schedule auto-hide
+        after_calls = [call for call in mock_root.after.call_args_list if call[0][0] > 0]
+        assert len(after_calls) == 0
