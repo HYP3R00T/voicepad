@@ -277,12 +277,23 @@ class TestHistoryLoading:
         rec_dir = tmp_path / "recordings"
         rec_dir.mkdir()
 
-        # Write a minimal markdown file
+        # Write a markdown file in the YAML front-matter format that parse_markdown_entry expects
         md = md_dir / "recording_20260101_120000.md"
         md.write_text(
-            "# Transcription\n\n**File:** `recording_20260101_120000.wav`\n"
-            "**Duration:** 5.0s\n**Latency:** 500ms\n**Model:** cuda / int8\n\n"
-            "---\n\n## Text\n\nhello from history\n",
+            "---\n"
+            "file: recording_20260101_120000.wav\n"
+            "transcriptions:\n"
+            "  - n: 1\n"
+            "    model: turbo · cuda / int8\n"
+            "    language: en (99.0%)\n"
+            "    duration: 5.0s\n"
+            "    latency: 500ms\n"
+            "    timestamp: 2026-01-01 12:00\n"
+            "---\n"
+            "\n"
+            "## Transcription 1\n"
+            "\n"
+            "hello from history\n",
             encoding="utf-8",
         )
 

@@ -45,3 +45,12 @@ class TestVoicepadInit:
             voicepad.main()
 
         mock_app.assert_called_once()
+
+    def test_voicepad_main_module_invokes_app(self) -> None:
+        """Importing voicepad.__main__ should call the Typer app entry point."""
+        with patch("voicepad.main.app") as mock_app:
+            import runpy
+
+            runpy.run_module("voicepad.__main__", run_name="__main__")
+
+        mock_app.assert_called_once()
