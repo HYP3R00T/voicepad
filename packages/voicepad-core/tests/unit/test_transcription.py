@@ -121,13 +121,13 @@ class TestModelDownloaded:
             assert model_downloaded("tiny") is False
 
     def test_returns_false_if_model_bin_missing(self, tmp_path: Path) -> None:
-        repo_dir = tmp_path / "models--Systran--faster-whisper-tiny" / "snapshots" / "abc123"
+        repo_dir = tmp_path / "hub" / "models--Systran--faster-whisper-tiny" / "snapshots" / "abc123"
         repo_dir.mkdir(parents=True)
         with patch.dict(os.environ, {"HF_HOME": str(tmp_path)}):
             assert model_downloaded("tiny") is False
 
     def test_returns_true_if_model_bin_present(self, tmp_path: Path) -> None:
-        repo_dir = tmp_path / "models--Systran--faster-whisper-tiny" / "snapshots" / "abc123"
+        repo_dir = tmp_path / "hub" / "models--Systran--faster-whisper-tiny" / "snapshots" / "abc123"
         repo_dir.mkdir(parents=True)
         (repo_dir / "model.bin").write_bytes(b"fake")
         with patch.dict(os.environ, {"HF_HOME": str(tmp_path)}):
@@ -141,7 +141,7 @@ class TestModelDownloaded:
 
 class TestEnsureModelDownloaded:
     def test_skips_if_already_downloaded(self, tmp_path: Path) -> None:
-        repo_dir = tmp_path / "models--Systran--faster-whisper-tiny" / "snapshots" / "abc123"
+        repo_dir = tmp_path / "hub" / "models--Systran--faster-whisper-tiny" / "snapshots" / "abc123"
         repo_dir.mkdir(parents=True)
         (repo_dir / "model.bin").write_bytes(b"fake")
         with (
