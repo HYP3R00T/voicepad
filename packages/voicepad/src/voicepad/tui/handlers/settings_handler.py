@@ -46,6 +46,11 @@ class SettingsHandler:
             sel_model.value = self.app.config.transcription_model
 
         with contextlib.suppress(Exception):
+            # Update theme dropdown from TUI config
+            sel_theme = self.app.query_one("#setting-theme", Select)
+            sel_theme.value = self.app.tui_config.theme
+
+        with contextlib.suppress(Exception):
             # Update path inputs
             from textual.widgets import Input as _Input
 
@@ -85,7 +90,6 @@ class SettingsHandler:
             "markdown_path": "Where your transcription files are saved",
             "transcription_model": "Whisper model to use for transcription",
             "input_device_index": "Microphone to record from",
-            "theme": "UI color theme",
         }
 
         # Build device options once — reused for the Select widget
@@ -127,19 +131,6 @@ class SettingsHandler:
                     classes="settings-input",
                     allow_blank=False,
                 )
-            elif field_name == "theme":
-                from voicepad.tui.theme import get_available_themes
-
-                available_themes = get_available_themes()
-                options = [(t, t) for t in available_themes]
-                current_str = str(current_val) if current_val is not None else "voicepad-dark"
-                widget = Select(
-                    options=options,
-                    value=current_str if current_str in available_themes else "voicepad-dark",
-                    id="setting-theme",
-                    classes="settings-input",
-                    allow_blank=False,
-                )
             elif field_name == "input_device_index":
                 # current_val is int | None; use -1 as the sentinel for "system default"
                 current_idx = current_val if current_val is not None else -1
@@ -162,6 +153,26 @@ class SettingsHandler:
             row = Static(classes="settings-row")
             container.mount(row)
             row.mount(key_label, widget)
+
+        # ── Theme picker (TUI-only setting) ───────────────────────────
+        from voicepad.tui.theme import get_available_themes
+
+        available_themes = get_available_themes()
+        current_theme = self.app.tui_config.theme
+        theme_label = Label(
+            "[bold]theme[/]  [dim]—  UI color theme[/]",
+            classes="settings-key",
+        )
+        theme_widget = Select(
+            options=[(t, t) for t in available_themes],
+            value=current_theme if current_theme in available_themes else "tokyo-night",
+            id="setting-theme",
+            classes="settings-input",
+            allow_blank=False,
+        )
+        theme_row = Static(classes="settings-row")
+        container.mount(theme_row)
+        theme_row.mount(theme_label, theme_widget)
 
         # ── Hotkey picker ──────────────────────────────────────────────
         hotkey_label = Label(
@@ -241,7 +252,7 @@ class SettingsHandler:
         """Read user-facing inputs, merge with existing config, write to voicepad.yaml."""
         from utilityhub_config import get_config_path, write_config
 
-        user_fields = ["recordings_path", "markdown_path", "transcription_model", "input_device_index", "theme"]
+        user_fields = ["recordings_path", "markdown_path", "transcription_model", "input_device_index"]
 
         status = self.app.query_one("#settings-status", Label)
         errors: list[str] = []
@@ -259,9 +270,6 @@ class SettingsHandler:
             with contextlib.suppress(Exception):
                 if field_name == "transcription_model":
                     sel = self.app.query_one("#setting-transcription_model", Select)
-                    raw[field_name] = str(sel.value) if sel.value is not Select.BLANK else raw[field_name]
-                elif field_name == "theme":
-                    sel = self.app.query_one("#setting-theme", Select)
                     raw[field_name] = str(sel.value) if sel.value is not Select.BLANK else raw[field_name]
                 elif field_name == "input_device_index":
                     sel = self.app.query_one("#setting-input_device_index", Select)
@@ -293,7 +301,6 @@ class SettingsHandler:
             write_config(new_config, "voicepad", path=global_path, format="yaml")
 
             hotkey_changed = new_config.global_hotkey != self.app.config.global_hotkey
-            theme_changed = new_config.theme != self.app.config.theme
             model_changed = (
                 new_config.transcription_model != self.app.config.transcription_model
                 or new_config.transcription_device != self.app.config.transcription_device
@@ -324,9 +331,11 @@ class SettingsHandler:
             else:
                 status.update("[green]\U000f012c  saved[/]")
 
-            # Apply theme immediately if changed
-            if theme_changed:
-                self.app.theme = new_config.theme
+            # Apply theme from the theme picker — watch_theme handles persistence
+            with contextlib.suppress(Exception):
+                sel = self.app.query_one("#setting-theme", Select)
+                if sel.value is not Select.BLANK:
+                    self.app.theme = str(sel.value)
 
             self.app.set_timer(3.0, lambda: status.update(""))
         except Exception as e:

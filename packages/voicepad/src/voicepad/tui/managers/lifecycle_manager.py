@@ -22,8 +22,8 @@ class LifecycleManager:
 
     def on_mount(self) -> None:
         """Initialize the app after mounting."""
-        # Apply theme from config
-        self.app.theme = self.app.config.theme
+        # Apply theme from TUI config
+        self.app.theme = self.app.tui_config.theme
 
         self.app._load_history_from_disk()
         self.app._populate_settings()

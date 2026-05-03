@@ -144,23 +144,6 @@ class Config(BaseModel):
         ),
     )
 
-    # ------------------------------------------------------------------
-    # UI Theme
-    # ------------------------------------------------------------------
-
-    theme: str = Field(
-        default="voicepad-dark",
-        description=(
-            "UI theme for the application. "
-            "Built-in Textual themes: textual-dark, textual-light, nord, gruvbox, "
-            "catppuccin-mocha, dracula, tokyo-night, monokai, flexoki, "
-            "catppuccin-latte, catppuccin-frappe, catppuccin-macchiato, "
-            "solarized-light, solarized-dark, rose-pine, rose-pine-moon, "
-            "rose-pine-dawn, atom-one-dark, atom-one-light. "
-            "Custom theme: voicepad-dark (default, dark theme with blue accents)."
-        ),
-    )
-
     @field_validator("recordings_path", "markdown_path", "model_cache_path", mode="before")
     @classmethod
     def expand_paths(cls, v: Path | str) -> Path:

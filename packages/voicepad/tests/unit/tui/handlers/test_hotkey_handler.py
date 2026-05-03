@@ -17,6 +17,7 @@ def mock_app() -> Mock:
     app = Mock(
         spec=[
             "config",
+            "tui_config",
             "_overlay",
             "_hotkey_listener",
             "_recording",
@@ -29,6 +30,8 @@ def mock_app() -> Mock:
     )
     app.config = Mock()
     app.config.global_hotkey = "ctrl+shift+r"
+    app.tui_config = Mock()
+    app.tui_config.theme = "tokyo-night"
     app._overlay = None
     app._hotkey_listener = None
     app._recording = False

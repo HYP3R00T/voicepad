@@ -28,38 +28,37 @@ class TestOnMount:
     def mock_app(self) -> Mock:
         """Create a mock app with necessary attributes."""
         app = Mock()
-        app.register_theme = Mock()
+        app.tui_config = Mock()
+        app.tui_config.theme = "tokyo-night"
         app._load_history_from_disk = Mock()
         app._populate_settings = Mock()
         return app
 
     def test_registers_theme(self, mock_app: Mock) -> None:
-        """Test that on_mount registers the theme."""
+        """Test that on_mount applies the theme from tui_config."""
         from voicepad.tui.managers.lifecycle_manager import LifecycleManager
 
+        mock_app.tui_config = Mock()
+        mock_app.tui_config.theme = "tokyo-night"
         manager = LifecycleManager(mock_app)
 
-        with (
-            patch("voicepad.tui.managers.lifecycle_manager._CATPPUCCIN_MOCHA_BLUE") as mock_theme,
-            patch.object(manager, "check_first_run"),
-        ):
+        with patch.object(manager, "check_first_run"):
             manager.on_mount()
 
-            mock_app.register_theme.assert_called_once_with(mock_theme)
+            assert mock_app.theme == "tokyo-night"
 
     def test_sets_theme(self, mock_app: Mock) -> None:
-        """Test that on_mount sets the app theme."""
+        """Test that on_mount sets the app theme from tui_config."""
         from voicepad.tui.managers.lifecycle_manager import LifecycleManager
 
+        mock_app.tui_config = Mock()
+        mock_app.tui_config.theme = "dracula"
         manager = LifecycleManager(mock_app)
 
-        with (
-            patch("voicepad.tui.managers.lifecycle_manager._THEME_NAME", "test-theme"),
-            patch.object(manager, "check_first_run"),
-        ):
+        with patch.object(manager, "check_first_run"):
             manager.on_mount()
 
-            assert mock_app.theme == "test-theme"
+            assert mock_app.theme == "dracula"
 
     def test_loads_history_from_disk(self, mock_app: Mock) -> None:
         """Test that on_mount loads history from disk."""

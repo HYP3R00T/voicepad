@@ -28,6 +28,7 @@ from voicepad_core import (
 from voicepad_core.config import Config
 
 from voicepad.tui.components import VoiceButton
+from voicepad.tui.config import TUIConfig, load_tui_config, save_tui_config
 from voicepad.tui.managers import (
     LayoutBuilder,
     LifecycleManager,
@@ -85,6 +86,7 @@ class VoicePadApp(App[None]):
     def __init__(self, config: Config) -> None:
         super().__init__()
         self.config = config
+        self.tui_config: TUIConfig = load_tui_config()
         self._session: RecordingSession | None = None
         self._streamer: StreamingTranscriber | None = None
         self._stream_chunks: list[ChunkResult] = []
@@ -132,6 +134,13 @@ class VoicePadApp(App[None]):
     def on_unmount(self) -> None:
         """Clean up resources when the app exits."""
         self._lifecycle_manager.on_unmount()
+
+    def watch_theme(self, theme: str) -> None:
+        """Auto-save theme to TUI config whenever it changes (palette or settings)."""
+        if self.tui_config.theme != theme:
+            new_tui = TUIConfig(theme=theme)
+            object.__setattr__(self, "tui_config", new_tui)
+            save_tui_config(new_tui)
 
     # ------------------------------------------------------------------
     # Global hotkey listener
