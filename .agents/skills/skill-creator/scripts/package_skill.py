@@ -15,7 +15,7 @@ import sys
 import zipfile
 from pathlib import Path
 
-from scripts.quick_validate import validate_skill
+from scripts.quick_validate import validate_skill  # ty:ignore[unresolved-import]
 
 # Patterns to exclude when packaging skills.
 EXCLUDE_DIRS = {"__pycache__", "node_modules"}

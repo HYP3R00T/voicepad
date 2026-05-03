@@ -285,25 +285,35 @@ def ensure_model_downloaded(
         hub_dir.mkdir(parents=True, exist_ok=True)
         cache_dir = str(hub_dir)
 
-    # Build a tqdm subclass that forwards byte counts to the callback.
-    # Must subclass real tqdm so huggingface_hub's get_lock() / set_lock()
-    # class-level calls work correctly.
     tqdm_class = None
     if on_progress is not None:
         _cb = on_progress
         from tqdm.auto import tqdm as _tqdm
 
+        # snapshot_download creates one tqdm instance per file.
+        # model.bin is the only large file (~99% of the download).
+        # We identify it by its size (> 1 MB) and track only its bytes.
+        # The total comes from the tqdm instance itself (set from the HTTP
+        # Content-Length header by huggingface_hub) — no extra API call needed.
+        _downloaded = [0]
+        _total = [0]
+
         class _ProgressTqdm(_tqdm):  # ty:ignore[unsupported-base]
             def __init__(self, *args: object, **kwargs: object) -> None:
-                kwargs.setdefault("disable", True)  # suppress console output
+                kwargs.setdefault("disable", True)
                 super().__init__(*args, **kwargs)
-                self._bytes_downloaded = 0
+                # Only track this instance if it looks like model.bin (> 1 MB).
+                # Small JSON/config files are ignored so they don't pollute the
+                # progress or cause a premature 100%.
+                self._track = bool(self.total and int(self.total) > 1_000_000)
+                if self._track and _total[0] == 0 and self.total:
+                    _total[0] = int(self.total)
 
             def update(self, n: int = 1) -> bool | None:
                 result = super().update(n)
-                self._bytes_downloaded += n
-                total = int(self.total or 0)
-                _cb(self._bytes_downloaded, total)
+                if self._track and n and n > 0:
+                    _downloaded[0] += n
+                    _cb(_downloaded[0], _total[0])
                 return result
 
         tqdm_class = _ProgressTqdm
@@ -421,22 +431,35 @@ def transcribe_buffer(audio: np.ndarray, config: Config) -> TranscriptionResult:
 
     model, device, compute, fallback = get_or_load_model(config)
 
-    # Distil models do not benefit from previous-text conditioning.
-    # For all other models, we disable it here as well because VAD already
-    # provides chunk boundaries and re-conditioning tends to amplify repeats.
+    # Distil models do not benefit from previous-text conditioning or prompts.
+    # For non-distil models, we enable conditioning for better punctuation BUT
+    # use aggressive VAD chunking (shorter max_speech_duration) to prevent
+    # hallucination buildup across long audio.
     is_distil = config.transcription_model in _DISTIL_MODELS
-    condition_on_prev = False
+    condition_on_prev = not is_distil
     prompt = None if is_distil else INITIAL_PROMPT
 
     try:
         # Standard mode with VAD — splits at natural speech pauses.
-        # Avoids hallucinated ellipses that BatchedInferencePipeline produces
+        # Avoids hallucinated ellucinations that BatchedInferencePipeline produces
         # at fixed 30s chunk boundaries. On turbo/RTX 3050, also faster than batched.
+        # VAD parameters tuned to prevent hallucinations while maintaining punctuation:
+        # - max_speech_duration_s: 30s chunks prevent error buildup with conditioning
+        # - min_silence_duration_ms: 500ms for more frequent natural breaks
+        # - speech_pad_ms: 400ms to avoid cutting words at boundaries
+        vad_params = {
+            "threshold": 0.5,
+            "min_speech_duration_ms": 250,
+            "max_speech_duration_s": 30.0,  # Force split at 30s to prevent hallucinations
+            "min_silence_duration_ms": 500,  # 0.5s silence for more natural breaks
+            "speech_pad_ms": 400,
+        }
         segments_iter, info = model.transcribe(
             audio,
             language=LANGUAGE,
             beam_size=BEAM_SIZE,
             vad_filter=True,
+            vad_parameters=vad_params,
             hallucination_silence_threshold=HALLUCINATION_SILENCE_THRESHOLD,
             no_speech_threshold=NO_SPEECH_THRESHOLD,
             initial_prompt=prompt,
@@ -459,6 +482,7 @@ def transcribe_buffer(audio: np.ndarray, config: Config) -> TranscriptionResult:
                 language=LANGUAGE,
                 beam_size=BEAM_SIZE,
                 vad_filter=True,
+                vad_parameters=vad_params,
                 hallucination_silence_threshold=HALLUCINATION_SILENCE_THRESHOLD,
                 no_speech_threshold=NO_SPEECH_THRESHOLD,
                 initial_prompt=prompt,

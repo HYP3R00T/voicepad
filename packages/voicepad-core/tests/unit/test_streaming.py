@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
+from voicepad_core import AudioRecorder
 from voicepad_core.config import Config
 from voicepad_core.streaming import (
     MIN_CHUNK_S,
@@ -37,7 +38,7 @@ def _silence(seconds: float) -> np.ndarray:
     return np.zeros(int(SAMPLE_RATE * seconds), dtype=np.float32)
 
 
-class _FakeRecorder:
+class _FakeRecorder(AudioRecorder):
     """Minimal recorder stub that exposes _lock and _frames."""
 
     def __init__(self, audio: np.ndarray | None = None) -> None:
@@ -104,6 +105,7 @@ class TestStreamingTranscriberLifecycle:
         )
         st.start()
         st.stop()
+        assert st._thread is not None
         assert not st._thread.is_alive()
 
     def test_stop_sets_stop_event(self, tmp_path: Path) -> None:
@@ -266,6 +268,77 @@ class TestDispatchChunk:
         assert len(chunks) == 1
         assert "real" in chunks[0].text
         assert "overlap" not in chunks[0].text
+
+    def test_segments_spanning_overlap_boundary_are_kept(self, tmp_path: Path) -> None:
+        """Segments that start in overlap but extend beyond it are kept (prevents word-splitting)."""
+        config = Config(recordings_path=tmp_path, markdown_path=tmp_path)
+        chunks: list[ChunkResult] = []
+        st = StreamingTranscriber(
+            recorder=_FakeRecorder(),
+            config=config,
+            on_chunk=chunks.append,
+            on_error=lambda _: None,
+        )
+        # Simulate: consumed 30s, overlap 0.5s → chunk starts at 29.5s
+        st._consumed_samples = int(30 * SAMPLE_RATE)
+        audio = _speech(31)  # 31s total
+
+        # Segment at 0.3s–0.8s in chunk audio = 29.8s–30.3s absolute
+        # Starts in overlap (29.8s < 30.0s) but extends beyond (30.3s > 30.0s)
+        # This should be KEPT to avoid word-splitting like "class. classical physics"
+        seg_spanning = MagicMock()
+        seg_spanning.start, seg_spanning.end, seg_spanning.text = 0.3, 0.8, "classical physics"
+        mock_model = MagicMock()
+        mock_model.transcribe.return_value = (
+            [seg_spanning],
+            MagicMock(language="en", language_probability=0.99),
+        )
+        with patch("voicepad_core.transcription.get_or_load_model", return_value=(mock_model, "cuda", "int8", False)):
+            st._dispatch_chunk(audio, is_final=True)
+
+        # The spanning segment should be kept
+        assert len(chunks) == 1
+        assert "classical physics" in chunks[0].text
+
+    def test_overlap_consistency_warning_on_mismatch(self, tmp_path: Path) -> None:
+        """When overlap text doesn't match between chunks, a warning is logged."""
+        config = Config(recordings_path=tmp_path, markdown_path=tmp_path)
+        st = StreamingTranscriber(
+            recorder=_FakeRecorder(),
+            config=config,
+            on_chunk=lambda _: None,
+            on_error=lambda _: None,
+        )
+
+        # First chunk: set up previous overlap text
+        st._chunk_index = 1
+        st._prev_overlap_text = "this is the end"
+        st._consumed_samples = int(30 * SAMPLE_RATE)
+
+        audio = _speech(31)
+
+        # Create segments where overlap text is completely different
+        seg_in_overlap = MagicMock()
+        seg_in_overlap.start, seg_in_overlap.end, seg_in_overlap.text = 0.1, 0.4, "different words"
+        seg_after = MagicMock()
+        seg_after.start, seg_after.end, seg_after.text = 0.6, 1.5, "new content"
+
+        mock_model = MagicMock()
+        mock_model.transcribe.return_value = (
+            [seg_in_overlap, seg_after],
+            MagicMock(language="en", language_probability=0.99),
+        )
+
+        with (
+            patch("voicepad_core.transcription.get_or_load_model", return_value=(mock_model, "cuda", "int8", False)),
+            patch("voicepad_core.streaming.logger") as mock_logger,
+        ):
+            st._dispatch_chunk(audio, is_final=False)
+
+        # Should have logged a warning about mismatch
+        mock_logger.warning.assert_called_once()
+        warning_msg = mock_logger.warning.call_args[0][0]
+        assert "Overlap mismatch" in warning_msg
 
     def test_prev_context_used_as_prompt_on_second_chunk(self, tmp_path: Path) -> None:
         """After the first chunk sets _prev_context, it appears in the next prompt."""

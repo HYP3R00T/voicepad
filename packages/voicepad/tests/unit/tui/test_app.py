@@ -1,515 +1,588 @@
-"""Tests for the VoicePad Textual application."""
+"""Tests for VoicePad TUI application."""
 
 from __future__ import annotations
 
-import threading
-from dataclasses import dataclass
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
-
-import numpy as np
-from textual.widgets import Label, Link
-from voicepad.tui.app import InfoModal, VoicePadApp, _format_markdown, _format_markdown_streaming
-from voicepad.tui.workers import ModelWarmResult
-from voicepad_core import ChunkResult, Config, Segment
-
-# ---------------------------------------------------------------------------
-# Stubs
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class _FakeRecorder:
-    """Minimal recorder stub compatible with StreamingTranscriber."""
-
-    _lock: threading.Lock = None  # type: ignore[assignment]
-    _frames: list = None  # type: ignore[assignment]
-
-    def __post_init__(self) -> None:
-        self._lock = threading.Lock()
-        self._frames = []
-
-
-@dataclass
-class _FakeRecordingSession:
-    """Recording session stub that exposes _recorder for StreamingTranscriber."""
-
-    config: Config
-
-    def __post_init__(self) -> None:
-        self._recorder = _FakeRecorder()
-
-    def start(self) -> None:
-        pass
-
-    def stop(self) -> np.ndarray:
-        return np.zeros(16000, dtype=np.float32)
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _ready_result(text: str = "hello world") -> SimpleNamespace:
-    return SimpleNamespace(
-        text=text,
-        device="cpu",
-        compute_type="int8",
-        duration_s=1.0,
-        latency_ms=50.0,
-        language="en",
-        language_probability=0.99,
-        segments=[],
-        fallback_to_cpu=False,
-    )
-
-
-# ---------------------------------------------------------------------------
-# App mount
-# ---------------------------------------------------------------------------
-
-
-class TestVoicePadAppMount:
-    async def test_transcription_placeholder_present(self, monkeypatch, tmp_path: Path) -> None:
-        """On mount, the transcription panel shows its placeholder text."""
-        config = Config(recordings_path=tmp_path / "r", markdown_path=tmp_path / "m")
-        monkeypatch.setattr(VoicePadApp, "_warm_model_worker", lambda self: None, raising=False)
-        app = VoicePadApp(config)
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            assert "speak and press space" in str(app.query_one("#tx-text", Label).content)
-
-    async def test_status_shows_initialising(self, monkeypatch, tmp_path: Path) -> None:
-        """On mount, the status label shows 'initialising'."""
-        config = Config(recordings_path=tmp_path / "r", markdown_path=tmp_path / "m")
-        monkeypatch.setattr(VoicePadApp, "_warm_model_worker", lambda self: None, raising=False)
-        app = VoicePadApp(config)
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            assert "initialising" in str(app.query_one("#status", Label).content)
-
-    async def test_tabs_present(self, monkeypatch, tmp_path: Path) -> None:
-        """On mount, all four tabs are present."""
-        from textual.widgets import TabbedContent
-
-        config = Config(recordings_path=tmp_path / "r", markdown_path=tmp_path / "m")
-        monkeypatch.setattr(VoicePadApp, "_warm_model_worker", lambda self: None, raising=False)
-        app = VoicePadApp(config)
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            tabs = app.query_one("#tabs", TabbedContent)
-            assert tabs is not None
-
-
-# ---------------------------------------------------------------------------
-# Model ready
-# ---------------------------------------------------------------------------
-
-
-class TestModelReady:
-    async def test_status_shows_ready(self, monkeypatch, tmp_path: Path) -> None:
-        config = Config(recordings_path=tmp_path / "r", markdown_path=tmp_path / "m")
-        monkeypatch.setattr(VoicePadApp, "_warm_model_worker", lambda self: None, raising=False)
-        app = VoicePadApp(config)
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            app._on_model_ready(ModelWarmResult(device="cuda", compute_type="int8", fallback=False))
-            await pilot.pause()
-            assert "ready" in str(app.query_one("#status", Label).content)
-
-    async def test_model_ready_flag_set(self, monkeypatch, tmp_path: Path) -> None:
-        config = Config(recordings_path=tmp_path / "r", markdown_path=tmp_path / "m")
-        monkeypatch.setattr(VoicePadApp, "_warm_model_worker", lambda self: None, raising=False)
-        app = VoicePadApp(config)
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            app._on_model_ready(ModelWarmResult(device="cuda", compute_type="int8", fallback=False))
-            assert app._model_ready is True
-
-    async def test_error_result_shows_error_status(self, monkeypatch, tmp_path: Path) -> None:
-        config = Config(recordings_path=tmp_path / "r", markdown_path=tmp_path / "m")
-        monkeypatch.setattr(VoicePadApp, "_warm_model_worker", lambda self: None, raising=False)
-        app = VoicePadApp(config)
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            app._on_model_ready(ModelWarmResult(device="cpu", compute_type="int8", fallback=True, error="load failed"))
-            await pilot.pause()
-            status = str(app.query_one("#status", Label).content)
-            assert "error" in status or "load failed" in status
-
-    async def test_fallback_reflected_in_header(self, monkeypatch, tmp_path: Path) -> None:
-        config = Config(recordings_path=tmp_path / "r", markdown_path=tmp_path / "m")
-        monkeypatch.setattr(VoicePadApp, "_warm_model_worker", lambda self: None, raising=False)
-        app = VoicePadApp(config)
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            app._on_model_ready(ModelWarmResult(device="cpu", compute_type="int8", fallback=True))
-            await pilot.pause()
-            header = str(app.query_one("#header-model", Label).content)
-            assert "cpu" in header.lower() or "fallback" in header.lower()
-
-
-# ---------------------------------------------------------------------------
-# Recording toggle
-# ---------------------------------------------------------------------------
-
-
-class TestRecordingToggle:
-    async def test_space_does_nothing_when_model_not_ready(self, monkeypatch, tmp_path: Path) -> None:
-        config = Config(recordings_path=tmp_path / "r", markdown_path=tmp_path / "m")
-        monkeypatch.setattr(VoicePadApp, "_warm_model_worker", lambda self: None, raising=False)
-        app = VoicePadApp(config)
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            await pilot.press("space")
-            await pilot.pause()
-            assert app._recording is False
-
-    async def test_space_starts_recording_when_ready(self, monkeypatch, tmp_path: Path) -> None:
-
-        config = Config(recordings_path=tmp_path / "r", markdown_path=tmp_path / "m")
-        monkeypatch.setattr(VoicePadApp, "_warm_model_worker", lambda self: None, raising=False)
-        monkeypatch.setattr("voicepad.tui.app.RecordingSession", _FakeRecordingSession)
-        # Stub out the streamer so it doesn't actually run
-        _stub = MagicMock()
-        _stub.start = lambda: None
-        _stub.stop = lambda: None
-        monkeypatch.setattr("voicepad.tui.app.StreamingTranscriber", lambda **kw: _stub)
-        app = VoicePadApp(config)
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            app._on_model_ready(ModelWarmResult(device="cpu", compute_type="int8", fallback=False))
-            await pilot.press("space")
-            await pilot.pause()
-            assert app._recording is True
-
-    async def test_space_does_nothing_on_non_record_tab(self, monkeypatch, tmp_path: Path) -> None:
-        from textual.widgets import TabbedContent
-
-        config = Config(recordings_path=tmp_path / "r", markdown_path=tmp_path / "m")
-        monkeypatch.setattr(VoicePadApp, "_warm_model_worker", lambda self: None, raising=False)
-        app = VoicePadApp(config)
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            app._on_model_ready(ModelWarmResult(device="cpu", compute_type="int8", fallback=False))
-            # Switch to history tab
-            app.query_one("#tabs", TabbedContent).active = "tab-history"
-            await pilot.press("space")
-            await pilot.pause()
-            assert app._recording is False
-
-
-# ---------------------------------------------------------------------------
-# Streaming chunk callback
-# ---------------------------------------------------------------------------
-
-
-class TestOnStreamChunk:
-    async def test_chunk_text_appears_in_transcription_panel(self, monkeypatch, tmp_path: Path) -> None:
-        config = Config(recordings_path=tmp_path / "r", markdown_path=tmp_path / "m")
-        monkeypatch.setattr(VoicePadApp, "_warm_model_worker", lambda self: None, raising=False)
-        app = VoicePadApp(config)
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            chunk = ChunkResult(index=1, text="hello streaming", is_final=False)
-            app._on_stream_chunk(chunk)
-            await pilot.pause()
-            content = str(app.query_one("#tx-text", Label).content)
-            assert "hello streaming" in content
-
-    async def test_final_chunk_sets_ready_status(self, monkeypatch, tmp_path: Path) -> None:
-        config = Config(recordings_path=tmp_path / "r", markdown_path=tmp_path / "m")
-        monkeypatch.setattr(VoicePadApp, "_warm_model_worker", lambda self: None, raising=False)
-        app = VoicePadApp(config)
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            app._on_model_ready(ModelWarmResult(device="cpu", compute_type="int8", fallback=False))
-            app._transcribing = True
-            chunk = ChunkResult(index=1, text="done", is_final=True)
-            app._on_stream_chunk(chunk)
-            await pilot.pause()
-            assert app._transcribing is False
-            assert "ready" in str(app.query_one("#status", Label).content)
-
-    async def test_multiple_chunks_accumulate(self, monkeypatch, tmp_path: Path) -> None:
-        config = Config(recordings_path=tmp_path / "r", markdown_path=tmp_path / "m")
-        monkeypatch.setattr(VoicePadApp, "_warm_model_worker", lambda self: None, raising=False)
-        app = VoicePadApp(config)
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            app._on_stream_chunk(ChunkResult(index=1, text="first", is_final=False))
-            app._on_stream_chunk(ChunkResult(index=2, text="second", is_final=False))
-            await pilot.pause()
-            content = str(app.query_one("#tx-text", Label).content)
-            assert "first" in content
-            assert "second" in content
-
-    async def test_empty_chunk_does_not_add_to_list(self, monkeypatch, tmp_path: Path) -> None:
-        config = Config(recordings_path=tmp_path / "r", markdown_path=tmp_path / "m")
-        monkeypatch.setattr(VoicePadApp, "_warm_model_worker", lambda self: None, raising=False)
-        app = VoicePadApp(config)
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            app._on_stream_chunk(ChunkResult(index=1, text="", is_final=False))
-            assert len(app._stream_chunks) == 0
-
-
-# ---------------------------------------------------------------------------
-# History loading
-# ---------------------------------------------------------------------------
-
-
-class TestHistoryLoading:
-    async def test_existing_markdown_files_populate_history(self, monkeypatch, tmp_path: Path) -> None:
-        """Markdown files on disk are loaded into the history list on mount."""
-        md_dir = tmp_path / "markdown"
-        md_dir.mkdir()
-        rec_dir = tmp_path / "recordings"
-        rec_dir.mkdir()
-
-        # Write a minimal markdown file
-        md = md_dir / "recording_20260101_120000.md"
-        md.write_text(
-            "# Transcription\n\n**File:** `recording_20260101_120000.wav`\n"
-            "**Duration:** 5.0s\n**Latency:** 500ms\n**Model:** cuda / int8\n\n"
-            "---\n\n## Text\n\nhello from history\n",
-            encoding="utf-8",
-        )
-
-        config = Config(recordings_path=rec_dir, markdown_path=md_dir)
-        monkeypatch.setattr(VoicePadApp, "_warm_model_worker", lambda self: None, raising=False)
-        app = VoicePadApp(config)
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            assert len(app._entries) == 1
-            assert "hello from history" in app._entries[0].text
-
-
-# ---------------------------------------------------------------------------
-# Markdown formatters
-# ---------------------------------------------------------------------------
-
-
-class TestFormatMarkdown:
-    def test_includes_filename(self, tmp_path: Path) -> None:
-        wav = tmp_path / "clip.wav"
-        result = _ready_result()
-        assert "clip.wav" in _format_markdown(wav, result)
-
-    def test_includes_text(self, tmp_path: Path) -> None:
-        wav = tmp_path / "clip.wav"
-        assert "hello world" in _format_markdown(wav, _ready_result("hello world"))
-
-    def test_includes_segments_when_present(self, tmp_path: Path) -> None:
-        wav = tmp_path / "clip.wav"
-        result = _ready_result()
-        result.segments = [SimpleNamespace(start=0.0, end=1.0, text="hello")]
-        assert "## Segments" in _format_markdown(wav, result)
-
-    def test_omits_segments_when_empty(self, tmp_path: Path) -> None:
-        wav = tmp_path / "clip.wav"
-        assert "## Segments" not in _format_markdown(wav, _ready_result())
-
-    def test_empty_text_uses_placeholder(self, tmp_path: Path) -> None:
-        wav = tmp_path / "clip.wav"
-        result = _ready_result(text="")
-        assert "no speech detected" in _format_markdown(wav, result)
-
-
-class TestFormatMarkdownStreaming:
-    def test_includes_mode_streaming(self, tmp_path: Path) -> None:
-        wav = tmp_path / "clip.wav"
-        md = _format_markdown_streaming(wav, "hello", 1.0, [])
-        assert "streaming" in md
-
-    def test_includes_text(self, tmp_path: Path) -> None:
-        wav = tmp_path / "clip.wav"
-        md = _format_markdown_streaming(wav, "hello world", 1.0, [])
-        assert "hello world" in md
-
-    def test_includes_segments_from_chunks(self, tmp_path: Path) -> None:
-        wav = tmp_path / "clip.wav"
-        chunks = [
-            ChunkResult(
-                index=1,
-                text="hello",
-                segments=[Segment(start=0.0, end=1.0, text="hello")],
-                start_s=0.0,
-                end_s=1.0,
-                latency_ms=100.0,
-                device="cuda",
-                language="en",
-                language_probability=0.99,
-                is_final=True,
-            )
-        ]
-        md = _format_markdown_streaming(wav, "hello", 1.0, chunks)
-        assert "## Segments" in md
-        assert "0.0s" in md
-
-    def test_uses_device_from_last_chunk(self, tmp_path: Path) -> None:
-        wav = tmp_path / "clip.wav"
-        chunks = [ChunkResult(index=1, text="hi", device="cpu", is_final=True)]
-        md = _format_markdown_streaming(wav, "hi", 1.0, chunks)
-        assert "cpu" in md
-
-    def test_empty_chunks_list(self, tmp_path: Path) -> None:
-        wav = tmp_path / "clip.wav"
-        md = _format_markdown_streaming(wav, "hi", 1.0, [])
-        assert "hi" in md
-        assert "## Segments" not in md
-
-    def test_total_latency_is_sum_of_chunks(self, tmp_path: Path) -> None:
-        wav = tmp_path / "clip.wav"
-        chunks = [
-            ChunkResult(index=1, text="a", latency_ms=500.0, is_final=False),
-            ChunkResult(index=2, text="b", latency_ms=700.0, is_final=True),
-        ]
-        md = _format_markdown_streaming(wav, "a b", 2.0, chunks)
-        assert "1200ms" in md
-
-
-# ---------------------------------------------------------------------------
-# Import needed for SimpleNamespace usage in tests
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# InfoModal tests
-# ---------------------------------------------------------------------------
-
-
-class TestInfoModal:
-    """Tests for the InfoModal screen."""
-
-    async def test_info_modal_has_sponsor_link(self, monkeypatch, tmp_path: Path) -> None:
-        """InfoModal should have a GitHub Sponsors link."""
-        config = Config(recordings_path=tmp_path / "r", markdown_path=tmp_path / "m")
-        monkeypatch.setattr(VoicePadApp, "_warm_model_worker", lambda self: None, raising=False)
-        app = VoicePadApp(config)
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            # Open the info modal
-            app.push_screen(InfoModal())
-            await pilot.pause()
-            # Check for sponsor link
-            sponsor_link = app.screen.query_one("#sponsor-link", Link)
-            assert sponsor_link is not None
-            assert sponsor_link.url == "https://github.com/sponsors/HYP3R00T"
-
-    async def test_info_modal_has_github_link(self, monkeypatch, tmp_path: Path) -> None:
-        """InfoModal should have a Star on GitHub link."""
-        config = Config(recordings_path=tmp_path / "r", markdown_path=tmp_path / "m")
-        monkeypatch.setattr(VoicePadApp, "_warm_model_worker", lambda self: None, raising=False)
-        app = VoicePadApp(config)
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            app.push_screen(InfoModal())
-            await pilot.pause()
-            github_link = app.screen.query_one("#github-link", Link)
-            assert github_link is not None
-            assert github_link.url == "https://github.com/HYP3R00T/voicepad"
-
-    async def test_info_modal_links_are_link_widgets(self, monkeypatch, tmp_path: Path) -> None:
-        """Links in the InfoModal should be Link widgets, not Label markup."""
-        config = Config(recordings_path=tmp_path / "r", markdown_path=tmp_path / "m")
-        monkeypatch.setattr(VoicePadApp, "_warm_model_worker", lambda self: None, raising=False)
-        app = VoicePadApp(config)
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            app.push_screen(InfoModal())
-            await pilot.pause()
-            # Verify that Link widgets exist (not Label with markup)
-            sponsor_link = app.screen.query_one("#sponsor-link", Link)
-            github_link = app.screen.query_one("#github-link", Link)
-            assert isinstance(sponsor_link, Link)
-            assert isinstance(github_link, Link)
-
-
-# ---------------------------------------------------------------------------
-# Link click tests
-# ---------------------------------------------------------------------------
-
-
-class TestLinkClicks:
-    """Tests for link click functionality in the app."""
-
-    async def test_markdown_link_clicked_opens_browser(self, monkeypatch, tmp_path: Path) -> None:
-        """Clicking a link in the markdown viewer should open the browser."""
-        from textual.widgets import Markdown
-
-        config = Config(recordings_path=tmp_path / "r", markdown_path=tmp_path / "m")
-        monkeypatch.setattr(VoicePadApp, "_warm_model_worker", lambda self: None, raising=False)
-
-        mock_webbrowser = MagicMock()
-        with patch("webbrowser.open", mock_webbrowser):
-            app = VoicePadApp(config)
-            async with app.run_test() as pilot:
-                await pilot.pause()
-                # Simulate a link click event
-                event = Markdown.LinkClicked(
-                    markdown=MagicMock(),
-                    href="https://example.com",
-                )
-                app.on_markdown_link_clicked(event)
-                await pilot.pause()
-                mock_webbrowser.assert_called_once_with("https://example.com")
-
-    async def test_markdown_link_clicked_handles_errors(self, monkeypatch, tmp_path: Path) -> None:
-        """Link click handler should gracefully handle errors."""
-        from textual.widgets import Markdown
-
-        config = Config(recordings_path=tmp_path / "r", markdown_path=tmp_path / "m")
-        monkeypatch.setattr(VoicePadApp, "_warm_model_worker", lambda self: None, raising=False)
-
-        def raise_error(url: str) -> None:
-            raise OSError("Browser not found")
-
-        with patch("webbrowser.open", side_effect=raise_error):
-            app = VoicePadApp(config)
-            async with app.run_test() as pilot:
-                await pilot.pause()
-                event = Markdown.LinkClicked(
-                    markdown=MagicMock(),
-                    href="https://example.com",
-                )
-                # Should not raise an exception
-                app.on_markdown_link_clicked(event)
-                await pilot.pause()
-
-    async def test_info_modal_links_are_clickable(self, monkeypatch, tmp_path: Path) -> None:
-        """Links in the InfoModal should be Link widgets, not Label markup."""
-        config = Config(recordings_path=tmp_path / "r", markdown_path=tmp_path / "m")
-        monkeypatch.setattr(VoicePadApp, "_warm_model_worker", lambda self: None, raising=False)
-        app = VoicePadApp(config)
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            app.push_screen(InfoModal())
-            await pilot.pause()
-            # Verify that Link widgets exist (not Label with markup)
-            sponsor_link = app.screen.query_one("#sponsor-link", Link)
-            github_link = app.screen.query_one("#github-link", Link)
-            assert isinstance(sponsor_link, Link)
-            assert isinstance(github_link, Link)
-
-    async def test_app_has_info_action(self, monkeypatch, tmp_path: Path) -> None:
-        """App should have an action to show the info modal."""
-        config = Config(recordings_path=tmp_path / "r", markdown_path=tmp_path / "m")
-        monkeypatch.setattr(VoicePadApp, "_warm_model_worker", lambda self: None, raising=False)
-        app = VoicePadApp(config)
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            # Verify the action exists
-            assert hasattr(app, "action_show_info")
-            # Press 'i' to trigger the info modal
-            await pilot.press("i")
-            await pilot.pause()
-            # Check if InfoModal is in the screen stack
-            assert any(isinstance(screen, InfoModal) for screen in app.screen_stack)
-
-
-# ---------------------------------------------------------------------------
-# Import needed for SimpleNamespace usage in tests
-# ---------------------------------------------------------------------------
+from unittest.mock import Mock, patch
+
+import pytest
+from voicepad_core.config import Config
+
+
+@pytest.fixture
+def mock_config() -> Mock:
+    """Create a mock Config instance."""
+    config = Mock(spec=Config)
+    config.recordings_path = Path("/tmp/recordings")
+    config.markdown_path = Path("/tmp/markdown")
+    config.global_hotkey = "ctrl+shift+r"
+    config.transcription_model = "base"
+    config.transcription_device = "cpu"
+    config.transcription_compute_type = "int8"
+    return config
+
+
+class TestVoicePadAppInit:
+    """Test VoicePadApp initialization."""
+
+    @patch("voicepad.tui.handlers.settings_handler.SettingsHandler")
+    @patch("voicepad.tui.handlers.recording_handler.RecordingHandler")
+    @patch("voicepad.tui.handlers.history_handler.HistoryHandler")
+    @patch("voicepad.tui.handlers.hotkey_handler.HotkeyHandler")
+    def test_init_stores_config(
+        self,
+        mock_hotkey_handler: Mock,
+        mock_history_handler: Mock,
+        mock_recording_handler: Mock,
+        mock_settings_handler: Mock,
+        mock_config: Mock,
+    ) -> None:
+        """Test that __init__ stores the config."""
+        from voicepad.tui.app import VoicePadApp
+
+        app = VoicePadApp(mock_config)
+        assert app.config is mock_config
+
+    @patch("voicepad.tui.handlers.settings_handler.SettingsHandler")
+    @patch("voicepad.tui.handlers.recording_handler.RecordingHandler")
+    @patch("voicepad.tui.handlers.history_handler.HistoryHandler")
+    @patch("voicepad.tui.handlers.hotkey_handler.HotkeyHandler")
+    def test_init_creates_managers(
+        self,
+        mock_hotkey_handler: Mock,
+        mock_history_handler: Mock,
+        mock_recording_handler: Mock,
+        mock_settings_handler: Mock,
+        mock_config: Mock,
+    ) -> None:
+        """Test that __init__ creates all managers."""
+        from voicepad.tui.app import VoicePadApp
+
+        app = VoicePadApp(mock_config)
+        assert app._layout_builder is not None
+        assert app._lifecycle_manager is not None
+        assert app._model_manager is not None
+        assert app._timer_manager is not None
+        assert app._tab_manager is not None
+
+    @patch("voicepad.tui.handlers.settings_handler.SettingsHandler")
+    @patch("voicepad.tui.handlers.recording_handler.RecordingHandler")
+    @patch("voicepad.tui.handlers.history_handler.HistoryHandler")
+    @patch("voicepad.tui.handlers.hotkey_handler.HotkeyHandler")
+    def test_init_creates_handlers(
+        self,
+        mock_hotkey_handler_class: Mock,
+        mock_history_handler_class: Mock,
+        mock_recording_handler_class: Mock,
+        mock_settings_handler_class: Mock,
+        mock_config: Mock,
+    ) -> None:
+        """Test that __init__ creates all handlers."""
+        from voicepad.tui.app import VoicePadApp
+
+        app = VoicePadApp(mock_config)
+
+        mock_settings_handler_class.assert_called_once_with(app)
+        mock_recording_handler_class.assert_called_once_with(app)
+        mock_history_handler_class.assert_called_once_with(app)
+        mock_hotkey_handler_class.assert_called_once_with(app)
+
+    @patch("voicepad.tui.handlers.settings_handler.SettingsHandler")
+    @patch("voicepad.tui.handlers.recording_handler.RecordingHandler")
+    @patch("voicepad.tui.handlers.history_handler.HistoryHandler")
+    @patch("voicepad.tui.handlers.hotkey_handler.HotkeyHandler")
+    def test_init_sets_reactive_defaults(
+        self,
+        mock_hotkey_handler: Mock,
+        mock_history_handler: Mock,
+        mock_recording_handler: Mock,
+        mock_settings_handler: Mock,
+        mock_config: Mock,
+    ) -> None:
+        """Test that __init__ sets reactive attribute defaults."""
+        from voicepad.tui.app import VoicePadApp
+
+        app = VoicePadApp(mock_config)
+        assert app._model_ready is False
+        assert app._recording is False
+        assert app._transcribing is False
+
+
+class TestLayoutMethods:
+    """Test layout-related methods."""
+
+    @patch("voicepad.tui.handlers.settings_handler.SettingsHandler")
+    @patch("voicepad.tui.handlers.recording_handler.RecordingHandler")
+    @patch("voicepad.tui.handlers.history_handler.HistoryHandler")
+    @patch("voicepad.tui.handlers.hotkey_handler.HotkeyHandler")
+    def test_compose_delegates_to_layout_builder(
+        self,
+        mock_hotkey_handler: Mock,
+        mock_history_handler: Mock,
+        mock_recording_handler: Mock,
+        mock_settings_handler: Mock,
+        mock_config: Mock,
+    ) -> None:
+        """Test that compose delegates to layout builder."""
+        from unittest.mock import patch
+
+        from voicepad.tui.app import VoicePadApp
+
+        app = VoicePadApp(mock_config)
+
+        with patch.object(app._layout_builder, "compose", return_value=iter([])) as mock_compose:
+            list(app.compose())
+            mock_compose.assert_called_once()
+
+
+class TestHotkeyDelegation:
+    """Test hotkey-related delegation methods."""
+
+    @patch("voicepad.tui.handlers.settings_handler.SettingsHandler")
+    @patch("voicepad.tui.handlers.recording_handler.RecordingHandler")
+    @patch("voicepad.tui.handlers.history_handler.HistoryHandler")
+    @patch("voicepad.tui.handlers.hotkey_handler.HotkeyHandler")
+    def test_start_hotkey_listener_delegates(
+        self,
+        mock_hotkey_handler_class: Mock,
+        mock_history_handler: Mock,
+        mock_recording_handler: Mock,
+        mock_settings_handler: Mock,
+        mock_config: Mock,
+    ) -> None:
+        """Test that _start_hotkey_listener delegates to handler."""
+        from voicepad.tui.app import VoicePadApp
+
+        mock_handler = Mock()
+        mock_hotkey_handler_class.return_value = mock_handler
+        app = VoicePadApp(mock_config)
+
+        app._start_hotkey_listener()
+
+        mock_handler.start_hotkey_listener.assert_called_once()
+
+    @patch("voicepad.tui.handlers.settings_handler.SettingsHandler")
+    @patch("voicepad.tui.handlers.recording_handler.RecordingHandler")
+    @patch("voicepad.tui.handlers.history_handler.HistoryHandler")
+    @patch("voicepad.tui.handlers.hotkey_handler.HotkeyHandler")
+    def test_hotkey_on_start_delegates(
+        self,
+        mock_hotkey_handler_class: Mock,
+        mock_history_handler: Mock,
+        mock_recording_handler: Mock,
+        mock_settings_handler: Mock,
+        mock_config: Mock,
+    ) -> None:
+        """Test that _hotkey_on_start delegates to handler."""
+        from voicepad.tui.app import VoicePadApp
+
+        mock_handler = Mock()
+        mock_hotkey_handler_class.return_value = mock_handler
+        app = VoicePadApp(mock_config)
+
+        app._hotkey_on_start()
+
+        mock_handler.hotkey_on_start.assert_called_once()
+
+    @patch("voicepad.tui.handlers.settings_handler.SettingsHandler")
+    @patch("voicepad.tui.handlers.recording_handler.RecordingHandler")
+    @patch("voicepad.tui.handlers.history_handler.HistoryHandler")
+    @patch("voicepad.tui.handlers.hotkey_handler.HotkeyHandler")
+    def test_overlay_set_delegates(
+        self,
+        mock_hotkey_handler_class: Mock,
+        mock_history_handler: Mock,
+        mock_recording_handler: Mock,
+        mock_settings_handler: Mock,
+        mock_config: Mock,
+    ) -> None:
+        """Test that _overlay_set delegates to handler."""
+        from voicepad.tui.app import VoicePadApp
+
+        mock_handler = Mock()
+        mock_hotkey_handler_class.return_value = mock_handler
+        app = VoicePadApp(mock_config)
+
+        app._overlay_set("recording")
+
+        mock_handler.overlay_set.assert_called_once_with("recording")
+
+
+class TestSettingsDelegation:
+    """Test settings-related delegation methods."""
+
+    @patch("voicepad.tui.handlers.settings_handler.SettingsHandler")
+    @patch("voicepad.tui.handlers.recording_handler.RecordingHandler")
+    @patch("voicepad.tui.handlers.history_handler.HistoryHandler")
+    @patch("voicepad.tui.handlers.hotkey_handler.HotkeyHandler")
+    def test_populate_settings_delegates(
+        self,
+        mock_hotkey_handler: Mock,
+        mock_history_handler: Mock,
+        mock_recording_handler: Mock,
+        mock_settings_handler_class: Mock,
+        mock_config: Mock,
+    ) -> None:
+        """Test that _populate_settings delegates to handler."""
+        from voicepad.tui.app import VoicePadApp
+
+        mock_handler = Mock()
+        mock_settings_handler_class.return_value = mock_handler
+        app = VoicePadApp(mock_config)
+
+        app._populate_settings()
+
+        mock_handler.populate_settings.assert_called_once()
+
+    @patch("voicepad.tui.handlers.settings_handler.SettingsHandler")
+    @patch("voicepad.tui.handlers.recording_handler.RecordingHandler")
+    @patch("voicepad.tui.handlers.history_handler.HistoryHandler")
+    @patch("voicepad.tui.handlers.hotkey_handler.HotkeyHandler")
+    def test_get_hotkey_from_picker_delegates(
+        self,
+        mock_hotkey_handler: Mock,
+        mock_history_handler: Mock,
+        mock_recording_handler: Mock,
+        mock_settings_handler_class: Mock,
+        mock_config: Mock,
+    ) -> None:
+        """Test that _get_hotkey_from_picker delegates to handler."""
+        from voicepad.tui.app import VoicePadApp
+
+        mock_handler = Mock()
+        mock_handler.get_hotkey_from_picker.return_value = "ctrl+shift+r"
+        mock_settings_handler_class.return_value = mock_handler
+        app = VoicePadApp(mock_config)
+
+        result = app._get_hotkey_from_picker()
+
+        assert result == "ctrl+shift+r"
+        mock_handler.get_hotkey_from_picker.assert_called_once()
+
+
+class TestRecordingDelegation:
+    """Test recording-related delegation methods."""
+
+    @patch("voicepad.tui.handlers.settings_handler.SettingsHandler")
+    @patch("voicepad.tui.handlers.recording_handler.RecordingHandler")
+    @patch("voicepad.tui.handlers.history_handler.HistoryHandler")
+    @patch("voicepad.tui.handlers.hotkey_handler.HotkeyHandler")
+    def test_action_toggle_recording_delegates(
+        self,
+        mock_hotkey_handler: Mock,
+        mock_history_handler: Mock,
+        mock_recording_handler_class: Mock,
+        mock_settings_handler: Mock,
+        mock_config: Mock,
+    ) -> None:
+        """Test that action_toggle_recording delegates to handler."""
+        from voicepad.tui.app import VoicePadApp
+
+        mock_handler = Mock()
+        mock_recording_handler_class.return_value = mock_handler
+        app = VoicePadApp(mock_config)
+
+        app.action_toggle_recording()
+
+        mock_handler.action_toggle_recording.assert_called_once()
+
+    @patch("voicepad.tui.handlers.settings_handler.SettingsHandler")
+    @patch("voicepad.tui.handlers.recording_handler.RecordingHandler")
+    @patch("voicepad.tui.handlers.history_handler.HistoryHandler")
+    @patch("voicepad.tui.handlers.hotkey_handler.HotkeyHandler")
+    def test_start_recording_delegates(
+        self,
+        mock_hotkey_handler: Mock,
+        mock_history_handler: Mock,
+        mock_recording_handler_class: Mock,
+        mock_settings_handler: Mock,
+        mock_config: Mock,
+    ) -> None:
+        """Test that _start_recording delegates to handler."""
+        from voicepad.tui.app import VoicePadApp
+
+        mock_handler = Mock()
+        mock_recording_handler_class.return_value = mock_handler
+        app = VoicePadApp(mock_config)
+
+        app._start_recording()
+
+        mock_handler.start_recording.assert_called_once()
+
+
+class TestHistoryDelegation:
+    """Test history-related delegation methods."""
+
+    @patch("voicepad.tui.handlers.settings_handler.SettingsHandler")
+    @patch("voicepad.tui.handlers.recording_handler.RecordingHandler")
+    @patch("voicepad.tui.handlers.history_handler.HistoryHandler")
+    @patch("voicepad.tui.handlers.hotkey_handler.HotkeyHandler")
+    def test_load_history_from_disk_delegates(
+        self,
+        mock_hotkey_handler: Mock,
+        mock_history_handler_class: Mock,
+        mock_recording_handler: Mock,
+        mock_settings_handler: Mock,
+        mock_config: Mock,
+    ) -> None:
+        """Test that _load_history_from_disk delegates to handler."""
+        from voicepad.tui.app import VoicePadApp
+
+        mock_handler = Mock()
+        mock_history_handler_class.return_value = mock_handler
+        app = VoicePadApp(mock_config)
+
+        app._load_history_from_disk()
+
+        mock_handler.load_history_from_disk.assert_called_once()
+
+    @patch("voicepad.tui.handlers.settings_handler.SettingsHandler")
+    @patch("voicepad.tui.handlers.recording_handler.RecordingHandler")
+    @patch("voicepad.tui.handlers.history_handler.HistoryHandler")
+    @patch("voicepad.tui.handlers.hotkey_handler.HotkeyHandler")
+    def test_action_delete_entry_delegates(
+        self,
+        mock_hotkey_handler: Mock,
+        mock_history_handler_class: Mock,
+        mock_recording_handler: Mock,
+        mock_settings_handler: Mock,
+        mock_config: Mock,
+    ) -> None:
+        """Test that action_delete_entry delegates to handler."""
+        from voicepad.tui.app import VoicePadApp
+
+        mock_handler = Mock()
+        mock_history_handler_class.return_value = mock_handler
+        app = VoicePadApp(mock_config)
+
+        app.action_delete_entry()
+
+        mock_handler.action_delete_entry.assert_called_once()
+
+    @patch("voicepad.tui.handlers.settings_handler.SettingsHandler")
+    @patch("voicepad.tui.handlers.recording_handler.RecordingHandler")
+    @patch("voicepad.tui.handlers.history_handler.HistoryHandler")
+    @patch("voicepad.tui.handlers.hotkey_handler.HotkeyHandler")
+    def test_action_copy_transcription_delegates(
+        self,
+        mock_hotkey_handler: Mock,
+        mock_history_handler_class: Mock,
+        mock_recording_handler: Mock,
+        mock_settings_handler: Mock,
+        mock_config: Mock,
+    ) -> None:
+        """Test that action_copy_transcription delegates to handler."""
+        from voicepad.tui.app import VoicePadApp
+
+        mock_handler = Mock()
+        mock_history_handler_class.return_value = mock_handler
+        app = VoicePadApp(mock_config)
+
+        app.action_copy_transcription()
+
+        mock_handler.action_copy_transcription.assert_called_once()
+
+
+class TestModelManagerDelegation:
+    """Test model manager delegation methods."""
+
+    @patch("voicepad.tui.handlers.settings_handler.SettingsHandler")
+    @patch("voicepad.tui.handlers.recording_handler.RecordingHandler")
+    @patch("voicepad.tui.handlers.history_handler.HistoryHandler")
+    @patch("voicepad.tui.handlers.hotkey_handler.HotkeyHandler")
+    def test_warm_model_worker_delegates(
+        self,
+        mock_hotkey_handler: Mock,
+        mock_history_handler: Mock,
+        mock_recording_handler: Mock,
+        mock_settings_handler: Mock,
+        mock_config: Mock,
+    ) -> None:
+        """Test that _warm_model_worker delegates to implementation."""
+        from unittest.mock import patch
+
+        from voicepad.tui.app import VoicePadApp
+
+        app = VoicePadApp(mock_config)
+
+        with patch.object(app, "_warm_model_worker_impl") as mock_warm:
+            app._warm_model_worker()
+            mock_warm.assert_called_once()
+
+    @patch("voicepad.tui.handlers.settings_handler.SettingsHandler")
+    @patch("voicepad.tui.handlers.recording_handler.RecordingHandler")
+    @patch("voicepad.tui.handlers.history_handler.HistoryHandler")
+    @patch("voicepad.tui.handlers.hotkey_handler.HotkeyHandler")
+    def test_set_status_delegates(
+        self,
+        mock_hotkey_handler: Mock,
+        mock_history_handler: Mock,
+        mock_recording_handler: Mock,
+        mock_settings_handler: Mock,
+        mock_config: Mock,
+    ) -> None:
+        """Test that _set_status delegates to manager."""
+        from unittest.mock import patch
+
+        from voicepad.tui.app import VoicePadApp
+
+        app = VoicePadApp(mock_config)
+
+        with patch.object(app._model_manager, "set_status") as mock_set_status:
+            app._set_status("ready", "Model loaded")
+            mock_set_status.assert_called_once_with("ready", "Model loaded")
+
+    @patch("voicepad.tui.handlers.settings_handler.SettingsHandler")
+    @patch("voicepad.tui.handlers.recording_handler.RecordingHandler")
+    @patch("voicepad.tui.handlers.history_handler.HistoryHandler")
+    @patch("voicepad.tui.handlers.hotkey_handler.HotkeyHandler")
+    def test_action_reload_model_delegates(
+        self,
+        mock_hotkey_handler: Mock,
+        mock_history_handler: Mock,
+        mock_recording_handler: Mock,
+        mock_settings_handler: Mock,
+        mock_config: Mock,
+    ) -> None:
+        """Test that action_reload_model delegates to manager."""
+        from unittest.mock import patch
+
+        from voicepad.tui.app import VoicePadApp
+
+        app = VoicePadApp(mock_config)
+
+        with patch.object(app._model_manager, "reload_model") as mock_reload:
+            app.action_reload_model()
+            mock_reload.assert_called_once()
+
+
+class TestTimerManagerDelegation:
+    """Test timer manager delegation methods."""
+
+    @patch("voicepad.tui.handlers.settings_handler.SettingsHandler")
+    @patch("voicepad.tui.handlers.recording_handler.RecordingHandler")
+    @patch("voicepad.tui.handlers.history_handler.HistoryHandler")
+    @patch("voicepad.tui.handlers.hotkey_handler.HotkeyHandler")
+    def test_start_timer_delegates(
+        self,
+        mock_hotkey_handler: Mock,
+        mock_history_handler: Mock,
+        mock_recording_handler: Mock,
+        mock_settings_handler: Mock,
+        mock_config: Mock,
+    ) -> None:
+        """Test that _start_timer delegates to manager."""
+        from unittest.mock import patch
+
+        from voicepad.tui.app import VoicePadApp
+
+        app = VoicePadApp(mock_config)
+
+        with patch.object(app._timer_manager, "start_timer") as mock_start:
+            app._start_timer()
+            mock_start.assert_called_once()
+
+    @patch("voicepad.tui.handlers.settings_handler.SettingsHandler")
+    @patch("voicepad.tui.handlers.recording_handler.RecordingHandler")
+    @patch("voicepad.tui.handlers.history_handler.HistoryHandler")
+    @patch("voicepad.tui.handlers.hotkey_handler.HotkeyHandler")
+    def test_stop_timer_delegates(
+        self,
+        mock_hotkey_handler: Mock,
+        mock_history_handler: Mock,
+        mock_recording_handler: Mock,
+        mock_settings_handler: Mock,
+        mock_config: Mock,
+    ) -> None:
+        """Test that _stop_timer delegates to manager."""
+        from unittest.mock import patch
+
+        from voicepad.tui.app import VoicePadApp
+
+        app = VoicePadApp(mock_config)
+
+        with patch.object(app._timer_manager, "stop_timer") as mock_stop:
+            app._stop_timer()
+            mock_stop.assert_called_once()
+
+
+class TestTabManagerDelegation:
+    """Test tab manager delegation methods."""
+
+    @patch("voicepad.tui.handlers.settings_handler.SettingsHandler")
+    @patch("voicepad.tui.handlers.recording_handler.RecordingHandler")
+    @patch("voicepad.tui.handlers.history_handler.HistoryHandler")
+    @patch("voicepad.tui.handlers.hotkey_handler.HotkeyHandler")
+    def test_check_action_delegates(
+        self,
+        mock_hotkey_handler: Mock,
+        mock_history_handler: Mock,
+        mock_recording_handler: Mock,
+        mock_settings_handler: Mock,
+        mock_config: Mock,
+    ) -> None:
+        """Test that check_action delegates to manager."""
+        from unittest.mock import patch
+
+        from voicepad.tui.app import VoicePadApp
+
+        app = VoicePadApp(mock_config)
+
+        with patch.object(app._tab_manager, "check_action", return_value=True) as mock_check:
+            result = app.check_action("toggle_recording", ())
+            assert result is True
+            mock_check.assert_called_once_with("toggle_recording", ())
+
+
+class TestActionMethods:
+    """Test action methods."""
+
+    @patch("voicepad.tui.handlers.settings_handler.SettingsHandler")
+    @patch("voicepad.tui.handlers.recording_handler.RecordingHandler")
+    @patch("voicepad.tui.handlers.history_handler.HistoryHandler")
+    @patch("voicepad.tui.handlers.hotkey_handler.HotkeyHandler")
+    def test_action_show_info_pushes_modal(
+        self,
+        mock_hotkey_handler: Mock,
+        mock_history_handler: Mock,
+        mock_recording_handler: Mock,
+        mock_settings_handler: Mock,
+        mock_config: Mock,
+    ) -> None:
+        """Test that action_show_info pushes InfoModal."""
+        from unittest.mock import patch
+
+        from voicepad.tui.app import VoicePadApp
+
+        app = VoicePadApp(mock_config)
+
+        with patch.object(app, "push_screen") as mock_push:
+            app.action_show_info()
+            mock_push.assert_called_once()
+            # Check that the argument is an InfoModal instance
+            args = mock_push.call_args[0]
+            assert len(args) == 1
+            from voicepad.tui.modals import InfoModal
+
+            assert isinstance(args[0], InfoModal)
+
+
+class TestRunFunction:
+    """Test the run() entry point function."""
+
+    @patch("voicepad.tui.app.get_config")
+    @patch("voicepad.tui.app.VoicePadApp")
+    def test_run_creates_app_and_runs(self, mock_app_class: Mock, mock_get_config: Mock) -> None:
+        """Test that run() creates app with config and runs it."""
+        from voicepad.tui.app import run
+
+        mock_config = Mock()
+        mock_get_config.return_value = mock_config
+        mock_app = Mock()
+        mock_app_class.return_value = mock_app
+
+        run()
+
+        mock_get_config.assert_called_once()
+        mock_app_class.assert_called_once_with(mock_config)
+        mock_app.run.assert_called_once()

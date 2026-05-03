@@ -1,4 +1,14 @@
-/* VoicePad — minimal layout stylesheet */
+/* ── VoiceButton — strip all Textual Button chrome ── */
+VoiceButton {
+    border: none;
+    background: transparent;
+    padding: 0 1;
+    height: 1;
+    min-width: 0;
+}
+VoiceButton:hover, VoiceButton:focus { background: transparent; }
+
+
 
 Screen {
     layout: vertical;
@@ -105,24 +115,9 @@ TabPane {
     margin-top: 1;
 }
 
+/* ── copy button (record tab) — inherits VoiceButton default role ── */
 #tx-copy-btn {
-    width: auto;
-    height: 1;
-    border: none;
-    background: transparent;
-    color: $text-muted;
     margin-top: 1;
-    padding: 0 1;
-    min-width: 10;
-}
-
-#tx-copy-btn:hover {
-    background: $boost;
-    color: $primary;
-}
-
-#tx-copy-btn:disabled {
-    color: $text-disabled;
 }
 
 /* ── history tab ── */
@@ -225,19 +220,9 @@ TabPane {
     color: $text-muted;
 }
 
+/* ── settings save button — inherits VoiceButton primary role ── */
 #settings-save-btn {
-    width: auto;
-    height: 1;
-    border: none;
-    background: transparent;
-    color: $text-success;
-    text-style: bold;
-    padding: 0 1;
-}
-
-#settings-save-btn:hover {
-    background: $boost;
-    color: $success;
+    /* no overrides needed */
 }
 
 /* ── info modal ── */
@@ -381,21 +366,7 @@ InfoModal {
     margin-bottom: 2;
 }
 
-/* Close button */
-#info-close-btn {
-    width: 100%;
-    height: 1;
-    border: none;
-    background: transparent;
-    color: $text-muted;
-    text-style: none;
-}
-
-#info-close-btn:hover {
-    background: transparent;
-    color: $foreground;
-    text-style: bold;
-}
+/* ── info modal close button — inherits VoiceButton default role ── */
 
 /* ── setup wizard modal ── */
 SetupModal {
@@ -512,39 +483,9 @@ SetupModal {
     padding: 0;
 }
 
-#wizard-back {
-    width: auto;
-    height: 1;
-    border: none;
-    background: transparent;
-    color: $text-muted;
-    padding: 0;
-    margin: 0;
-}
-
-#wizard-back:hover {
-    color: $foreground;
-    background: transparent;
-}
-
+/* ── wizard nav buttons — inherits VoiceButton roles ── */
 #wizard-spacer {
     width: 1fr;
-}
-
-#wizard-next {
-    width: auto;
-    height: 1;
-    border: none;
-    background: transparent;
-    color: $primary;
-    text-style: bold;
-    padding: 0;
-    margin: 0;
-}
-
-#wizard-next:hover {
-    color: $foreground;
-    background: transparent;
 }
 
 #wizard-next:disabled {
@@ -596,37 +537,32 @@ DeleteConfirmModal {
     width: 100%;
 }
 
-#delete-cancel {
-    width: auto;
-    height: 1;
-    border: none;
-    background: transparent;
-    color: $text-muted;
-    padding: 0;
-    margin: 0;
-}
-
-#delete-cancel:hover {
-    color: $foreground;
-    background: transparent;
-}
-
+/* ── delete modal buttons — inherits VoiceButton roles ── */
 #delete-spacer {
     width: 1fr;
 }
 
-#delete-confirm {
-    width: auto;
-    height: 1;
-    border: none;
-    background: transparent;
-    color: $error;
-    text-style: bold;
-    padding: 0;
-    margin: 0;
+/* ── hotkey picker ── */
+.hotkey-mod-row {
+    layout: horizontal;
+    height: auto;
+    width: 100%;
+    margin-top: 1;
+    margin-bottom: 1;
 }
 
-#delete-confirm:hover {
-    color: $foreground;
-    background: transparent;
+.hotkey-checkbox {
+    width: auto;
+    margin-right: 2;
+}
+
+.hotkey-key-select {
+    width: 24;
+    margin-bottom: 1;
+}
+
+.hotkey-preview {
+    height: 1;
+    color: $text-muted;
+    margin-top: 0;
 }

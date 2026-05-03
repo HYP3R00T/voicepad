@@ -295,4 +295,11 @@ def _format_markdown(wav_path: Path, result, model_name: str = "") -> str:
         result.text or "*(no speech detected)*",
         "",
     ]
+    # Add segments if present
+    if hasattr(result, "segments") and result.segments:
+        lines.append("## Segments")
+        lines.append("")
+        for seg in result.segments:
+            lines.append(f"**[{seg.start:.2f}s - {seg.end:.2f}s]** {seg.text}")
+        lines.append("")
     return "\n".join(lines) + "\n"

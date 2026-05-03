@@ -1,0 +1,172 @@
+"""Recording handler for VoicePad TUI."""
+
+from __future__ import annotations
+
+import time
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+import numpy as np
+from textual.widgets import Label, Static, TabbedContent
+from voicepad_core import AudioRecorder, AudioRecorderError, ChunkResult, StreamingTranscriber
+
+from voicepad.tui.components import VoiceButton
+from voicepad.tui.utils.clipboard import copy_to_clipboard as _copy_to_clipboard
+from voicepad.tui.utils.markdown import format_markdown_streaming as _format_markdown_streaming
+from voicepad.tui.workers import RecordingSession
+
+if TYPE_CHECKING:
+    from voicepad.tui.app import VoicePadApp
+
+
+class RecordingHandler:
+    """Handles recording and transcription functionality."""
+
+    def __init__(self, app: VoicePadApp) -> None:
+        self.app = app
+
+    def action_toggle_recording(self) -> None:
+        """Toggle recording on/off (space bar binding)."""
+        active = self.app.query_one("#tabs", TabbedContent).active
+        if active != "tab-record":
+            return
+        if not self.app._model_ready or self.app._transcribing:
+            return
+        if self.app._recording:
+            self.stop_recording()
+        else:
+            self.start_recording()
+
+    def start_recording(self) -> None:
+        """Start recording audio."""
+        self.app._session = RecordingSession(config=self.app.config)
+        try:
+            self.app._session.start()
+        except AudioRecorderError as e:
+            self.app._set_status("error", f"mic error: {e}")
+            return
+
+        self.app._recording = True
+        self.app._record_start = time.monotonic()
+        self.app._stream_chunks = []
+        self.app._set_status("recording", "recording…")
+        self.app._start_timer()
+
+        # Start streaming transcriber — transcribes chunks during recording
+        recorder = self.app._session._recorder
+        if recorder is None:
+            return
+        self.app._streamer = StreamingTranscriber(
+            recorder=recorder,
+            config=self.app.config,
+            on_chunk=lambda chunk: self.app.call_from_thread(self.on_stream_chunk, chunk),
+            on_error=lambda err: self.app.call_from_thread(self.app._set_status, "error", err),
+        )
+        self.app._streamer.start()
+
+    def stop_recording(self) -> None:
+        """Stop recording audio."""
+        if self.app._session is None:
+            return
+
+        self.app._recording = False
+        self.app._stop_timer()
+        self.app._set_status("transcribing", "transcribing…")
+
+        try:
+            audio = self.app._session.stop()
+        except AudioRecorderError as e:
+            self.app._set_status("error", f"stop error: {e}")
+            if self.app._streamer:
+                self.app._streamer._stop_event.set()
+            return
+
+        self.app._transcribing = True
+        # Stop the streamer in a thread — it will transcribe the tail and call on_chunk(is_final=True)
+        # Must go through the app's @work-decorated wrapper so it runs in a background thread.
+        self.app._finalize_worker(audio)
+
+    def finalize_worker(self, audio: np.ndarray) -> None:
+        """Stop the streamer (transcribes tail) then save the full recording."""
+        if self.app._streamer:
+            self.app._streamer.stop()  # blocks until final chunk callback fires
+        self.app.call_from_thread(self.save_recording, audio)
+
+    def on_stream_chunk(self, chunk: ChunkResult) -> None:
+        """Called from the streaming thread for each transcribed chunk."""
+        if chunk.text:
+            self.app._stream_chunks.append(chunk)
+
+        # Update transcription panel with all accumulated text so far
+        full_text = " ".join(c.text for c in self.app._stream_chunks).strip()
+        if full_text:
+            tx_text = self.app.query_one("#tx-text", Label)
+            tx_text.remove_class("placeholder")
+            tx_text.update(full_text)
+            self.app.query_one("#transcription", Static).scroll_end(animate=False)
+
+        if chunk.is_final:
+            self.app._transcribing = False
+            elapsed = time.monotonic() - self.app._record_start
+            self.app.query_one("#tx-meta", Label).update(f"[dim]{elapsed:.1f}s  ·  streaming[/]")
+            self.app._set_status("ready", "ready")
+            # Auto-copy if triggered by global hotkey
+            if self.app._hotkey_pending_copy:
+                self.app._hotkey_pending_copy = False
+                full_text = " ".join(c.text for c in self.app._stream_chunks).strip()
+                if full_text:
+                    _copy_to_clipboard(full_text)
+                    self.app._set_status("ready", "ready — copied to clipboard")
+                    self.app.set_timer(2.0, lambda: self.app._set_status("ready", "ready"))
+                    self.app._overlay_set("copied")
+                else:
+                    self.app._overlay_set("hidden")
+
+    def save_recording(self, audio: np.ndarray) -> None:
+        """Save WAV + markdown and add history entry after streaming completes."""
+        from voicepad.tui.models import SessionEntry
+
+        full_text = " ".join(c.text for c in self.app._stream_chunks).strip()
+        if not full_text:
+            return
+
+        self.app._current_text = full_text
+        self.app.query_one("#tx-copy-btn", VoiceButton).disabled = False
+
+        # Save WAV
+        wav_path: Path | None = None
+        md_path: Path | None = None
+        recorder_ref: AudioRecorder | None = self.app._session._recorder if self.app._session else None
+        if recorder_ref is not None:
+            wav_path = recorder_ref.make_wav_path()
+            try:
+                recorder_ref.save_wav(audio, wav_path)
+                # Build a synthetic TranscriptionResult-like object for _format_markdown
+                md_path = self.app.config.markdown_path / f"{wav_path.stem}.md"
+                self.app.config.markdown_path.mkdir(parents=True, exist_ok=True)
+                duration_s = len(audio) / 16000
+                md_path.write_text(
+                    _format_markdown_streaming(
+                        wav_path,
+                        full_text,
+                        duration_s,
+                        self.app._stream_chunks,
+                        self.app.config.transcription_model,
+                    ),
+                    encoding="utf-8",
+                )
+            except Exception:
+                wav_path = None
+                md_path = None
+
+        entry = SessionEntry(
+            index=len(self.app._entries),
+            wav_path=wav_path,
+            md_path=md_path,
+            duration_s=len(audio) / 16000,
+            text=full_text,
+            latency_ms=0.0,
+            device=self.app._stream_chunks[-1].device if self.app._stream_chunks else "cuda",
+        )
+        self.app._entries.append(entry)
+        self.app._add_history_entry(entry)

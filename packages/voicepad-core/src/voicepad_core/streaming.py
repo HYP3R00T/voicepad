@@ -107,6 +107,7 @@ class StreamingTranscriber:
         self._chunk_index = 0
         self._consumed_samples = 0
         self._prev_context: str = ""
+        self._prev_overlap_text: str = ""  # Text from previous chunk's overlap region
         self._stop_event = threading.Event()
 
     def start(self) -> None:
@@ -211,10 +212,14 @@ class StreamingTranscriber:
 
         try:
             is_distil = self._config.transcription_model in _DISTIL_MODELS
+            # Enable conditioning for non-distil models to maintain punctuation.
+            # Combined with aggressive VAD chunking (max 30s), this prevents
+            # hallucination buildup while preserving punctuation quality.
             condition_on_prev = not is_distil
             if is_distil:
                 prompt = None
             elif self._prev_context:
+                # Include previous context in prompt for continuity
                 prompt = (INITIAL_PROMPT + " " + self._prev_context[-200:]).strip()
             else:
                 prompt = INITIAL_PROMPT
@@ -226,11 +231,20 @@ class StreamingTranscriber:
 
             chunk_audio = _trim_trailing_silence(chunk_audio)
 
+            # VAD parameters tuned to prevent hallucinations while maintaining punctuation
+            vad_params = {
+                "threshold": 0.5,
+                "min_speech_duration_ms": 250,
+                "max_speech_duration_s": 30.0,  # Force split at 30s to prevent hallucinations
+                "min_silence_duration_ms": 500,  # 0.5s silence for more natural breaks
+                "speech_pad_ms": 400,
+            }
             segs_iter, info = model.transcribe(
                 chunk_audio,
                 language=LANGUAGE,
                 beam_size=BEAM_SIZE,
                 vad_filter=True,
+                vad_parameters=vad_params,
                 hallucination_silence_threshold=HALLUCINATION_SILENCE_THRESHOLD,
                 no_speech_threshold=NO_SPEECH_THRESHOLD,
                 initial_prompt=prompt,
@@ -239,23 +253,51 @@ class StreamingTranscriber:
             raw_segments = list(segs_iter)
             latency_ms = (time.perf_counter() - t0) * 1000
 
-            # Adjust timestamps: add the absolute start offset, skip overlap region
+            # Adjust timestamps and verify overlap consistency
             segments: list[Segment] = []
+            overlap_segments: list[Segment] = []  # Segments in the overlap region
+
             for s in raw_segments:
                 abs_start = s.start + audio_offset_s
                 abs_end = s.end + audio_offset_s
-                # Skip segments that fall entirely within the overlap region
+
+                # Categorize segments: overlap vs new content
                 if abs_end <= chunk_start_s + 0.1:
-                    continue
-                segments.append(
-                    Segment(
-                        start=abs_start,
-                        end=abs_end,
-                        text=s.text.strip(),
-                    )
-                )
+                    # Segment entirely in overlap region
+                    overlap_segments.append(Segment(start=abs_start, end=abs_end, text=s.text.strip()))
+                elif abs_start < chunk_start_s and abs_end > chunk_start_s + 0.1:
+                    # Segment spans the boundary - keep it to avoid word-splitting
+                    segments.append(Segment(start=abs_start, end=abs_end, text=s.text.strip()))
+                else:
+                    # Segment entirely after overlap - keep it
+                    segments.append(Segment(start=abs_start, end=abs_end, text=s.text.strip()))
+
+            # Verify overlap consistency with previous chunk
+            overlap_text = " ".join(s.text for s in overlap_segments if s.text).strip()
+            if self._chunk_index > 0 and self._prev_overlap_text and overlap_text:
+                # Normalize for comparison (remove extra spaces, lowercase)
+                prev_normalized = " ".join(self._prev_overlap_text.lower().split())
+                curr_normalized = " ".join(overlap_text.lower().split())
+
+                # Check if overlap texts are similar (allow minor differences due to VAD)
+                if prev_normalized and curr_normalized:
+                    # Use simple substring check - current should contain most of previous
+                    similarity = len(set(prev_normalized.split()) & set(curr_normalized.split()))
+                    total_words = len(set(prev_normalized.split()))
+                    if total_words > 0 and similarity / total_words < 0.5:
+                        logger.warning(
+                            f"Chunk {self._chunk_index + 1}: Overlap mismatch detected. "
+                            f"Previous: '{self._prev_overlap_text[:50]}...' "
+                            f"Current: '{overlap_text[:50]}...'"
+                        )
 
             text = " ".join(s.text for s in segments if s.text).strip()
+
+            # Store overlap text from end of current chunk for next verification
+            # Get last OVERLAP_S seconds of segments for next chunk's verification
+            overlap_boundary = chunk_end_s - OVERLAP_S
+            end_segments = [s for s in segments if s.start >= overlap_boundary]
+            self._prev_overlap_text = " ".join(s.text for s in end_segments if s.text).strip()
 
             # Update context for next chunk's prompt
             if text:

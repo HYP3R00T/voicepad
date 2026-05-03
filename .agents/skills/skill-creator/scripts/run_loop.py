@@ -15,10 +15,10 @@ import time
 import webbrowser
 from pathlib import Path
 
-from scripts.generate_report import generate_html
-from scripts.improve_description import improve_description
-from scripts.run_eval import find_project_root, run_eval
-from scripts.utils import parse_skill_md
+from scripts.generate_report import generate_html  # ty:ignore[unresolved-import]
+from scripts.improve_description import improve_description  # ty:ignore[unresolved-import]
+from scripts.run_eval import find_project_root, run_eval  # ty:ignore[unresolved-import]
+from scripts.utils import parse_skill_md  # ty:ignore[unresolved-import]
 
 
 def split_eval_set(eval_set: list[dict], holdout: float, seed: int = 42) -> tuple[list[dict], list[dict]]:
@@ -178,7 +178,7 @@ def run_loop(
                     )
 
             print_eval_stats("Train", train_results["results"], eval_elapsed)
-            if test_summary:
+            if test_summary and test_results is not None:
                 print_eval_stats("Test ", test_results["results"], 0)
 
         if train_summary["failed"] == 0:

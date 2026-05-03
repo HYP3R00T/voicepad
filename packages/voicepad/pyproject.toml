@@ -38,6 +38,7 @@ dependencies = [
   "rich>=13.0.0",
   "textual>=8.2.4",
   "pyperclip>=1.9.0",
+  "pynput>=1.8.1",
 ]
 
 [project.urls]
@@ -50,5 +51,5 @@ Documentation = "https://hyp3r00t.github.io/voicepad/"
 voicepad = "voicepad:main"
 
 [build-system]
-requires = ["uv_build>=0.10.2,<0.11.0"]
+requires = ["uv_build>=0.11.8,<0.12"]
 build-backend = "uv_build"

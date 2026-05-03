@@ -1,1 +1,1 @@
-"""Tests for the voicepad package."""
+# test package marker
