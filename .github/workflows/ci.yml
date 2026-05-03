@@ -42,7 +42,6 @@ jobs:
       - name: Test with coverage gate
         run: |
           uv run pytest packages \
-            -m "not gpu" \
             --cov=packages/voicepad-core/src/voicepad_core \
             --cov=packages/voicepad/src/voicepad \
             --cov-fail-under=80 \

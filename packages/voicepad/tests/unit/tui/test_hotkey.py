@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
 from voicepad.tui.hotkey import GlobalHotkeyListener, _parse_hotkey
 
 
@@ -149,6 +150,7 @@ class TestGlobalHotkeyListener:
 
         mock_logger.info.assert_called_once()
 
+    @pytest.mark.display
     @patch("pynput.keyboard")
     @patch("voicepad.tui.hotkey.logger")
     def test_run_creates_global_hotkeys(self, mock_logger: MagicMock, mock_keyboard: MagicMock) -> None:
@@ -176,6 +178,7 @@ class TestGlobalHotkeyListener:
         # Verify run was called
         mock_global_hotkeys.run.assert_called_once()
 
+    @pytest.mark.display
     @patch("pynput.keyboard")
     def test_run_with_empty_hotkey_returns_early(self, mock_keyboard: MagicMock) -> None:
         """_run() returns early if hotkey is empty."""
@@ -192,6 +195,7 @@ class TestGlobalHotkeyListener:
 
         mock_keyboard.GlobalHotKeys.assert_not_called()
 
+    @pytest.mark.display
     @patch("pynput.keyboard")
     @patch("voicepad.tui.hotkey.logger")
     def test_run_handles_import_error(self, mock_logger: MagicMock, mock_keyboard: MagicMock) -> None:
@@ -212,6 +216,7 @@ class TestGlobalHotkeyListener:
         mock_logger.error.assert_called_once()
         assert "failed" in str(mock_logger.error.call_args).lower()
 
+    @pytest.mark.display
     @patch("pynput.keyboard")
     def test_hotkey_activation_toggles_recording(self, mock_keyboard: MagicMock) -> None:
         """Hotkey activation toggles recording state."""
@@ -253,6 +258,7 @@ class TestGlobalHotkeyListener:
         on_start.assert_called_once()  # Still only once
         on_stop.assert_called_once()
 
+    @pytest.mark.display
     @patch("pynput.keyboard")
     @patch("voicepad.tui.hotkey.logger")
     def test_hotkey_activation_handles_on_start_error(self, mock_logger: MagicMock, mock_keyboard: MagicMock) -> None:
@@ -287,6 +293,7 @@ class TestGlobalHotkeyListener:
         mock_logger.error.assert_called()
         assert "on_start" in str(mock_logger.error.call_args).lower()
 
+    @pytest.mark.display
     @patch("pynput.keyboard")
     @patch("voicepad.tui.hotkey.logger")
     def test_hotkey_activation_handles_on_stop_error(self, mock_logger: MagicMock, mock_keyboard: MagicMock) -> None:
@@ -325,6 +332,7 @@ class TestGlobalHotkeyListener:
         mock_logger.error.assert_called()
         assert "on_stop" in str(mock_logger.error.call_args).lower()
 
+    @pytest.mark.display
     @patch("pynput.keyboard")
     @patch("voicepad.tui.hotkey.logger")
     def test_multiple_activations_toggle_correctly(self, mock_logger: MagicMock, mock_keyboard: MagicMock) -> None:
