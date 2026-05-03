@@ -47,7 +47,6 @@ def format_markdown(audio_path: Path, result: object, model_name: str = "") -> s
     duration_s = getattr(result, "duration_s", 0.0)
     latency_ms = getattr(result, "latency_ms", 0.0)
     text = getattr(result, "text", "") or "*(no speech detected)*"
-    segments = getattr(result, "segments", []) or []
 
     model_str = f"{model_name} · {device} / {compute_type}" if model_name else f"{device} / {compute_type}"
     lines = [
@@ -67,15 +66,6 @@ def format_markdown(audio_path: Path, result: object, model_name: str = "") -> s
         text,
         "",
     ]
-
-    if segments:
-        lines += ["## Segments", ""]
-        for seg in segments:
-            start = getattr(seg, "start", 0.0)
-            end = getattr(seg, "end", 0.0)
-            seg_text = getattr(seg, "text", "")
-            lines.append(f"- **{start:.1f}s – {end:.1f}s** {seg_text}")
-        lines.append("")
 
     return "\n".join(lines)
 
@@ -113,21 +103,6 @@ def format_markdown_streaming(
         text or "*(no speech detected)*",
         "",
     ]
-
-    # Collect all segments from all chunks
-    all_segments = []
-    for chunk in chunks:
-        segs = getattr(chunk, "segments", None) or []
-        all_segments.extend(segs)
-
-    if all_segments:
-        lines += ["## Segments", ""]
-        for seg in all_segments:
-            start = getattr(seg, "start", 0.0)
-            end = getattr(seg, "end", 0.0)
-            seg_text = getattr(seg, "text", "")
-            lines.append(f"- **{start:.1f}s – {end:.1f}s** {seg_text}")
-        lines.append("")
 
     return "\n".join(lines)
 

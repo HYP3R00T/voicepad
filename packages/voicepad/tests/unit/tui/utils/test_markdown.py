@@ -61,7 +61,7 @@ class TestFormatMarkdown:
         assert "*(no speech detected)*" in markdown
 
     def test_format_markdown_includes_segments(self) -> None:
-        """format_markdown includes segment information when available."""
+        """format_markdown no longer includes segment information (removed feature)."""
         audio_path = Path("/test/recording.wav")
         result = MagicMock()
         result.device = "cuda"
@@ -86,9 +86,10 @@ class TestFormatMarkdown:
 
         markdown = format_markdown(audio_path, result, "base")
 
-        assert "## Segments" in markdown
-        assert "**0.0s – 5.0s** First segment." in markdown
-        assert "**5.0s – 10.0s** Second segment." in markdown
+        # Segments section should not be included
+        assert "## Segments" not in markdown
+        assert "## Transcription 1" in markdown
+        assert "First segment. Second segment." in markdown
 
     def test_format_markdown_without_model_name(self) -> None:
         """format_markdown works without model name."""
@@ -208,7 +209,7 @@ class TestFormatMarkdownStreaming:
         assert "*(no speech detected)*" in markdown
 
     def test_format_markdown_streaming_includes_all_segments(self) -> None:
-        """format_markdown_streaming includes segments from all chunks."""
+        """format_markdown_streaming no longer includes segments (removed feature)."""
         wav_path = Path("/test/recording.wav")
         text = "Combined segments"
         duration_s = 10.0
@@ -243,9 +244,10 @@ class TestFormatMarkdownStreaming:
 
         markdown = format_markdown_streaming(wav_path, text, duration_s, cast(list, chunks))
 
-        assert "## Segments" in markdown
-        assert "**0.0s – 3.0s** First" in markdown
-        assert "**3.0s – 6.0s** Second" in markdown
+        # Segments section should not be included
+        assert "## Segments" not in markdown
+        assert "## Transcription 1" in markdown
+        assert "Combined segments" in markdown
 
     def test_format_markdown_streaming_uses_latest_chunk_metadata(self) -> None:
         """format_markdown_streaming uses metadata from latest non-empty chunk."""
