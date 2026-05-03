@@ -35,9 +35,9 @@ class VoiceButton(Button):
     VoiceButton.-on    { background: transparent; }
 
     /* default — secondary / navigation */
-    VoiceButton.-role-default          { color: $text; }
-    VoiceButton.-role-default:hover    { color: $primary; text-style: bold; }
-    VoiceButton.-role-default:focus    { color: $primary; text-style: bold; }
+    VoiceButton.-role-default          { color: $primary; }
+    VoiceButton.-role-default:hover    { color: $foreground; text-style: bold; }
+    VoiceButton.-role-default:focus    { color: $foreground; text-style: bold; }
 
     /* primary — main action */
     VoiceButton.-role-primary          { color: $primary; text-style: bold; }
