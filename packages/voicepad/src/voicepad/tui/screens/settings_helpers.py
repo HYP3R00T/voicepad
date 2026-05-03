@@ -5,8 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from textual.widgets import Checkbox, Input, Label, Select, Static
+from textual.widgets import Input, Label, Select, Static
 from voicepad_core import VALID_TRANSCRIPTION_MODELS
+
+from voicepad.tui.components.checkbox import VoiceCheckbox
 
 if TYPE_CHECKING:
     from voicepad_core.config import Config
@@ -117,7 +119,7 @@ def _mount_hotkey_picker(container: Static, config: Config) -> None:
 
     _modifiers = [("Ctrl", "ctrl"), ("Alt", "alt"), ("Shift", "shift"), ("Win", "cmd")]
     for label_text, mod_id in _modifiers:
-        cb = Checkbox(
+        cb = VoiceCheckbox(
             label_text,
             value=(mod_id in mods),
             id=f"hotkey-mod-{mod_id}",

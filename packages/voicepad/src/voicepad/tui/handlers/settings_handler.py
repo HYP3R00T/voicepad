@@ -6,10 +6,11 @@ import contextlib
 from typing import TYPE_CHECKING
 
 from textual import on
-from textual.widgets import Button, Checkbox, Input, Label, Select, Static
+from textual.widgets import Button, Input, Label, Select, Static
 from voicepad_core import VALID_TRANSCRIPTION_MODELS
 from voicepad_core.config import Config as _Config
 
+from voicepad.tui.components.checkbox import VoiceCheckbox
 from voicepad.tui.utils.hotkey_utils import HOTKEY_KEYS as _HOTKEY_KEYS
 from voicepad.tui.utils.hotkey_utils import build_hotkey_str as _build_hotkey_str
 from voicepad.tui.utils.hotkey_utils import parse_hotkey_str as _parse_hotkey_str
@@ -55,7 +56,7 @@ class SettingsHandler:
             # Sync hotkey picker from config
             mods, key = _parse_hotkey_str(self.app.config.global_hotkey)
             for mod_id in ("ctrl", "alt", "shift", "cmd"):
-                self.app.query_one(f"#hotkey-mod-{mod_id}", Checkbox).value = mod_id in mods
+                self.app.query_one(f"#hotkey-mod-{mod_id}", VoiceCheckbox).value = mod_id in mods
             sel = self.app.query_one("#hotkey-key-select", Select)
             if key in _HOTKEY_KEYS:
                 sel.value = key
@@ -165,7 +166,7 @@ class SettingsHandler:
 
         _modifiers = [("Ctrl", "ctrl"), ("Alt", "alt"), ("Shift", "shift"), ("Win", "cmd")]
         for label_text, mod_id in _modifiers:
-            cb = Checkbox(
+            cb = VoiceCheckbox(
                 label_text,
                 value=(mod_id in mods),
                 id=f"hotkey-mod-{mod_id}",
@@ -198,7 +199,7 @@ class SettingsHandler:
         mods: list[str] = []
         for mod_id in ("ctrl", "alt", "shift", "cmd"):
             with contextlib.suppress(Exception):
-                if self.app.query_one(f"#hotkey-mod-{mod_id}", Checkbox).value:
+                if self.app.query_one(f"#hotkey-mod-{mod_id}", VoiceCheckbox).value:
                     mods.append(mod_id)
         key = "v"
         with contextlib.suppress(Exception):
@@ -213,7 +214,7 @@ class SettingsHandler:
             preview = self.get_hotkey_from_picker()
             self.app.query_one("#hotkey-preview", Label).update(f"[dim]{preview or 'disabled'}[/]")
 
-    @on(Checkbox.Changed, ".hotkey-checkbox")
+    @on(VoiceCheckbox.Changed, ".hotkey-checkbox")
     def on_hotkey_checkbox_changed(self) -> None:
         self._update_hotkey_preview()
 

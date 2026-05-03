@@ -554,7 +554,6 @@ DeleteConfirmModal {
 .hotkey-checkbox {
     width: auto;
     margin-right: 2;
-    background: transparent;
 }
 
 .hotkey-key-select {
