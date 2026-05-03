@@ -1,1 +1,1 @@
-"""Tests for TUI components."""
+"""Tests for VoicePad TUI components."""
