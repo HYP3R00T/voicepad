@@ -324,14 +324,9 @@ class SettingsHandler:
             else:
                 status.update("[green]\U000f012c  saved[/]")
 
-            # Show notification if theme changed
+            # Apply theme immediately if changed
             if theme_changed:
-                self.app.notify(
-                    "Theme saved. Please restart VoicePad to apply changes.",
-                    title="Restart Required",
-                    severity="information",
-                    timeout=3.0,
-                )
+                self.app.theme = new_config.theme
 
             self.app.set_timer(3.0, lambda: status.update(""))
         except Exception as e:
