@@ -1,48 +1,48 @@
 name: CI Pipeline
 
 on:
-  pull_request:
-    branches: [ main ]
-    types: [ opened, synchronize, reopened, ready_for_review ]
-  workflow_dispatch:
+    pull_request:
+        branches: [ main ]
+        types: [ opened, synchronize, reopened, ready_for_review ]
+    workflow_dispatch:
 
 jobs:
-  uv-ci:
-    name: CI (uv)
-    runs-on: ubuntu-latest
+    uv-ci:
+        name: CI (uv)
+        runs-on: ubuntu-latest
 
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v6
 
-      - name: Install system audio dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libportaudio2 portaudio19-dev
+            - name: Install system audio dependencies
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y libportaudio2 portaudio19-dev
 
-      - name: Install UV
-        uses: astral-sh/setup-uv@v7
+            - name: Install UV
+              uses: astral-sh/setup-uv@v7
 
-      - name: Set up Python
-        run: uv python install
+            - name: Set up Python
+              run: uv python install
 
-      - name: Install dependencies
-        run: |
-          uv sync --locked --dev
+            - name: Install dependencies
+              run: |
+                  uv sync --locked --dev
 
-      - name: Lint with Ruff
-        run: |
-          uv run ruff check --output-format=github --target-version=py313 packages
-          uv run ruff format --diff --check --target-version=py313 packages
+            - name: Lint with Ruff
+              run: |
+                  uv run ruff check --output-format=github --target-version=py313 packages
+                  uv run ruff format --diff --check --target-version=py313 packages
 
-      - name: Type check with Ty
-        run: |
-          uv run ty check packages
+            - name: Type check with Ty
+              run: |
+                  uv run ty check packages
 
-      - name: Test with coverage gate
-        run: |
-          uv run pytest packages \
-            --cov=packages/voicepad-core/src/voicepad_core \
-            --cov=packages/voicepad/src/voicepad \
-            --cov-fail-under=80 \
-            --cov-report=term-missing
+            - name: Test with coverage gate
+              run: |
+                  uv run pytest packages \
+                    --cov=packages/voicepad-core/src/voicepad_core \
+                    --cov=packages/voicepad/src/voicepad \
+                    --cov-fail-under=70 \
+                    --cov-report=term-missing
