@@ -111,11 +111,10 @@ class TestActionRetranscribeEntry:
         mock_app._model_ready = True
 
         handler = HistoryHandler(mock_app)
-        handler.retranscribe_file = Mock()
 
-        handler.action_retranscribe_entry()
-
-        handler.retranscribe_file.assert_not_called()
+        with patch.object(handler, "retranscribe_file") as mock_retranscribe:
+            handler.action_retranscribe_entry()
+            mock_retranscribe.assert_not_called()
 
     def test_returns_early_when_model_not_ready(self):
         """Test that method returns early when model is not ready."""
@@ -125,11 +124,10 @@ class TestActionRetranscribeEntry:
         mock_app._entries = [Mock()]
 
         handler = HistoryHandler(mock_app)
-        handler.retranscribe_file = Mock()
 
-        handler.action_retranscribe_entry()
-
-        handler.retranscribe_file.assert_not_called()
+        with patch.object(handler, "retranscribe_file") as mock_retranscribe:
+            handler.action_retranscribe_entry()
+            mock_retranscribe.assert_not_called()
 
     def test_calls_retranscribe_when_conditions_met(self, tmp_path):
         """Test that method calls retranscribe_file when conditions are met."""
@@ -152,11 +150,10 @@ class TestActionRetranscribeEntry:
         mock_app._entries = [entry]
 
         handler = HistoryHandler(mock_app)
-        handler.retranscribe_file = Mock()
 
-        handler.action_retranscribe_entry()
-
-        handler.retranscribe_file.assert_called_once_with(wav_path, None)
+        with patch.object(handler, "retranscribe_file") as mock_retranscribe:
+            handler.action_retranscribe_entry()
+            mock_retranscribe.assert_called_once_with(wav_path, None)
 
 
 class TestActionDeleteEntry:
