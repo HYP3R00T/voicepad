@@ -39,6 +39,7 @@ def populate_settings_form(
         "markdown_path": "Where your transcription files are saved",
         "transcription_model": "Whisper model to use for transcription",
         "input_device_index": "Microphone to record from",
+        "theme": "UI color theme",
     }
 
     # Build device options
@@ -67,6 +68,20 @@ def populate_settings_form(
                 options=options,
                 value=current_str if current_str in VALID_TRANSCRIPTION_MODELS else "turbo",
                 id="setting-transcription_model",
+                classes="settings-input",
+                allow_blank=False,
+            )
+        elif field_name == "theme":
+            # Get available themes from the app
+            from voicepad.tui.theme import get_available_themes
+
+            available_themes = get_available_themes()
+            options = [(t, t) for t in available_themes]
+            current_str = str(current_val) if current_val is not None else "voicepad-dark"
+            widget = Select(
+                options=options,
+                value=current_str if current_str in available_themes else "voicepad-dark",
+                id="setting-theme",
                 classes="settings-input",
                 allow_blank=False,
             )

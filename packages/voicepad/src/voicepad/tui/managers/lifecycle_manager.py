@@ -24,8 +24,13 @@ class LifecycleManager:
 
     def on_mount(self) -> None:
         """Initialize the app after mounting."""
+        # Register custom theme
         self.app.register_theme(_CATPPUCCIN_MOCHA_BLUE)
-        self.app.theme = _THEME_NAME
+
+        # Apply theme from config, fallback to custom theme if not set
+        theme_name = self.app.config.theme if self.app.config.theme else _THEME_NAME
+        self.app.theme = theme_name
+
         self.app._load_history_from_disk()
         self.app._populate_settings()
         self.check_first_run()

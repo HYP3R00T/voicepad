@@ -52,7 +52,6 @@ class HistoryHandler:
         ol.add_option(Option(label, id=str(entry.index)))
         ol.highlighted = ol.option_count - 1
 
-    @on(OptionList.OptionSelected, "#history-options")
     def on_history_option_selected(self, event: OptionList.OptionSelected) -> None:
         """Handle selection of a history entry."""
         try:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from textual.theme import Theme
 
-THEME_NAME = "catppuccin-mocha-blue"
+THEME_NAME = "voicepad-dark"
 
 CATPPUCCIN_MOCHA_BLUE = Theme(
     name=THEME_NAME,
@@ -31,6 +31,40 @@ CATPPUCCIN_MOCHA_BLUE = Theme(
         "button-color-foreground": "#181825",
     },
 )
+
+
+def get_available_themes() -> list[str]:
+    """Get list of available themes including built-in Textual themes and custom themes."""
+    # Built-in Textual themes
+    builtin_themes = [
+        "textual-dark",
+        "textual-light",
+        "nord",
+        "gruvbox",
+        "catppuccin-mocha",
+        "dracula",
+        "tokyo-night",
+        "monokai",
+        "flexoki",
+        "catppuccin-latte",
+        "catppuccin-frappe",
+        "catppuccin-macchiato",
+        "solarized-light",
+        "solarized-dark",
+        "rose-pine",
+        "rose-pine-moon",
+        "rose-pine-dawn",
+        "atom-one-dark",
+        "atom-one-light",
+    ]
+
+    # Custom themes
+    custom_themes = [
+        "voicepad-dark",  # VoicePad's custom dark theme with blue accents
+    ]
+
+    return custom_themes + builtin_themes
+
 
 MD_PLACEHOLDER = """\
 # voicepad

@@ -85,6 +85,7 @@ class SettingsHandler:
             "markdown_path": "Where your transcription files are saved",
             "transcription_model": "Whisper model to use for transcription",
             "input_device_index": "Microphone to record from",
+            "theme": "UI color theme",
         }
 
         # Build device options once — reused for the Select widget
@@ -123,6 +124,19 @@ class SettingsHandler:
                     options=options,
                     value=current_str if current_str in VALID_TRANSCRIPTION_MODELS else "turbo",
                     id="setting-transcription_model",
+                    classes="settings-input",
+                    allow_blank=False,
+                )
+            elif field_name == "theme":
+                from voicepad.tui.theme import get_available_themes
+
+                available_themes = get_available_themes()
+                options = [(t, t) for t in available_themes]
+                current_str = str(current_val) if current_val is not None else "voicepad-dark"
+                widget = Select(
+                    options=options,
+                    value=current_str if current_str in available_themes else "voicepad-dark",
+                    id="setting-theme",
                     classes="settings-input",
                     allow_blank=False,
                 )
@@ -227,7 +241,7 @@ class SettingsHandler:
         """Read user-facing inputs, merge with existing config, write to voicepad.yaml."""
         from utilityhub_config import get_config_path, write_config
 
-        user_fields = ["recordings_path", "markdown_path", "transcription_model", "input_device_index"]
+        user_fields = ["recordings_path", "markdown_path", "transcription_model", "input_device_index", "theme"]
 
         status = self.app.query_one("#settings-status", Label)
         errors: list[str] = []
@@ -245,6 +259,9 @@ class SettingsHandler:
             with contextlib.suppress(Exception):
                 if field_name == "transcription_model":
                     sel = self.app.query_one("#setting-transcription_model", Select)
+                    raw[field_name] = str(sel.value) if sel.value is not Select.BLANK else raw[field_name]
+                elif field_name == "theme":
+                    sel = self.app.query_one("#setting-theme", Select)
                     raw[field_name] = str(sel.value) if sel.value is not Select.BLANK else raw[field_name]
                 elif field_name == "input_device_index":
                     sel = self.app.query_one("#setting-input_device_index", Select)
@@ -276,6 +293,7 @@ class SettingsHandler:
             write_config(new_config, "voicepad", path=global_path, format="yaml")
 
             hotkey_changed = new_config.global_hotkey != self.app.config.global_hotkey
+            theme_changed = new_config.theme != self.app.config.theme
             model_changed = (
                 new_config.transcription_model != self.app.config.transcription_model
                 or new_config.transcription_device != self.app.config.transcription_device
@@ -305,6 +323,15 @@ class SettingsHandler:
                 status.update("[green]\U000f012c  saved — reloading model[/]")
             else:
                 status.update("[green]\U000f012c  saved[/]")
+
+            # Show notification if theme changed
+            if theme_changed:
+                self.app.notify(
+                    "Theme saved. Please restart VoicePad to apply changes.",
+                    title="Restart Required",
+                    severity="information",
+                    timeout=3.0,
+                )
 
             self.app.set_timer(3.0, lambda: status.update(""))
         except Exception as e:

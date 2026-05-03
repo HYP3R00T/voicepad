@@ -268,6 +268,7 @@ class VoicePadApp(App[None]):
 
     @on(OptionList.OptionSelected, "#history-options")
     def on_history_option_selected(self, event: OptionList.OptionSelected) -> None:
+        """Handle selection of a history entry."""
         self._history_handler.on_history_option_selected(event)
 
     @work(name="md-view")
