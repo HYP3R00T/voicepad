@@ -1,5 +1,10 @@
 """voicepad-core — audio capture and transcription engine.
 
+On Windows, the nvidia-cublas-cu12 and nvidia-cudnn-cu12 packages install their
+DLLs under site-packages/nvidia/*/bin/.  Windows does not search Python package
+directories for DLLs, so we register each bin directory with os.add_dll_directory()
+before any ctranslate2 import can happen.  This is a no-op on non-Windows platforms.
+
 Public API:
 
     Recording:
@@ -22,6 +27,20 @@ Public API:
         get_config          — load from YAML / env / defaults
         get_config_with_metadata — load + per-field source info
 """
+
+import os
+import sys
+
+if sys.platform == "win32":
+    import pathlib
+    import site
+
+    _site_pkgs = pathlib.Path(site.getsitepackages()[0])
+    _nvidia_root = _site_pkgs / "nvidia"
+    if _nvidia_root.is_dir():
+        for _bin_dir in _nvidia_root.glob("*/bin"):
+            if _bin_dir.is_dir():
+                os.add_dll_directory(str(_bin_dir))
 
 from voicepad_core.audio import SAMPLE_RATE, AudioRecorder, AudioRecorderError
 from voicepad_core.config import Config, get_config, get_config_with_metadata
