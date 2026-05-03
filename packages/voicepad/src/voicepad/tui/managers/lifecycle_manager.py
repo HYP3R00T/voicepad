@@ -7,8 +7,6 @@ import logging
 from typing import TYPE_CHECKING
 
 from voicepad.tui.modals import SetupModal
-from voicepad.tui.theme import CATPPUCCIN_MOCHA_BLUE as _CATPPUCCIN_MOCHA_BLUE
-from voicepad.tui.theme import THEME_NAME as _THEME_NAME
 
 if TYPE_CHECKING:
     from voicepad.tui.app import VoicePadApp
@@ -24,12 +22,8 @@ class LifecycleManager:
 
     def on_mount(self) -> None:
         """Initialize the app after mounting."""
-        # Register custom theme
-        self.app.register_theme(_CATPPUCCIN_MOCHA_BLUE)
-
-        # Apply theme from config, fallback to custom theme if not set
-        theme_name = self.app.config.theme if self.app.config.theme else _THEME_NAME
-        self.app.theme = theme_name
+        # Apply theme from config
+        self.app.theme = self.app.config.theme
 
         self.app._load_history_from_disk()
         self.app._populate_settings()
