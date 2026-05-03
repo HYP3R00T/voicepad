@@ -270,8 +270,88 @@ class VoicePadApp(App[None]):
     def on_history_option_selected(self, event: OptionList.OptionSelected) -> None:
         self._history_handler.on_history_option_selected(event)
 
-    def _load_history_viewer(self, md_path: Path) -> None:
-        self._history_handler.load_history_viewer(md_path)
+    @work(name="md-view")
+    async def _load_history_viewer(self, md_path: Path) -> None:
+        """Load and display markdown content in the history viewer."""
+        import contextlib
+
+        from textual.widgets import MarkdownViewer
+
+        viewer = self.query_one("#history-viewer", MarkdownViewer)
+        try:
+            raw = md_path.read_text(encoding="utf-8")
+            lines = raw.splitlines()
+
+            # Parse YAML front matter into per-transcription metadata
+            fm_meta: dict[int, dict] = {}
+            wav_name = ""
+            body_lines: list[str] = lines
+
+            if lines and lines[0].strip() == "---":
+                fm_end = next((idx for idx, ln in enumerate(lines[1:], 1) if ln.strip() == "---"), None)
+                if fm_end is not None:
+                    current: dict | None = None
+                    for fl in lines[1:fm_end]:
+                        s = fl.strip()
+                        if s.startswith("file:"):
+                            wav_name = s.split(":", 1)[-1].strip()
+                        elif s.startswith("- n:"):
+                            with contextlib.suppress(Exception):
+                                current = {"n": int(s.split(":")[-1].strip())}
+                        elif current is not None and ":" in s:
+                            k, _, v = s.partition(":")
+                            current[k.strip()] = v.strip()
+                            fm_meta[current["n"]] = current
+                    body_lines = lines[fm_end + 1 :]
+
+            # Rebuild display content: inject metadata after each ## Transcription N heading
+            out: list[str] = []
+            if wav_name:
+                out += [f"**File:** `{wav_name}`", ""]
+
+            in_segments = False
+            for line in body_lines:
+                stripped = line.strip()
+
+                # Skip segments section entirely
+                if stripped.startswith("## Segments") or stripped.startswith("### Segments"):
+                    in_segments = True
+                    continue
+                elif stripped.startswith("## ") or stripped.startswith("### "):
+                    in_segments = False
+
+                if in_segments:
+                    continue
+
+                out.append(line)
+                if stripped.startswith("## Transcription "):
+                    with contextlib.suppress(Exception):
+                        n = int(stripped.split()[-1])
+                        meta = fm_meta.get(n, {})
+                        if meta:
+                            parts = []
+                            if "model" in meta:
+                                parts.append(f"**model:** {meta['model']}")
+                            if "language" in meta:
+                                parts.append(f"**language:** {meta['language']}")
+                            if "duration" in meta:
+                                parts.append(f"**duration:** {meta['duration']}")
+                            if "latency" in meta:
+                                parts.append(f"**latency:** {meta['latency']}")
+                            if "timestamp" in meta:
+                                parts.append(f"**timestamp:** {meta['timestamp']}")
+                            if parts:
+                                out.append("")
+                                out.append(" · ".join(parts))
+
+            await viewer.document.update("\n".join(out))
+        except Exception as e:
+            import logging
+
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to parse markdown {md_path}: {e}")
+            # Fallback to direct file loading
+            await viewer.go(md_path.resolve())
 
     @on(Markdown.LinkClicked)
     def on_markdown_link_clicked(self, event: Markdown.LinkClicked) -> None:
@@ -284,7 +364,22 @@ class VoicePadApp(App[None]):
 
     @work(thread=True, name="retranscribe")
     def _retranscribe_file(self, wav_path: Path, md_path: Path | None) -> None:
-        self._history_handler.retranscribe_file(wav_path, md_path)
+        """Retranscribe a WAV file and prepend the result to the markdown."""
+        import soundfile as sf
+        from voicepad_core.transcription import transcribe_buffer
+
+        self.call_from_thread(self._set_status, "transcribing", f"retranscribing {wav_path.name}…")
+        try:
+            audio, _sr = sf.read(str(wav_path), dtype="float32", always_2d=False)
+            if audio.ndim > 1:
+                audio = audio.mean(axis=1)
+            result = transcribe_buffer(audio, self.config)
+            error: str | None = None
+        except Exception as e:
+            result = None
+            error = str(e)
+
+        self.call_from_thread(self._history_handler.on_retranscribe_done, wav_path, md_path, result, error)
 
     # ------------------------------------------------------------------
     # Timer

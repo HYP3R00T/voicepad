@@ -6,8 +6,7 @@ import contextlib
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import soundfile as sf
-from textual import on, work
+from textual import on
 from textual.widgets import Button, Markdown, MarkdownViewer, OptionList, TabbedContent
 from textual.widgets.option_list import Option
 
@@ -56,7 +55,7 @@ class HistoryHandler:
     @on(OptionList.OptionSelected, "#history-options")
     def on_history_option_selected(self, event: OptionList.OptionSelected) -> None:
         """Handle selection of a history entry."""
-        with contextlib.suppress(Exception):
+        try:
             idx = int(event.option.id or "-1")
             if 0 <= idx < len(self.app._entries):
                 self.app._selected_entry_idx = idx
@@ -64,68 +63,16 @@ class HistoryHandler:
                 self.app.refresh_bindings()
                 if entry.md_path and entry.md_path.exists():
                     self.load_history_viewer(entry.md_path)
+        except Exception as e:
+            import logging
 
-    @work(name="md-view")
-    async def load_history_viewer(self, md_path: Path) -> None:
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to select history entry: {e}")
+
+    def load_history_viewer(self, md_path: Path) -> None:
         """Load and display markdown content in the history viewer."""
-        viewer = self.app.query_one("#history-viewer", MarkdownViewer)
-        try:
-            raw = md_path.read_text(encoding="utf-8")
-            lines = raw.splitlines()
-
-            # Parse YAML front matter into per-transcription metadata
-            fm_meta: dict[int, dict] = {}
-            wav_name = ""
-            body_lines: list[str] = lines
-
-            if lines and lines[0].strip() == "---":
-                fm_end = next((idx for idx, ln in enumerate(lines[1:], 1) if ln.strip() == "---"), None)
-                if fm_end is not None:
-                    current: dict | None = None
-                    for fl in lines[1:fm_end]:
-                        s = fl.strip()
-                        if s.startswith("file:"):
-                            wav_name = s.split(":", 1)[-1].strip()
-                        elif s.startswith("- n:"):
-                            with contextlib.suppress(Exception):
-                                current = {"n": int(s.split(":")[-1].strip())}
-                        elif current is not None and ":" in s:
-                            k, _, v = s.partition(":")
-                            current[k.strip()] = v.strip()
-                            fm_meta[current["n"]] = current
-                    body_lines = lines[fm_end + 1 :]
-
-            # Rebuild display content: inject metadata after each ## Transcription N heading
-            out: list[str] = []
-            if wav_name:
-                out += [f"**File:** `{wav_name}`", ""]
-
-            for line in body_lines:
-                stripped = line.strip()
-                out.append(line)
-                if stripped.startswith("## Transcription "):
-                    with contextlib.suppress(Exception):
-                        n = int(stripped.split()[-1])
-                        meta = fm_meta.get(n, {})
-                        if meta:
-                            parts = []
-                            if "model" in meta:
-                                parts.append(f"model: {meta['model']}")
-                            if "language" in meta:
-                                parts.append(f"language: {meta['language']}")
-                            if "duration" in meta:
-                                parts.append(f"duration: {meta['duration']}")
-                            if "latency" in meta:
-                                parts.append(f"latency: {meta['latency']}")
-                            if "timestamp" in meta:
-                                parts.append(f"_{meta['timestamp']}_")
-                            if parts:
-                                out.append("")
-                                out.append("*" + " · ".join(parts) + "*")
-
-            await viewer.document.update("\n".join(out))
-        except Exception:
-            await viewer.go(md_path.resolve())
+        # Delegate to app's worker method (App is a DOMNode, so @work decorator works there)
+        self.app._load_history_viewer(md_path)
 
     @on(Markdown.LinkClicked)
     def on_markdown_link_clicked(self, event: Markdown.LinkClicked) -> None:
@@ -148,23 +95,10 @@ class HistoryHandler:
         if entry.wav_path and entry.wav_path.exists():
             self.retranscribe_file(entry.wav_path, entry.md_path)
 
-    @work(thread=True, name="retranscribe")
     def retranscribe_file(self, wav_path: Path, md_path: Path | None) -> None:
         """Retranscribe a WAV file and prepend the result to the markdown."""
-        from voicepad_core.transcription import transcribe_buffer
-
-        self.app.call_from_thread(self.app._set_status, "transcribing", f"retranscribing {wav_path.name}…")
-        try:
-            audio, _sr = sf.read(str(wav_path), dtype="float32", always_2d=False)
-            if audio.ndim > 1:
-                audio = audio.mean(axis=1)
-            result = transcribe_buffer(audio, self.app.config)
-            error: str | None = None
-        except Exception as e:
-            result = None
-            error = str(e)
-
-        self.app.call_from_thread(self.on_retranscribe_done, wav_path, md_path, result, error)
+        # Delegate to app's worker method (App is a DOMNode, so @work decorator works there)
+        self.app._retranscribe_file(wav_path, md_path)
 
     def on_retranscribe_done(self, wav_path: Path, md_path: Path | None, result, error: str | None) -> None:
         """Handle completion of retranscription."""
