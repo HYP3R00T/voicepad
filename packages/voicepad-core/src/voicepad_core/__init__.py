@@ -1,9 +1,12 @@
 """voicepad-core — audio capture and transcription engine.
 
-On Windows, the nvidia-cublas-cu12 and nvidia-cudnn-cu12 packages install their
-DLLs under site-packages/nvidia/*/bin/.  Windows does not search Python package
-directories for DLLs, so we register each bin directory with os.add_dll_directory()
-before any ctranslate2 import can happen.  This is a no-op on non-Windows platforms.
+GPU support:
+    CUDA DLLs (cublas, cudnn, nvrtc) are provided by nvidia-cublas-cu12 and
+    nvidia-cudnn-cu12.  On Windows, ctranslate2 cannot discover them from
+    site-packages on its own, so we pre-load them via ctypes.WinDLL before
+    any ctranslate2 import.  A DLL already loaded in memory is found by
+    name without any path search — this is the most reliable approach.
+    If CUDA is unavailable, transcription falls back to CPU transparently.
 
 Public API:
 
@@ -28,19 +31,50 @@ Public API:
         get_config_with_metadata — load + per-field source info
 """
 
-import os
 import sys
 
+# Pre-load CUDA DLLs on Windows so ctranslate2 can find them.
 if sys.platform == "win32":
+    import ctypes
+    import os
     import pathlib
-    import site
 
-    _site_pkgs = pathlib.Path(site.getsitepackages()[0])
-    _nvidia_root = _site_pkgs / "nvidia"
-    if _nvidia_root.is_dir():
-        for _bin_dir in _nvidia_root.glob("*/bin"):
-            if _bin_dir.is_dir():
-                os.add_dll_directory(str(_bin_dir))
+    _cuda_dll_dirs: set[str] = set()
+
+    # Find nvidia DLL directories from sys.path (works with any installer)
+    for _path_entry in sys.path:
+        _nvidia_dir = pathlib.Path(_path_entry) / "nvidia"
+        if _nvidia_dir.is_dir():
+            for _dll_file in _nvidia_dir.rglob("*.dll"):
+                _cuda_dll_dirs.add(str(_dll_file.parent))
+            break
+
+    # Register directories AND pre-load each DLL into the process.
+    # Three mechanisms for maximum compatibility:
+    #  1. os.add_dll_directory  — Python extension module loading
+    #  2. PATH prepend          — C++ LoadLibrary calls
+    #  3. ctypes.WinDLL         — pre-load into memory (most reliable)
+    _loaded = 0
+    for _d in sorted(_cuda_dll_dirs):
+        os.add_dll_directory(_d)
+        os.environ["PATH"] = _d + os.pathsep + os.environ.get("PATH", "")
+
+    # Two passes to handle DLL dependency ordering (cudnn depends on cublas)
+    _dll_files = []
+    for _d in sorted(_cuda_dll_dirs):
+        _dll_files.extend(sorted(pathlib.Path(_d).glob("*.dll")))
+    _remaining = list(_dll_files)
+    for _pass_num in range(2):
+        _still_remaining = []
+        for _dll in _remaining:
+            try:
+                ctypes.WinDLL(str(_dll))
+                _loaded += 1
+            except OSError:
+                _still_remaining.append(_dll)
+        _remaining = _still_remaining
+        if not _remaining:
+            break
 
 from voicepad_core.audio import SAMPLE_RATE, AudioRecorder, AudioRecorderError
 from voicepad_core.config import Config, get_config, get_config_with_metadata

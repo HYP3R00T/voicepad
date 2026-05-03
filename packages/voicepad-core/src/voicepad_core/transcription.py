@@ -6,8 +6,8 @@ transcribe_file() is a thin convenience wrapper that loads audio then calls tran
 
 GPU support:
     CUDA DLLs are provided by nvidia-cublas-cu12 and nvidia-cudnn-cu12 — no system
-    CUDA installation required. CTranslate2 finds them automatically via the Python
-    package path. If CUDA is unavailable for any reason, falls back to CPU transparently.
+    CUDA installation required.  Pre-loaded into the process by voicepad_core.__init__
+    via ctypes.WinDLL.  If CUDA is unavailable for any reason, falls back to CPU.
 
 Accuracy:
     Uses standard model.transcribe with vad_filter=True for all durations.
