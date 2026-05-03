@@ -5,9 +5,9 @@ All transcription goes through this function — no file I/O required.
 transcribe_file() is a thin convenience wrapper that loads audio then calls transcribe_buffer().
 
 GPU support:
-    CUDA DLLs are bundled with the torch package — no system CUDA installation required.
-    faster-whisper (CTranslate2) finds them automatically when torch is installed.
-    If CUDA is unavailable for any reason, falls back to CPU transparently.
+    CUDA DLLs are provided by nvidia-cublas-cu12 and nvidia-cudnn-cu12 — no system
+    CUDA installation required. CTranslate2 finds them automatically via the Python
+    package path. If CUDA is unavailable for any reason, falls back to CPU transparently.
 
 Accuracy:
     Uses standard model.transcribe with vad_filter=True for all durations.
@@ -41,8 +41,8 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 # Target device. "cuda" is tried first; falls back to "cpu" automatically
-# if CUDA is unavailable. CUDA DLLs come bundled with torch — no system
-# CUDA installation required.
+# if CUDA is unavailable. CUDA DLLs are provided by nvidia-cublas-cu12 and
+# nvidia-cudnn-cu12 — no system CUDA installation required.
 # Overridden at runtime by config.transcription_device.
 DEVICE: str = "cuda"
 
