@@ -1227,7 +1227,7 @@ wheels = [
 
 [[package]]
 name = "voicepad"
-version = "0.1.7"
+version = "0.1.8"
 source = { editable = "packages/voicepad" }
 dependencies = [
     { name = "pynput" },
