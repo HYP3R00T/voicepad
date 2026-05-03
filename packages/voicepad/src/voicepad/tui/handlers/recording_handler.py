@@ -116,6 +116,7 @@ class RecordingHandler:
                 if full_text:
                     _copy_to_clipboard(full_text)
                     self.app._set_status("ready", "ready — copied to clipboard")
+                    self.app.set_timer(2.0, lambda: self.app._set_status("ready", "ready"))
                     self.app._overlay_set("copied")
                 else:
                     self.app._overlay_set("hidden")

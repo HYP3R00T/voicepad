@@ -192,6 +192,8 @@ class SetupModal(ModalScreen[tuple[str, int | None]]):
 
     @work(thread=True, name="setup-download")
     def _download_model_worker(self, model: str) -> None:
+        import time
+
         from voicepad_core import ensure_model_downloaded, model_downloaded
         from voicepad_core.transcription import TranscriptionError
 
@@ -204,15 +206,20 @@ class SetupModal(ModalScreen[tuple[str, int | None]]):
         self.app.call_from_thread(self._set_download_status, f"Downloading '{model}'…")
         self.app.call_from_thread(self._show_progress_bar)
 
-        _last_pct = [-1]
+        _start_time = time.monotonic()
+        _last_update = [0.0]  # last wall-clock time we pushed a UI update
+        _update_interval = 0.25  # push UI update at most every 250 ms
 
         def _on_progress(downloaded: int, total: int) -> None:
-            if total > 0:
-                pct = min(100, int(downloaded * 100 / total))
-                if pct == _last_pct[0]:
-                    return
-                _last_pct[0] = pct
-            self.app.call_from_thread(self._update_progress, downloaded, total)
+            now = time.monotonic()
+            # Throttle UI updates to ~4 per second — avoids flooding the event loop
+            # while still giving smooth visual feedback
+            if now - _last_update[0] < _update_interval and downloaded != total:
+                return
+            _last_update[0] = now
+            elapsed = max(now - _start_time, 0.001)
+            speed_mb = (downloaded / 1_048_576) / elapsed  # MB/s
+            self.app.call_from_thread(self._update_progress, downloaded, total, speed_mb)
 
         try:
             ensure_model_downloaded(model, self._config, on_progress=_on_progress)
@@ -225,21 +232,18 @@ class SetupModal(ModalScreen[tuple[str, int | None]]):
             bar = self.query_one("#wizard-progress", ProgressBar)
             bar.display = True
             bar.update(total=100, progress=0)
-        self._last_pct: int = -1
 
-    def _update_progress(self, downloaded: int, total: int) -> None:
+    def _update_progress(self, downloaded: int, total: int, speed_mb: float = 0.0) -> None:
         with contextlib.suppress(Exception):
             mb_done = downloaded / 1_048_576
+            speed_str = f"  {speed_mb:.1f} MB/s" if speed_mb > 0 else ""
             if total > 0:
-                pct = min(100, int(downloaded * 100 / total))
-                if pct == getattr(self, "_last_pct", -1):
-                    return
-                self._last_pct = pct
+                pct = min(100, downloaded * 100 / total)
                 mb_total = total / 1_048_576
                 self.query_one("#wizard-progress", ProgressBar).update(total=100, progress=pct)
-                self._set_download_status(f"Downloading… {mb_done:.0f} / {mb_total:.0f} MB")
+                self._set_download_status(f"Downloading… {mb_done:.1f} / {mb_total:.0f} MB{speed_str}")
             else:
-                self._set_download_status(f"Downloading… {mb_done:.1f} MB")
+                self._set_download_status(f"Downloading… {mb_done:.1f} MB{speed_str}")
 
     def _set_download_status(self, msg: str) -> None:
         with contextlib.suppress(Exception):
