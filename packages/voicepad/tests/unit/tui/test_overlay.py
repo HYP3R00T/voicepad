@@ -222,7 +222,8 @@ class TestStatusOverlay:
         overlay._run()
 
         mock_tk_class.assert_called_once()
-        assert overlay._root is mock_root
+        # _root is cleared in the finally block after mainloop exits
+        assert overlay._root is None
 
     @patch("tkinter.Tk")
     @patch("tkinter.Canvas")
@@ -258,8 +259,9 @@ class TestStatusOverlay:
         overlay._run()
 
         mock_canvas_class.assert_called_once()
-        assert overlay._canvas is mock_canvas
         mock_canvas.pack.assert_called_once()
+        # _canvas is cleared in the finally block after mainloop exits
+        assert overlay._canvas is None
 
     @patch("tkinter.Tk")
     @patch("tkinter.Canvas")
@@ -276,7 +278,8 @@ class TestStatusOverlay:
         overlay._run()
 
         mock_label_class.assert_called_once()
-        assert overlay._label is mock_label
+        # _label is cleared in the finally block after mainloop exits
+        assert overlay._label is None
 
     @patch("tkinter.Tk")
     @patch("tkinter.Canvas")

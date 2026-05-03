@@ -134,7 +134,9 @@ class StatusOverlay:
         """Destroy the window and stop the mainloop."""
         if self._root is not None:
             with contextlib.suppress(Exception):
-                self._root.after(0, self._root.destroy)
+                self._root.after(0, self._root.quit)
+        if self._thread is not None:
+            self._thread.join(timeout=2.0)
 
     def set_state(self, state: State) -> None:
         """Update the pill state from any thread."""
@@ -190,9 +192,22 @@ class StatusOverlay:
             self._ready.set()
 
             root.mainloop()
+            root.destroy()
         except Exception as e:
             logger.error(f"Overlay failed: {e}")
             self._ready.set()
+        finally:
+            # Release all Tk object references on this thread so their
+            # C-level deallocation (Tcl_DeleteInterp) happens here, not
+            # on the main thread during interpreter shutdown — which would
+            # cause "Tcl_AsyncDelete: async handler deleted by the wrong
+            # thread".
+            self._label = None
+            self._canvas = None
+            self._root = None
+            import gc
+
+            gc.collect()
 
     def _reposition(self) -> None:
         """Place the pill at the bottom-center of the primary screen."""
