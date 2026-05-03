@@ -431,22 +431,33 @@ def transcribe_buffer(audio: np.ndarray, config: Config) -> TranscriptionResult:
 
     model, device, compute, fallback = get_or_load_model(config)
 
-    # Distil models do not benefit from previous-text conditioning.
-    # For all other models, we disable it here as well because VAD already
-    # provides chunk boundaries and re-conditioning tends to amplify repeats.
+    # Distil models do not benefit from previous-text conditioning or prompts.
+    # For all other models, we disable conditioning because VAD already provides
+    # chunk boundaries and re-conditioning tends to amplify repeats/hallucinations.
+    # Instead, we rely on a strong initial_prompt to encourage proper punctuation.
     is_distil = config.transcription_model in _DISTIL_MODELS
     condition_on_prev = False
     prompt = None if is_distil else INITIAL_PROMPT
 
     try:
         # Standard mode with VAD — splits at natural speech pauses.
-        # Avoids hallucinated ellipses that BatchedInferencePipeline produces
+        # Avoids hallucinated ellucinations that BatchedInferencePipeline produces
         # at fixed 30s chunk boundaries. On turbo/RTX 3050, also faster than batched.
+        # VAD parameters tuned for better chunking: shorter silence threshold (1s)
+        # and reasonable speech padding to avoid cutting words.
+        vad_params = {
+            "threshold": 0.5,
+            "min_speech_duration_ms": 250,
+            "max_speech_duration_s": float("inf"),
+            "min_silence_duration_ms": 1000,  # 1s silence to split (vs default 2s)
+            "speech_pad_ms": 400,
+        }
         segments_iter, info = model.transcribe(
             audio,
             language=LANGUAGE,
             beam_size=BEAM_SIZE,
             vad_filter=True,
+            vad_parameters=vad_params,
             hallucination_silence_threshold=HALLUCINATION_SILENCE_THRESHOLD,
             no_speech_threshold=NO_SPEECH_THRESHOLD,
             initial_prompt=prompt,
@@ -469,6 +480,7 @@ def transcribe_buffer(audio: np.ndarray, config: Config) -> TranscriptionResult:
                 language=LANGUAGE,
                 beam_size=BEAM_SIZE,
                 vad_filter=True,
+                vad_parameters=vad_params,
                 hallucination_silence_threshold=HALLUCINATION_SILENCE_THRESHOLD,
                 no_speech_threshold=NO_SPEECH_THRESHOLD,
                 initial_prompt=prompt,

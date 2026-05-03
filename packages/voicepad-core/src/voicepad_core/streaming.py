@@ -212,10 +212,14 @@ class StreamingTranscriber:
 
         try:
             is_distil = self._config.transcription_model in _DISTIL_MODELS
-            condition_on_prev = not is_distil
+            # Disable condition_on_previous_text to prevent hallucinations/repeats.
+            # VAD already provides natural chunk boundaries. We use context-aware
+            # prompting instead to maintain continuity without amplifying errors.
+            condition_on_prev = False
             if is_distil:
                 prompt = None
             elif self._prev_context:
+                # Include previous context in prompt for continuity
                 prompt = (INITIAL_PROMPT + " " + self._prev_context[-200:]).strip()
             else:
                 prompt = INITIAL_PROMPT
@@ -227,11 +231,20 @@ class StreamingTranscriber:
 
             chunk_audio = _trim_trailing_silence(chunk_audio)
 
+            # VAD parameters tuned for better chunking within streaming chunks
+            vad_params = {
+                "threshold": 0.5,
+                "min_speech_duration_ms": 250,
+                "max_speech_duration_s": float("inf"),
+                "min_silence_duration_ms": 1000,  # 1s silence to split (vs default 2s)
+                "speech_pad_ms": 400,
+            }
             segs_iter, info = model.transcribe(
                 chunk_audio,
                 language=LANGUAGE,
                 beam_size=BEAM_SIZE,
                 vad_filter=True,
+                vad_parameters=vad_params,
                 hallucination_silence_threshold=HALLUCINATION_SILENCE_THRESHOLD,
                 no_speech_threshold=NO_SPEECH_THRESHOLD,
                 initial_prompt=prompt,
