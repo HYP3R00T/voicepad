@@ -432,24 +432,26 @@ def transcribe_buffer(audio: np.ndarray, config: Config) -> TranscriptionResult:
     model, device, compute, fallback = get_or_load_model(config)
 
     # Distil models do not benefit from previous-text conditioning or prompts.
-    # For all other models, we disable conditioning because VAD already provides
-    # chunk boundaries and re-conditioning tends to amplify repeats/hallucinations.
-    # Instead, we rely on a strong initial_prompt to encourage proper punctuation.
+    # For non-distil models, we enable conditioning for better punctuation BUT
+    # use aggressive VAD chunking (shorter max_speech_duration) to prevent
+    # hallucination buildup across long audio.
     is_distil = config.transcription_model in _DISTIL_MODELS
-    condition_on_prev = False
+    condition_on_prev = not is_distil
     prompt = None if is_distil else INITIAL_PROMPT
 
     try:
         # Standard mode with VAD — splits at natural speech pauses.
         # Avoids hallucinated ellucinations that BatchedInferencePipeline produces
         # at fixed 30s chunk boundaries. On turbo/RTX 3050, also faster than batched.
-        # VAD parameters tuned for better chunking: shorter silence threshold (1s)
-        # and reasonable speech padding to avoid cutting words.
+        # VAD parameters tuned to prevent hallucinations while maintaining punctuation:
+        # - max_speech_duration_s: 30s chunks prevent error buildup with conditioning
+        # - min_silence_duration_ms: 500ms for more frequent natural breaks
+        # - speech_pad_ms: 400ms to avoid cutting words at boundaries
         vad_params = {
             "threshold": 0.5,
             "min_speech_duration_ms": 250,
-            "max_speech_duration_s": float("inf"),
-            "min_silence_duration_ms": 1000,  # 1s silence to split (vs default 2s)
+            "max_speech_duration_s": 30.0,  # Force split at 30s to prevent hallucinations
+            "min_silence_duration_ms": 500,  # 0.5s silence for more natural breaks
             "speech_pad_ms": 400,
         }
         segments_iter, info = model.transcribe(

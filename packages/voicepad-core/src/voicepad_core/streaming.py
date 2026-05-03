@@ -212,10 +212,10 @@ class StreamingTranscriber:
 
         try:
             is_distil = self._config.transcription_model in _DISTIL_MODELS
-            # Disable condition_on_previous_text to prevent hallucinations/repeats.
-            # VAD already provides natural chunk boundaries. We use context-aware
-            # prompting instead to maintain continuity without amplifying errors.
-            condition_on_prev = False
+            # Enable conditioning for non-distil models to maintain punctuation.
+            # Combined with aggressive VAD chunking (max 30s), this prevents
+            # hallucination buildup while preserving punctuation quality.
+            condition_on_prev = not is_distil
             if is_distil:
                 prompt = None
             elif self._prev_context:
@@ -231,12 +231,12 @@ class StreamingTranscriber:
 
             chunk_audio = _trim_trailing_silence(chunk_audio)
 
-            # VAD parameters tuned for better chunking within streaming chunks
+            # VAD parameters tuned to prevent hallucinations while maintaining punctuation
             vad_params = {
                 "threshold": 0.5,
                 "min_speech_duration_ms": 250,
-                "max_speech_duration_s": float("inf"),
-                "min_silence_duration_ms": 1000,  # 1s silence to split (vs default 2s)
+                "max_speech_duration_s": 30.0,  # Force split at 30s to prevent hallucinations
+                "min_silence_duration_ms": 500,  # 0.5s silence for more natural breaks
                 "speech_pad_ms": 400,
             }
             segs_iter, info = model.transcribe(
