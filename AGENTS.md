@@ -34,18 +34,18 @@ IMPORTANT - Activate the virtual environment first
 
 ```sh
 # Full quality pass (run before PR)
-ruff check && ruff format --check && ty check && pytest packages --cov=voicepad --cov=voicepad_core --cov-fail-under=70
+uv run ruff check; uv run ruff format --check; uv run ty check; uv run pytest packages --cov=voicepad --cov=voicepad_core --cov-fail-under=70
 
 # Individual
-ruff check              # lint
-ruff format             # format (apply)
-ruff format --check     # format (check only)
-ty check                # type check
-pytest packages --cov=voicepad --cov=voicepad_core --cov-fail-under=70  # tests
+uv run ruff check              # lint
+uv run ruff format             # format (apply)
+uv run ruff format --check     # format (check only)
+uv run ty check                # type check
+uv run pytest packages --cov=voicepad --cov=voicepad_core --cov-fail-under=70  # tests
 
 # Docs
-zensical build --clean
-zensical serve
+uv run zensical build --clean
+uv run zensical serve
 ```
 
 Coverage threshold: **70%** (enforced in CI and `mise.toml` `test` task).
