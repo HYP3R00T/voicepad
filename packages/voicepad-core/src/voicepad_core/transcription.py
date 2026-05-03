@@ -285,25 +285,35 @@ def ensure_model_downloaded(
         hub_dir.mkdir(parents=True, exist_ok=True)
         cache_dir = str(hub_dir)
 
-    # Build a tqdm subclass that forwards byte counts to the callback.
-    # Must subclass real tqdm so huggingface_hub's get_lock() / set_lock()
-    # class-level calls work correctly.
     tqdm_class = None
     if on_progress is not None:
         _cb = on_progress
         from tqdm.auto import tqdm as _tqdm
 
+        # snapshot_download creates one tqdm instance per file.
+        # model.bin is the only large file (~99% of the download).
+        # We identify it by its size (> 1 MB) and track only its bytes.
+        # The total comes from the tqdm instance itself (set from the HTTP
+        # Content-Length header by huggingface_hub) — no extra API call needed.
+        _downloaded = [0]
+        _total = [0]
+
         class _ProgressTqdm(_tqdm):  # ty:ignore[unsupported-base]
             def __init__(self, *args: object, **kwargs: object) -> None:
-                kwargs.setdefault("disable", True)  # suppress console output
+                kwargs.setdefault("disable", True)
                 super().__init__(*args, **kwargs)
-                self._bytes_downloaded = 0
+                # Only track this instance if it looks like model.bin (> 1 MB).
+                # Small JSON/config files are ignored so they don't pollute the
+                # progress or cause a premature 100%.
+                self._track = bool(self.total and int(self.total) > 1_000_000)
+                if self._track and _total[0] == 0 and self.total:
+                    _total[0] = int(self.total)
 
             def update(self, n: int = 1) -> bool | None:
                 result = super().update(n)
-                self._bytes_downloaded += n
-                total = int(self.total or 0)
-                _cb(self._bytes_downloaded, total)
+                if self._track and n and n > 0:
+                    _downloaded[0] += n
+                    _cb(_downloaded[0], _total[0])
                 return result
 
         tqdm_class = _ProgressTqdm

@@ -62,6 +62,7 @@ class SetupModal(ModalScreen[tuple[str, int | None]]):
         self._chosen_model: str = config.transcription_model
         self._chosen_device_index: int | None = config.input_device_index
         self._downloading = False
+        self._download_start_time: float = 0.0
 
     # ------------------------------------------------------------------
     # Layout
@@ -85,9 +86,15 @@ class SetupModal(ModalScreen[tuple[str, int | None]]):
 
     @on(Button.Pressed, "#wizard-next")
     def on_next(self) -> None:
-        if self._step == 1 and not self._downloading:
-            self._start_download()
-            return
+        if self._step == 1:
+            if self._downloading:
+                return  # download in progress — button is disabled anyway
+            next_btn = self.query_one("#wizard-next", Button)
+            if str(next_btn.label) in ("Download →", "Download & Continue →"):
+                # First click on step 1 — start the download
+                self._start_download()
+                return
+            # Button now says "Continue →" — download finished, advance
         if self._step < 3:
             self._step += 1
             self._render_step()
@@ -116,7 +123,7 @@ class SetupModal(ModalScreen[tuple[str, int | None]]):
         back_btn = self.query_one("#wizard-back", Button)
         next_btn = self.query_one("#wizard-next", Button)
         back_btn.display = self._step > 0
-        next_btn.label = "Finish" if self._step == 3 else "Download & Continue →" if self._step == 1 else "Next →"
+        next_btn.label = "Finish" if self._step == 3 else "Download →" if self._step == 1 else "Next →"
         next_btn.disabled = False
 
         if self._step == 0:
@@ -172,7 +179,8 @@ class SetupModal(ModalScreen[tuple[str, int | None]]):
         )
         body.mount(Static("", id="wizard-model-hint", classes="wizard-hint"))
         body.mount(Static("", id="wizard-download-status", classes="wizard-status"))
-        bar = ProgressBar(id="wizard-progress", show_eta=False, show_percentage=True)
+        # Indeterminate progress bar — no percentage, just a looping animation
+        bar = ProgressBar(id="wizard-progress", show_eta=False, show_percentage=False)
         bar.display = False
         body.mount(bar)
 
@@ -187,8 +195,23 @@ class SetupModal(ModalScreen[tuple[str, int | None]]):
         if self._downloading:
             return
         self._downloading = True
+        self._download_start_time = 0.0
         self.query_one("#wizard-next", Button).disabled = True
         self._download_model_worker(self._chosen_model)
+
+    def _start_elapsed_timer(self) -> None:
+        """Tick the elapsed-time display every second while downloading."""
+        import time
+
+        if not self._downloading:
+            return
+        elapsed = time.monotonic() - self._download_start_time
+        mins, secs = divmod(int(elapsed), 60)
+        elapsed_str = f"{mins}m {secs:02d}s" if mins else f"{secs}s"
+        with contextlib.suppress(Exception):
+            self._set_download_status(f"Downloading {self._chosen_model}  ·  {elapsed_str}")
+        # Reschedule for next second
+        self.set_timer(1.0, self._start_elapsed_timer)
 
     @work(thread=True, name="setup-download")
     def _download_model_worker(self, model: str) -> None:
@@ -197,69 +220,54 @@ class SetupModal(ModalScreen[tuple[str, int | None]]):
         from voicepad_core import ensure_model_downloaded, model_downloaded
         from voicepad_core.transcription import TranscriptionError
 
-        self.app.call_from_thread(self._set_download_status, f"Checking '{model}'…")
+        self.app.call_from_thread(self._set_download_status, f"Checking {model}")
 
         if model_downloaded(model, self._config):
-            self.app.call_from_thread(self._on_download_done, model, None)
+            self.app.call_from_thread(self._on_download_done, model, None, 0.0)
             return
 
-        self.app.call_from_thread(self._set_download_status, f"Downloading '{model}'…")
+        # Record start time and kick off the indeterminate bar + elapsed timer
+        self._download_start_time = time.monotonic()
         self.app.call_from_thread(self._show_progress_bar)
-
-        _start_time = time.monotonic()
-        _last_update = [0.0]  # last wall-clock time we pushed a UI update
-        _update_interval = 0.25  # push UI update at most every 250 ms
-
-        def _on_progress(downloaded: int, total: int) -> None:
-            now = time.monotonic()
-            # Throttle UI updates to ~4 per second — avoids flooding the event loop
-            # while still giving smooth visual feedback
-            if now - _last_update[0] < _update_interval and downloaded != total:
-                return
-            _last_update[0] = now
-            elapsed = max(now - _start_time, 0.001)
-            speed_mb = (downloaded / 1_048_576) / elapsed  # MB/s
-            self.app.call_from_thread(self._update_progress, downloaded, total, speed_mb)
+        self.app.call_from_thread(self._set_download_status, f"Downloading {model}")
+        self.app.call_from_thread(self.set_timer, 1.0, self._start_elapsed_timer)
 
         try:
-            ensure_model_downloaded(model, self._config, on_progress=_on_progress)
-            self.app.call_from_thread(self._on_download_done, model, None)
+            ensure_model_downloaded(model, self._config, on_progress=None)
+            elapsed = time.monotonic() - self._download_start_time
+            self.app.call_from_thread(self._on_download_done, model, None, elapsed)
         except TranscriptionError as e:
-            self.app.call_from_thread(self._on_download_done, model, str(e))
+            self.app.call_from_thread(self._on_download_done, model, str(e), 0.0)
 
     def _show_progress_bar(self) -> None:
         with contextlib.suppress(Exception):
             bar = self.query_one("#wizard-progress", ProgressBar)
             bar.display = True
-            bar.update(total=100, progress=0)
-
-    def _update_progress(self, downloaded: int, total: int, speed_mb: float = 0.0) -> None:
-        with contextlib.suppress(Exception):
-            mb_done = downloaded / 1_048_576
-            speed_str = f"  {speed_mb:.1f} MB/s" if speed_mb > 0 else ""
-            if total > 0:
-                pct = min(100, downloaded * 100 / total)
-                mb_total = total / 1_048_576
-                self.query_one("#wizard-progress", ProgressBar).update(total=100, progress=pct)
-                self._set_download_status(f"Downloading… {mb_done:.1f} / {mb_total:.0f} MB{speed_str}")
-            else:
-                self._set_download_status(f"Downloading… {mb_done:.1f} MB{speed_str}")
+            # total=None makes Textual render an indeterminate looping bar
+            bar.update(total=None)
 
     def _set_download_status(self, msg: str) -> None:
         with contextlib.suppress(Exception):
             self.query_one("#wizard-download-status", Static).update(msg)
 
-    def _on_download_done(self, model: str, error: str | None) -> None:
+    def _on_download_done(self, model: str, error: str | None, elapsed: float) -> None:
         self._downloading = False
         with contextlib.suppress(Exception):
             self.query_one("#wizard-progress", ProgressBar).display = False
         if error:
             self._set_download_status(f"[red]\U000f0156  Download failed: {error}[/]")
-            self.query_one("#wizard-next", Button).disabled = False
+            # Re-enable the Download button so the user can retry
+            next_btn = self.query_one("#wizard-next", Button)
+            next_btn.label = "Download →"
+            next_btn.disabled = False
         else:
-            self._set_download_status(f"[green]\U000f012c  '{model}' ready[/]")
-            self._step += 1
-            self.set_timer(0.6, self._render_step)
+            # Show completion message with total time, then unlock Continue
+            mins, secs = divmod(int(elapsed), 60)
+            time_str = f"{mins}m {secs:02d}s" if mins else f"{secs}s"
+            self._set_download_status(f"[green]\U000f012c  Downloaded {model}[/]  [dim]·  took {time_str}[/]")
+            next_btn = self.query_one("#wizard-next", Button)
+            next_btn.label = "Continue →"
+            next_btn.disabled = False
 
     # ------------------------------------------------------------------
     # Step 2 — Microphone
