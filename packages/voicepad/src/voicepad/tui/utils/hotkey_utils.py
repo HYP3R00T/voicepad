@@ -38,7 +38,7 @@ MOD_TO_PYNPUT: dict[str, str] = {
     "ctrl": "<ctrl>",
     "alt": "<alt>",
     "shift": "<shift>",
-    "cmd": "<cmd>",
+    "cmd": "<cmd>",  # Windows key on Windows, Command key on macOS
 }
 
 

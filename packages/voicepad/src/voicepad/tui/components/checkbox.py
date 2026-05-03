@@ -6,12 +6,19 @@ Shows checked/unchecked state with simple text indicators, no borders or backgro
 
 from __future__ import annotations
 
-from textual import on
-from textual.widgets import Checkbox, Static
+import logging
+
+from textual.widgets import Checkbox
+
+logger = logging.getLogger(__name__)
 
 
 class VoiceCheckbox(Checkbox):
     """A minimal, chrome-free checkbox for VoicePad."""
+
+    # Custom button symbols - MUST be class attributes for Textual to use them
+    BUTTON_INNER = "◯"  # Unchecked: large empty circle (ring) - U+25EF
+    BUTTON_CHECKED = "⬤"  # Checked: large filled circle (disc) - U+2B24
 
     # Override Textual's built-in Checkbox CSS to remove all chrome
     DEFAULT_CSS = """
@@ -43,7 +50,7 @@ class VoiceCheckbox(Checkbox):
         border: none !important;
         background: transparent !important;
         color: $error;
-        width: 3;
+        width: 4;
         padding: 0;
         outline: none !important;
     }
@@ -123,9 +130,6 @@ class VoiceCheckbox(Checkbox):
     }
     """
 
-    # Custom button symbols
-    BUTTON_INNER = "○"  # Unchecked symbol (red circle)
-
     def __init__(
         self,
         label: str = "",
@@ -155,23 +159,4 @@ class VoiceCheckbox(Checkbox):
             disabled=disabled,
             name=name,
         )
-
-    def on_mount(self) -> None:
-        """Called when widget is mounted."""
-        self._update_button_text()
-
-    def _update_button_text(self) -> None:
-        """Update the button text to show checkmark or circle."""
-        try:
-            button = self.query_one(".toggle--button", Static)
-            if self.value:
-                button.update("✓")  # Green checkmark for ON
-            else:
-                button.update("○")  # Red circle for OFF
-        except Exception:
-            pass
-
-    @on(Checkbox.Changed)
-    def _on_checkbox_changed(self) -> None:
-        """Called when the checkbox value changes."""
-        self._update_button_text()
+        logger.debug(f"VoiceCheckbox created: {self.id}, value={self.value}")
