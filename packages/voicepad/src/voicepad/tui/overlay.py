@@ -21,16 +21,30 @@ logger = logging.getLogger(__name__)
 
 State = Literal["recording", "transcribing", "copied", "error", "hidden"]
 
-# Pill appearance — dark background with bright text for visibility on dark themes
-_BG = "#1e1e2e"  # Catppuccin Mocha base (dark)
-_FG = "#cdd6f4"  # Catppuccin Mocha text (light)
-_COLORS: dict[State, str] = {
-    "recording": "#f38ba8",  # Catppuccin Mocha red (brighter)
-    "transcribing": "#f9e2af",  # Catppuccin Mocha yellow (brighter)
-    "copied": "#a6e3a1",  # Catppuccin Mocha green (brighter)
-    "error": "#f38ba8",  # Catppuccin Mocha red (brighter)
-    "hidden": "#cdd6f4",
+# Per-theme colors: (background, foreground, recording, transcribing, copied, error)
+_THEME_COLORS: dict[str, tuple[str, str, str, str, str, str]] = {
+    "tokyo-night": ("#1A1B26", "#a9b1d6", "#F7768E", "#E0AF68", "#9ECE6A", "#F7768E"),
+    "catppuccin-mocha": ("#181825", "#cdd6f4", "#F28FAD", "#FAE3B0", "#ABE9B3", "#F28FAD"),
+    "catppuccin-frappe": ("#303446", "#C6D0F5", "#E78284", "#E5C890", "#A6D189", "#E78284"),
+    "catppuccin-macchiato": ("#24273A", "#CAD3F5", "#ED8796", "#EED49F", "#A6DA95", "#ED8796"),
+    "catppuccin-latte": ("#EFF1F5", "#4C4F69", "#D20F39", "#DF8E1D", "#40A02B", "#D20F39"),
+    "dracula": ("#282A36", "#F8F8F2", "#FF5555", "#FFB86C", "#50FA7B", "#FF5555"),
+    "nord": ("#2E3440", "#D8DEE9", "#BF616A", "#EBCB8B", "#A3BE8C", "#BF616A"),
+    "gruvbox": ("#282828", "#fbf1c7", "#fb4934", "#fe8019", "#b8bb26", "#fb4934"),
+    "monokai": ("#272822", "#d6d6d6", "#F92672", "#FD971F", "#A6E22E", "#F92672"),
+    "flexoki": ("#100F0F", "#FFFCF0", "#AF3029", "#AD8301", "#66800B", "#AF3029"),
+    "solarized-dark": ("#002b36", "#839496", "#dc322f", "#cb4b16", "#859900", "#dc322f"),
+    "solarized-light": ("#fdf6e3", "#586e75", "#dc322f", "#cb4b16", "#859900", "#dc322f"),
+    "rose-pine": ("#191724", "#e0def4", "#eb6f92", "#f6c177", "#9ccfd8", "#eb6f92"),
+    "rose-pine-moon": ("#232136", "#e0def4", "#eb6f92", "#f6c177", "#9ccfd8", "#eb6f92"),
+    "rose-pine-dawn": ("#faf4ed", "#575279", "#b4637a", "#ea9d34", "#56949f", "#b4637a"),
+    "atom-one-dark": ("#282C34", "#ABB2BF", "#F06262", "#DEB25B", "#62F062", "#F06262"),
+    "atom-one-light": ("#FAFAFA", "#383A42", "#F23F3F", "#D8D938", "#6CF23F", "#F23F3F"),
+    "textual-dark": ("#121212", "#e0e0e0", "#ba3c5b", "#ffa62b", "#4EBF71", "#ba3c5b"),
+    "textual-light": ("#E0E0E0", "#121212", "#ba3c5b", "#ffa62b", "#4EBF71", "#ba3c5b"),
 }
+_DEFAULT_THEME = "tokyo-night"
+
 _LABELS: dict[State, str] = {
     "recording": "● Recording…",
     "transcribing": "◌ Transcribing…",
@@ -39,6 +53,18 @@ _LABELS: dict[State, str] = {
     "hidden": "",
 }
 _AUTO_HIDE_AFTER_S = 2.0  # hide "Copied" / "Error" after this many seconds
+
+# Module-level aliases for the default theme — used by tests and external code
+_bg, _fg, _c_rec, _c_trans, _c_copy, _c_err = _THEME_COLORS[_DEFAULT_THEME]
+_BG = _bg
+_FG = _fg
+_COLORS: dict[State, str] = {
+    "recording": _c_rec,
+    "transcribing": _c_trans,
+    "copied": _c_copy,
+    "error": _c_err,
+    "hidden": _fg,
+}
 
 
 def _draw_pill(canvas_obj: object, x1: int, y1: int, x2: int, y2: int, r: int, **kw: object) -> None:
@@ -76,7 +102,16 @@ class StatusOverlay:
     All state changes are thread-safe via after() scheduling.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, theme: str = _DEFAULT_THEME) -> None:
+        colors = _THEME_COLORS.get(theme, _THEME_COLORS[_DEFAULT_THEME])
+        self._bg, self._fg, self._c_recording, self._c_transcribing, self._c_copied, self._c_error = colors
+        self._state_colors: dict[State, str] = {
+            "recording": self._c_recording,
+            "transcribing": self._c_transcribing,
+            "copied": self._c_copied,
+            "error": self._c_error,
+            "hidden": self._fg,
+        }
         self._root: tk.Tk | None = None
         self._canvas: tk.Canvas | None = None
         self._label: tk.Label | None = None
@@ -127,10 +162,10 @@ class StatusOverlay:
             root.overrideredirect(True)
             root.attributes("-topmost", True)
             root.attributes("-alpha", 0.92)
-            root.configure(bg=_BG)
+            root.configure(bg=self._bg)
 
             # Use a Canvas to draw a rounded-rectangle pill shape
-            canvas = tk.Canvas(root, bg=_BG, highlightthickness=0)
+            canvas = tk.Canvas(root, bg=self._bg, highlightthickness=0)
             canvas.pack()
             self._canvas = canvas
 
@@ -139,8 +174,8 @@ class StatusOverlay:
                 root,
                 text="",
                 font=("Segoe UI", 12, "bold"),
-                bg=_BG,
-                fg=_FG,
+                bg=self._bg,
+                fg=self._fg,
                 padx=20,
                 pady=9,
             )
@@ -193,10 +228,10 @@ class StatusOverlay:
             return
 
         text = _LABELS.get(state, "")
-        color = _COLORS.get(state, _FG)
+        color = self._state_colors.get(state, self._fg)
 
         # Measure text size to size the pill
-        self._label.configure(text=text, fg=color, bg=_BG)
+        self._label.configure(text=text, fg=color, bg=self._bg)
         self._root.update_idletasks()
         lw = self._label.winfo_reqwidth()
         lh = self._label.winfo_reqheight()
@@ -208,7 +243,7 @@ class StatusOverlay:
         # Resize canvas and draw rounded rect
         self._canvas.configure(width=w, height=h)
         self._canvas.delete("all")
-        _draw_pill(self._canvas, 0, 0, w, h, r, fill=_BG, outline=color, width=2)
+        _draw_pill(self._canvas, 0, 0, w, h, r, fill=self._bg, outline=color, width=2)
 
         # Place label centred on canvas
         self._canvas.create_window(w // 2, h // 2, window=self._label)

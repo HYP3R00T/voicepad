@@ -29,7 +29,7 @@ class HotkeyHandler:
             from voicepad.tui.hotkey import GlobalHotkeyListener
             from voicepad.tui.overlay import StatusOverlay
 
-            self.app._overlay = StatusOverlay()
+            self.app._overlay = StatusOverlay(theme=getattr(self.app.config, "theme", "tokyo-night"))
             self.app._overlay.start()
 
             self.app._hotkey_listener = GlobalHotkeyListener(
