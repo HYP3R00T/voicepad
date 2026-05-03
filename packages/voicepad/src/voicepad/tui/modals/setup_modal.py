@@ -12,6 +12,8 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, DataTable, ProgressBar, Select, Static
 from voicepad_core import VALID_TRANSCRIPTION_MODELS
 
+from voicepad.tui.components import VoiceButton
+
 if TYPE_CHECKING:
     from textual.app import ComposeResult
     from voicepad_core.config import Config
@@ -73,9 +75,9 @@ class SetupModal(ModalScreen[tuple[str, int | None]]):
             yield Static("", id="wizard-step-indicator")
             yield Static(id="wizard-body")
             with Static(id="wizard-nav"):
-                yield Button("← Back", id="wizard-back", variant="default")
+                yield VoiceButton("← Back", role="default", id="wizard-back")
                 yield Static("", id="wizard-spacer")
-                yield Button("Next →", id="wizard-next", variant="primary")
+                yield VoiceButton("Next →", role="primary", id="wizard-next")
 
     def on_mount(self) -> None:
         self._render_step()
@@ -89,7 +91,7 @@ class SetupModal(ModalScreen[tuple[str, int | None]]):
         if self._step == 1:
             if self._downloading:
                 return  # download in progress — button is disabled anyway
-            next_btn = self.query_one("#wizard-next", Button)
+            next_btn = self.query_one("#wizard-next", VoiceButton)
             if str(next_btn.label) in ("Download →", "Download & Continue →"):
                 # First click on step 1 — start the download
                 self._start_download()
@@ -120,8 +122,8 @@ class SetupModal(ModalScreen[tuple[str, int | None]]):
         for child in list(body.children):
             child.remove()
 
-        back_btn = self.query_one("#wizard-back", Button)
-        next_btn = self.query_one("#wizard-next", Button)
+        back_btn = self.query_one("#wizard-back", VoiceButton)
+        next_btn = self.query_one("#wizard-next", VoiceButton)
         back_btn.display = self._step > 0
         next_btn.label = "Finish" if self._step == 3 else "Download →" if self._step == 1 else "Next →"
         next_btn.disabled = False
@@ -196,7 +198,7 @@ class SetupModal(ModalScreen[tuple[str, int | None]]):
             return
         self._downloading = True
         self._download_start_time = 0.0
-        self.query_one("#wizard-next", Button).disabled = True
+        self.query_one("#wizard-next", VoiceButton).disabled = True
         self._download_model_worker(self._chosen_model)
 
     def _start_elapsed_timer(self) -> None:
@@ -257,7 +259,7 @@ class SetupModal(ModalScreen[tuple[str, int | None]]):
         if error:
             self._set_download_status(f"[red]\U000f0156  Download failed: {error}[/]")
             # Re-enable the Download button so the user can retry
-            next_btn = self.query_one("#wizard-next", Button)
+            next_btn = self.query_one("#wizard-next", VoiceButton)
             next_btn.label = "Download →"
             next_btn.disabled = False
         else:
@@ -265,7 +267,7 @@ class SetupModal(ModalScreen[tuple[str, int | None]]):
             mins, secs = divmod(int(elapsed), 60)
             time_str = f"{mins}m {secs:02d}s" if mins else f"{secs}s"
             self._set_download_status(f"[green]\U000f012c  Downloaded {model}[/]  [dim]·  took {time_str}[/]")
-            next_btn = self.query_one("#wizard-next", Button)
+            next_btn = self.query_one("#wizard-next", VoiceButton)
             next_btn.label = "Continue →"
             next_btn.disabled = False
 

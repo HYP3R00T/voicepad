@@ -7,7 +7,9 @@ from typing import TYPE_CHECKING
 
 from textual.binding import Binding
 from textual.screen import ModalScreen
-from textual.widgets import Button, Link, Static
+from textual.widgets import Link, Static
+
+from voicepad.tui.components import VoiceButton
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
@@ -65,7 +67,7 @@ class InfoModal(ModalScreen[None]):
                 id="info-meta",
             )
             yield Static("", id="info-divider2")
-            yield Button("Close", variant="default", id="info-close-btn")
+            yield VoiceButton("Close", role="default", id="info-close-btn")
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
+    def on_button_pressed(self, event) -> None:  # type: ignore[override]
         self.dismiss()

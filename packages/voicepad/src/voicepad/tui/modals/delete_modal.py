@@ -9,6 +9,8 @@ from textual.binding import Binding
 from textual.screen import ModalScreen
 from textual.widgets import Button, Static
 
+from voicepad.tui.components import VoiceButton
+
 if TYPE_CHECKING:
     from textual.app import ComposeResult
 
@@ -34,9 +36,9 @@ class DeleteConfirmModal(ModalScreen[bool]):
                 id="delete-body",
             )
             with Static(id="delete-nav"):
-                yield Button("Cancel", id="delete-cancel")
+                yield VoiceButton("Cancel", role="default", id="delete-cancel")
                 yield Static("", id="delete-spacer")
-                yield Button("Delete", id="delete-confirm")
+                yield VoiceButton("Delete", role="danger", id="delete-confirm")
 
     def action_dismiss_false(self) -> None:
         self.dismiss(False)

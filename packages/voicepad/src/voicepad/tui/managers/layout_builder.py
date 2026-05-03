@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 from textual.app import ComposeResult
 from textual.containers import VerticalScroll
 from textual.widgets import (
-    Button,
     Footer,
     Label,
     MarkdownViewer,
@@ -16,6 +15,8 @@ from textual.widgets import (
     TabbedContent,
     TabPane,
 )
+
+from voicepad.tui.components.button import VoiceButton
 
 if TYPE_CHECKING:
     from voicepad.tui.app import VoicePadApp
@@ -86,7 +87,7 @@ class LayoutBuilder:
                 yield Static(id="settings-fields")
             with Static(id="settings-footer"):
                 yield Label("", id="settings-status")
-                yield Button("\U000f0493  save", id="settings-save-btn")
+                yield VoiceButton("\U000f0493  save", role="primary", id="settings-save-btn")
 
     def mount_widgets(self) -> None:
         """Mount additional widgets after initial composition."""
@@ -98,7 +99,7 @@ class LayoutBuilder:
         tx = self.app.query_one("#transcription", Static)
         tx.mount(Label("speak and press space to begin…", id="tx-text", classes="placeholder"))
         tx.mount(Label("", id="tx-meta"))
-        tx.mount(Button("\U000f0191  copy", id="tx-copy-btn", disabled=True))
+        tx.mount(VoiceButton("\U000f0191  copy", role="default", id="tx-copy-btn", disabled=True))
 
     def _mount_history_tab_widgets(self) -> None:
         """Mount widgets for the history tab."""

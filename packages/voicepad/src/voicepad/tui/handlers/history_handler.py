@@ -11,6 +11,7 @@ from textual import on, work
 from textual.widgets import Button, Markdown, MarkdownViewer, OptionList, TabbedContent
 from textual.widgets.option_list import Option
 
+from voicepad.tui.components import VoiceButton
 from voicepad.tui.modals import DeleteConfirmModal
 from voicepad.tui.models import SessionEntry
 from voicepad.tui.theme import MD_PLACEHOLDER as _MD_PLACEHOLDER
@@ -270,7 +271,7 @@ class HistoryHandler:
             return
         _copy_to_clipboard(self.app._current_text)
         with contextlib.suppress(Exception):
-            btn = self.app.query_one("#tx-copy-btn", Button)
+            btn = self.app.query_one("#tx-copy-btn", VoiceButton)
             btn.label = "\U000f012c  copied"
             self.app.set_timer(1.5, lambda: setattr(btn, "label", "\U000f0191  copy"))
 

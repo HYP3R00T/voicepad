@@ -7,9 +7,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
-from textual.widgets import Button, Label, Static, TabbedContent
+from textual.widgets import Label, Static, TabbedContent
 from voicepad_core import AudioRecorder, AudioRecorderError, ChunkResult, StreamingTranscriber
 
+from voicepad.tui.components import VoiceButton
 from voicepad.tui.utils.clipboard import copy_to_clipboard as _copy_to_clipboard
 from voicepad.tui.utils.markdown import format_markdown_streaming as _format_markdown_streaming
 from voicepad.tui.workers import RecordingSession
@@ -130,7 +131,7 @@ class RecordingHandler:
             return
 
         self.app._current_text = full_text
-        self.app.query_one("#tx-copy-btn", Button).disabled = False
+        self.app.query_one("#tx-copy-btn", VoiceButton).disabled = False
 
         # Save WAV
         wav_path: Path | None = None

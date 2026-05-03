@@ -27,6 +27,7 @@ from voicepad_core import (
 )
 from voicepad_core.config import Config
 
+from voicepad.tui.components import VoiceButton
 from voicepad.tui.managers import (
     LayoutBuilder,
     LifecycleManager,
@@ -317,7 +318,7 @@ class VoicePadApp(App[None]):
 
     def action_save_settings(self) -> None:
         """Save settings via keyboard shortcut."""
-        self.query_one("#settings-save-btn", Button).press()
+        self.query_one("#settings-save-btn", VoiceButton).press()
 
     def action_copy_transcription(self) -> None:
         self._history_handler.action_copy_transcription()
