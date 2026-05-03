@@ -269,7 +269,7 @@ class TestStopRecording:
 
     @patch.object(RecordingHandler, "finalize_worker")
     def test_sets_transcribing_state_and_calls_finalize(self, mock_finalize):
-        """Test that stop_recording sets transcribing state and calls finalize_worker."""
+        """Test that stop_recording sets transcribing state and delegates to app._finalize_worker."""
         mock_app = Mock()
         mock_session = Mock()
         audio = np.array([1.0, 2.0, 3.0], dtype=np.float32)
@@ -280,9 +280,9 @@ class TestStopRecording:
         handler.stop_recording()
 
         assert mock_app._transcribing is True
-        mock_finalize.assert_called_once()
+        mock_app._finalize_worker.assert_called_once()
         # Check that audio array was passed
-        call_args = mock_finalize.call_args[0]
+        call_args = mock_app._finalize_worker.call_args[0]
         np.testing.assert_array_equal(call_args[0], audio)
 
 
