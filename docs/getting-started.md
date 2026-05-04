@@ -10,7 +10,7 @@ icon: lucide/rocket
 |---|---|
 | Python | 3.13 or newer |
 | Microphone | Any input device recognised by your OS |
-| NVIDIA GPU | Required for GPU-accelerated transcription. See [GPU Acceleration](configuration/gpu.md) |
+| NVIDIA GPU | Required for GPU-accelerated transcription. See [GPU Acceleration](configuration/gpu/) |
 | uv | Required for installation. [Install uv](https://docs.astral.sh/uv/getting-started/installation/) |
 
 !!! warning "NVIDIA GPUs only"
@@ -78,7 +78,7 @@ When you run VoicePad for the first time:
 5. Press ++space++ again to stop. Transcription begins immediately
 6. The transcribed text appears in the transcription panel within seconds
 
-The recording is saved as a WAV file and the transcription as a markdown file. Both go to `~/.config/voicepad/data/` by default. See [Configuration](configuration/index.md) to change this.
+The recording is saved as a WAV file and the transcription as a markdown file. Both go to `~/.config/voicepad/data/` by default. See [Configuration](configuration/) to change this.
 
 ## Check Your Microphone
 
@@ -87,5 +87,5 @@ If nothing is captured, your microphone may not be set as the default input devi
 ## Next Steps
 
 - [User Interface](interface.md): learn the full terminal interface
-- [Configuration](configuration/index.md): change output paths, model, and device settings
-- [GPU Acceleration](configuration/gpu.md): get the most out of your NVIDIA GPU
+- [Configuration](configuration/): change output paths, model, and device settings
+- [GPU Acceleration](configuration/gpu/): get the most out of your NVIDIA GPU

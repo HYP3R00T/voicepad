@@ -6,61 +6,62 @@ icon: lucide/home
 
 **Your private, local-first dictation studio.**
 
-Welcome! VoicePad is an open-source, lightning-fast dictation tool built from the ground up to respect your privacy. Everything happens on your machine, securely and privately. No data mining, no cloud APIs, and absolutely no subscriptions. You own your voice, and with VoicePad, you keep it that way.
+VoicePad is an open-source terminal UI for voice recording and transcription. Everything runs on your machine - no cloud, no API keys, no subscriptions. Speak, transcribe, done.
 
 ![VoicePad Interface](assets/sample_1.png)
 
-## Why VoicePad?
+## Why VoicePad
 
-Most transcription tools send your audio to a cloud API. That means your voice data (meetings, notes, ideas, sensitive conversations) leaves your machine and lives on someone else's server.
+### Private by design
 
-VoicePad takes the opposite approach:
+There is no server. Not "we promise we don't look" -- there is literally no server to send your data to. No bills to pay means no subscription model, which means no reason to charge you. Your audio stays on your machine because there is nowhere else for it to go.
 
-- **100% local processing**: every byte of audio stays on your hardware.
-- **Secure by design**: no cloud, no tracking, no data leaks.
-- **GPU-accelerated**: near-instant transcription powered by your NVIDIA GPU.
-- **Open source**: MIT licensed, fully auditable, and you are welcome to contribute!
+### Record from anywhere, without switching apps
 
-## More Than Just Text
+Open a terminal, run `uvx voicepad`, and leave it. From that point, press your hotkey in any application -- your browser, your editor, your notes app -- and VoicePad starts recording. Press it again to stop. The transcription is processed and copied to your clipboard automatically. When you close the terminal, VoicePad is gone. No background service, no startup entry, no idle resource drain.
 
-VoicePad doesn't just give you text; it safely stores your original audio recordings alongside your markdown notes. This is a massive advantage:
+### Minimal footprint
 
-- **No vendor lock-in**: You always have your original audio files. If you ever want to use a different tool in the future, your audio is ready to go.
-- **Re-transcribe anytime**: If the transcription missed a highly nuanced word or if it crashed due to memory issues, you don't have to speak again. Just select the recording in the history and hit re-transcribe!
-- **Listen back**: Sometimes you need to hear the original tone or emotion that text just can't capture.
+It is a terminal UI, not an Electron app. No bundled JavaScript engine, no browser runtime, no 300 MB of overhead just to show a button. When VoicePad is sitting idle, it is barely there.
 
 ## Features
 
-| Feature | Details |
-|---|---|
-| Interactive terminal interface | Record, review history, and configure settings in one place |
-| Streaming transcription | Live text appears while you speak |
-| Whisper model support | All faster-whisper models, from tiny through large-v3, turbo, and distil variants |
-| GPU acceleration | NVIDIA CUDA support with no separate CUDA install needed |
-| Auto-save | WAV recordings and markdown transcriptions saved automatically |
-| Flexible configuration | YAML config file or in-app settings panel |
+- **No server, no telemetry** - Nothing leaves your machine. I literally cannot collect your data - there is no server to receive it.
+- **No API keys, no accounts** - Just run it. No sign-up, no usage limits, no subscription.
+- **Global hotkey** - Trigger recording system-wide from any app. Transcription auto-copies to clipboard when done.
+- **GPU-accelerated transcription** - NVIDIA CUDA support included. No separate CUDA install needed.
+- **Multiple Whisper models** - From `tiny` to `large-v3`, `turbo`, and `distil` variants. Pick the right balance of speed and accuracy for your hardware.
+- **Streaming transcription** - Text appears live as you speak.
+- **History and re-transcription** - Browse past recordings and re-run transcription with a better model at any time. Your original audio is always there.
+- **Completely offline** - After the initial model download, no internet connection needed.
+- **Auto-save** - Every recording and transcription saved automatically.
+- **Open source** - MIT licensed, fully auditable. [Read the code](https://github.com/HYP3R00T/voicepad) or contribute.
+
+!!! note "Resource usage benchmarks coming soon"
+    Formal benchmarks across models and hardware are in progress and will be published here once available.
 
 ## Quick Start
-
-The fastest way to try VoicePad. No installation needed:
 
 ```bash
 uvx voicepad
 ```
 
-This downloads and runs VoicePad in an isolated environment using [uv](https://docs.astral.sh/uv/). The interface opens immediately, the default transcription model downloads on first run, and you can start recording right away.
+No installation needed. Downloads and runs VoicePad in an isolated environment using [uv](https://docs.astral.sh/uv/). The default model downloads on first run, then you are ready to record.
 
-## Compatibility
+!!! tip "Full setup guide"
+    For installation options, first-run walkthrough, and microphone setup, see [Getting Started](getting-started.md).
 
-| Requirement | Details |
+## System Requirements
+
+| | |
 |---|---|
-| Python | 3.13 or newer |
-| Operating system | Windows, Linux |
-| GPU | **NVIDIA GPU required** for GPU-accelerated transcription (tested on RTX 30/40 series) |
-| Audio | Any microphone or input device recognised by your OS |
+| **Python** | 3.13 or newer |
+| **OS** | Windows, Linux |
+| **GPU** | NVIDIA GPU required for GPU-accelerated transcription (tested on RTX 30/40 series) |
+| **Microphone** | Any input device recognised by your OS |
 
 !!! note "NVIDIA GPUs only"
-    VoicePad's GPU acceleration has been tested exclusively with NVIDIA GPUs. AMD and Apple Silicon GPUs are **not supported**. CPU-only mode is available as a fallback but is significantly slower.
+    GPU acceleration has been tested exclusively with NVIDIA GPUs. AMD and Apple Silicon are not supported. CPU-only mode is available as a fallback but is significantly slower.
 
 ## Support the Project ❤️
 

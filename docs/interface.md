@@ -61,7 +61,7 @@ You can change the following settings:
 | Transcription model | Whisper model to use |
 | Input device | Microphone to record from |
 
-See [Configuration](configuration/index.md) for more details on each setting.
+See [Configuration](configuration/) for more details on each setting.
 
 ## Info Panel
 

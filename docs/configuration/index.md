@@ -32,10 +32,10 @@ transcription_compute_type: auto
 
 For details on individual settings, see:
 
-- [Whisper Models](models.md): choose the right model for your hardware
-- [Input Device](input-device.md): select which microphone to use
-- [Output Paths](output-paths.md): change where recordings and transcriptions are saved
-- [GPU Acceleration](gpu.md): NVIDIA GPU requirements and performance
+- [Whisper Models](configuration/models/): choose the right model for your hardware
+- [Input Device](configuration/input-device/): select which microphone to use
+- [Output Paths](configuration/output-paths/): change where recordings and transcriptions are saved
+- [GPU Acceleration](configuration/gpu/): NVIDIA GPU requirements and performance
 
 ## Changing Settings
 
