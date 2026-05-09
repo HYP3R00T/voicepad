@@ -283,7 +283,7 @@ class SetupModal(ModalScreen[tuple[str, int | None]]):
 
         devices = _get_input_devices()
         device_options: list[tuple[str, int]] = [("System default", -1)]
-        device_options += [(f"[{d.index}]  {d.name}", d.index) for d in devices]
+        device_options += [(d.name, d.index) for d in devices]
 
         current = self._chosen_device_index if self._chosen_device_index is not None else -1
         valid = {v for _, v in device_options}

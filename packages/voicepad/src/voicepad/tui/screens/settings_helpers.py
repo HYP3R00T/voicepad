@@ -44,8 +44,8 @@ def populate_settings_form(
 
     # Build device options
     audio_devices = _get_input_devices()
-    device_options: list[tuple[str, int]] = [("system default", -1)]
-    device_options += [(f"[{d.index}]  {d.name}", d.index) for d in audio_devices]
+    device_options: list[tuple[str, int]] = [("System default", -1)]
+    device_options += [(d.name, d.index) for d in audio_devices]
 
     # Create field widgets
     for field_name, hint in user_fields.items():

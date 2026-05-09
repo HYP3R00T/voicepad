@@ -76,20 +76,87 @@ class AudioDevice:
 
 
 def _get_input_devices() -> list[AudioDevice]:
+    """Return deduplicated input devices, preferring WASAPI on Windows.
+
+    sounddevice exposes the same physical microphone multiple times — once per
+    host API (MME, DirectSound, WASAPI, WDM-KS). We keep only one entry per
+    device by preferring WASAPI (best quality/latency on Windows), then
+    DirectSound, then MME. WDM-KS entries are kernel-level and not useful for
+    normal recording, so they are always excluded.
+    """
+
     class _DeviceInfo(TypedDict, total=False):
         name: str
         max_input_channels: int
         default_samplerate: float
+        hostapi: int
 
-    devices: list[AudioDevice] = []
-    for idx, dev in enumerate(cast(list[_DeviceInfo], sd.query_devices())):
+    # Host API preference order: higher = preferred
+    api_priority: dict[str, int] = {
+        "windows wasapi": 3,
+        "windows directsound": 2,
+        "mme": 1,
+    }
+
+    all_devices = cast(list[_DeviceInfo], sd.query_devices())
+    try:
+        host_apis = sd.query_hostapis()
+    except Exception:
+        host_apis = []
+
+    def _api_name(hostapi_idx: int) -> str:
+        try:
+            return host_apis[hostapi_idx]["name"].lower()
+        except (IndexError, KeyError):
+            return ""
+
+    def _normalise_name(name: str) -> str:
+        """Normalise device name for deduplication.
+
+        MME truncates names at 31 characters, which can leave unclosed
+        parentheses (e.g. 'CABLE Output (VB-Audio Virtual '). We strip
+        everything from the first '(' onward so truncated and full names
+        both reduce to the same root (e.g. 'cable output').
+        """
+        if "(" in name:
+            name = name[: name.index("(")]
+        return name.strip().lower()
+
+    # Windows virtual routing devices — not real microphones, confuse users
+    virtual_device_names = frozenset({
+        "microsoft sound mapper - input",
+        "primary sound capture driver",
+    })
+
+    # Collect all valid input devices with their API priority
+    candidates: list[tuple[int, AudioDevice, int]] = []  # (priority, device, original_idx)
+    for idx, dev in enumerate(all_devices):
         ch = dev.get("max_input_channels") or 0
         if ch <= 0:
             continue
+        api = _api_name(dev.get("hostapi", -1))
+        # Skip WDM-KS entirely — kernel-level, confusing names, not useful for dictation
+        if "wdm" in api or "wdm-ks" in api:
+            continue
+        # Skip Windows virtual routing devices
         name = dev.get("name", f"Device {idx}")
+        if name.lower().strip() in virtual_device_names:
+            continue
+        priority = api_priority.get(api, 0)
         rate = int(dev.get("default_samplerate") or 44100)
-        devices.append(AudioDevice(index=idx, name=name, channels=ch, sample_rate=rate))
-    return devices
+        candidates.append((priority, AudioDevice(index=idx, name=name, channels=ch, sample_rate=rate), idx))
+
+    # Deduplicate: for each normalised name, keep the highest-priority API entry
+    best: dict[str, tuple[int, AudioDevice]] = {}
+    for priority, device, _ in candidates:
+        key = _normalise_name(device.name)
+        if key not in best or priority > best[key][0]:
+            best[key] = (priority, device)
+
+    # Return in original index order
+    result = [device for _, device in best.values()]
+    result.sort(key=lambda d: d.index)
+    return result
 
 
 @config_app.command("input")

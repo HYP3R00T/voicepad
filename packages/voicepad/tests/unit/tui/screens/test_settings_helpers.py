@@ -171,7 +171,7 @@ class TestPopulateSettingsForm:
             select = app.container.query_one("#setting-input_device_index", Select)
             options = select._options
             # First option should be system default
-            assert options[0][0] == "system default"
+            assert options[0][0] == "System default"
             assert options[0][1] == -1
 
     @pytest.mark.asyncio

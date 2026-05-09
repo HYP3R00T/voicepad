@@ -32,8 +32,8 @@ class SettingsHandler:
 
             # Update device dropdown
             devices = _get_input_devices()
-            device_options: list[tuple[str, int]] = [("system default", -1)]
-            device_options += [(f"[{d.index}]  {d.name}", d.index) for d in devices]
+            device_options: list[tuple[str, int]] = [("System default", -1)]
+            device_options += [(d.name, d.index) for d in devices]
             valid = {v for _, v in device_options}
             current_idx = self.app.config.input_device_index if self.app.config.input_device_index is not None else -1
             sel_device = self.app.query_one("#setting-input_device_index", Select)
@@ -94,8 +94,8 @@ class SettingsHandler:
 
         # Build device options once — reused for the Select widget
         audio_devices = _get_input_devices()
-        device_options: list[tuple[str, int]] = [("system default", -1)]
-        device_options += [(f"[{d.index}]  {d.name}", d.index) for d in audio_devices]
+        device_options: list[tuple[str, int]] = [("System default", -1)]
+        device_options += [(d.name, d.index) for d in audio_devices]
 
         container = self.app.query_one("#settings-fields", Static)
         _, meta = get_config_with_metadata()
