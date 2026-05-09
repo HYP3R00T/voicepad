@@ -129,28 +129,34 @@ class StreamingTranscriber:
     # ------------------------------------------------------------------
 
     def _get_audio_snapshot(self) -> np.ndarray:
-        """Thread-safe snapshot of all audio captured so far."""
+        """Thread-safe snapshot of all audio captured so far (at capture rate)."""
         with self._recorder._lock:
             frames = list(self._recorder._frames)
         if not frames:
             return np.array([], dtype=np.float32)
         return np.concatenate(frames).flatten()
 
+    @property
+    def _capture_rate(self) -> int:
+        """The sample rate the recorder is actually using."""
+        return getattr(self._recorder, "_capture_rate", SAMPLE_RATE)
+
     def _monitor_loop(self) -> None:
         """Background thread: poll audio, detect silence, dispatch chunks."""
         silence_start: float | None = None
+        capture_rate = self._capture_rate  # snapshot once — doesn't change mid-recording
 
         while not self._stop_event.is_set():
             time.sleep(POLL_INTERVAL_S)
 
             audio = self._get_audio_snapshot()
-            pending_s = (len(audio) - self._consumed_samples) / SAMPLE_RATE
+            pending_s = (len(audio) - self._consumed_samples) / capture_rate
 
             if pending_s < MIN_CHUNK_S:
                 continue
 
             # Check if the tail of the buffer is silent
-            tail_samples = int(SILENCE_TRIGGER_S * SAMPLE_RATE)
+            tail_samples = int(SILENCE_TRIGGER_S * capture_rate)
             tail = audio[-tail_samples:] if len(audio) >= tail_samples else audio
             rms = float(np.sqrt(np.mean(tail**2)))
 
@@ -158,31 +164,33 @@ class StreamingTranscriber:
                 if silence_start is None:
                     silence_start = time.monotonic()
                 elif time.monotonic() - silence_start >= SILENCE_TRIGGER_S:
-                    self._dispatch_chunk(audio, is_final=False)
+                    self._dispatch_chunk(audio, is_final=False, capture_rate=capture_rate)
                     silence_start = None
             else:
                 silence_start = None
 
         # Recording stopped — transcribe whatever remains
+        capture_rate = self._capture_rate
         audio = self._get_audio_snapshot()
-        remaining_s = (len(audio) - self._consumed_samples) / SAMPLE_RATE
+        remaining_s = (len(audio) - self._consumed_samples) / capture_rate
 
         if remaining_s > 0.5 or self._chunk_index == 0:
-            self._dispatch_chunk(audio, is_final=True)
+            self._dispatch_chunk(audio, is_final=True, capture_rate=capture_rate)
         else:
             # Everything already dispatched — fire empty final signal
             self._on_chunk(
                 ChunkResult(
                     index=self._chunk_index + 1,
                     text="",
-                    start_s=self._consumed_samples / SAMPLE_RATE,
-                    end_s=len(audio) / SAMPLE_RATE,
+                    start_s=self._consumed_samples / capture_rate,
+                    end_s=len(audio) / capture_rate,
                     is_final=True,
                 )
             )
 
-    def _dispatch_chunk(self, full_audio: np.ndarray, is_final: bool) -> None:
+    def _dispatch_chunk(self, full_audio: np.ndarray, is_final: bool, capture_rate: int = SAMPLE_RATE) -> None:
         """Transcribe the pending audio and fire on_chunk."""
+        from voicepad_core.audio import _resample
         from voicepad_core.transcription import (
             _DISTIL_MODELS,
             BEAM_SIZE,
@@ -196,19 +204,23 @@ class StreamingTranscriber:
         )
 
         # Include a short overlap for acoustic context at the boundary
-        overlap_samples = int(OVERLAP_S * SAMPLE_RATE)
+        overlap_samples = int(OVERLAP_S * capture_rate)
         start_sample = max(0, self._consumed_samples - overlap_samples)
         chunk_audio = full_audio[start_sample:]
 
-        chunk_start_s = self._consumed_samples / SAMPLE_RATE
-        chunk_end_s = len(full_audio) / SAMPLE_RATE
-        audio_offset_s = start_sample / SAMPLE_RATE  # for adjusting segment timestamps
+        chunk_start_s = self._consumed_samples / capture_rate
+        chunk_end_s = len(full_audio) / capture_rate
+        audio_offset_s = start_sample / capture_rate  # for adjusting segment timestamps
 
         logger.debug(
             f"Chunk {self._chunk_index + 1}: "
             f"{chunk_start_s:.1f}s–{chunk_end_s:.1f}s  "
-            f"({len(chunk_audio) / SAMPLE_RATE:.1f}s incl. {OVERLAP_S}s overlap)"
+            f"({len(chunk_audio) / capture_rate:.1f}s incl. {OVERLAP_S}s overlap)"
         )
+
+        # Resample to 16 kHz for Whisper if the device ran at a different rate
+        if capture_rate != SAMPLE_RATE:
+            chunk_audio = _resample(chunk_audio, capture_rate, SAMPLE_RATE)
 
         try:
             is_distil = self._config.transcription_model in _DISTIL_MODELS

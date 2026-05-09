@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
-from voicepad_core.audio import SAMPLE_RATE, AudioRecorder, AudioRecorderError
+from voicepad_core.audio import AudioRecorder, AudioRecorderError
 from voicepad_core.config import Config
 
 
@@ -51,7 +51,8 @@ class TestAudioRecorderInit:
 
 class TestAudioRecorderStart:
     @patch("sounddevice.InputStream")
-    def test_start_opens_stream_with_correct_parameters(self, mock_stream_class, config: Config) -> None:
+    @patch("voicepad_core.audio._query_device_sample_rate", return_value=16000)
+    def test_start_opens_stream_with_correct_parameters(self, _mock_rate, mock_stream_class, config: Config) -> None:
         """When start() is called, a sounddevice stream is opened with correct settings."""
         mock_stream = MagicMock()
         mock_stream_class.return_value = mock_stream
@@ -63,11 +64,26 @@ class TestAudioRecorderStart:
         call_kwargs = mock_stream_class.call_args[1]
         assert call_kwargs["device"] == config.input_device_index
         assert call_kwargs["channels"] == 1
-        assert call_kwargs["samplerate"] == SAMPLE_RATE
+        assert call_kwargs["samplerate"] == 16000  # native rate returned by mock
         assert call_kwargs["dtype"] == "float32"
 
     @patch("sounddevice.InputStream")
-    def test_start_calls_stream_start(self, mock_stream_class, config: Config) -> None:
+    @patch("voicepad_core.audio._query_device_sample_rate", return_value=48000)
+    def test_start_uses_native_sample_rate(self, _mock_rate, mock_stream_class, config: Config) -> None:
+        """When the device native rate differs from 16 kHz, the stream opens at the native rate."""
+        mock_stream = MagicMock()
+        mock_stream_class.return_value = mock_stream
+
+        recorder = AudioRecorder(config)
+        recorder.start()
+
+        call_kwargs = mock_stream_class.call_args[1]
+        assert call_kwargs["samplerate"] == 48000
+        assert recorder._capture_rate == 48000
+
+    @patch("sounddevice.InputStream")
+    @patch("voicepad_core.audio._query_device_sample_rate", return_value=16000)
+    def test_start_calls_stream_start(self, _mock_rate, mock_stream_class, config: Config) -> None:
         """When start() is called, stream.start() is called."""
         mock_stream = MagicMock()
         mock_stream_class.return_value = mock_stream
@@ -78,7 +94,8 @@ class TestAudioRecorderStart:
         mock_stream.start.assert_called_once()
 
     @patch("sounddevice.InputStream")
-    def test_start_sets_recording_true(self, mock_stream_class, config: Config) -> None:
+    @patch("voicepad_core.audio._query_device_sample_rate", return_value=16000)
+    def test_start_sets_recording_true(self, _mock_rate, mock_stream_class, config: Config) -> None:
         """When start() succeeds, _recording is set to True."""
         mock_stream = MagicMock()
         mock_stream_class.return_value = mock_stream
@@ -89,7 +106,8 @@ class TestAudioRecorderStart:
         assert recorder._recording is True
 
     @patch("sounddevice.InputStream")
-    def test_start_clears_frames(self, mock_stream_class, config: Config) -> None:
+    @patch("voicepad_core.audio._query_device_sample_rate", return_value=16000)
+    def test_start_clears_frames(self, _mock_rate, mock_stream_class, config: Config) -> None:
         """When start() is called, the frames buffer is cleared."""
         mock_stream = MagicMock()
         mock_stream_class.return_value = mock_stream
@@ -102,7 +120,10 @@ class TestAudioRecorderStart:
 
     def test_start_raises_if_already_recording(self, config: Config) -> None:
         """When start() is called while already recording, AudioRecorderError is raised."""
-        with patch("sounddevice.InputStream"):
+        with (
+            patch("sounddevice.InputStream"),
+            patch("voicepad_core.audio._query_device_sample_rate", return_value=16000),
+        ):
             recorder = AudioRecorder(config)
             recorder.start()
             with pytest.raises(AudioRecorderError, match="Already recording"):
@@ -166,7 +187,8 @@ class TestAudioRecorderStop:
         assert len(audio) == 0
 
     @patch("sounddevice.InputStream")
-    def test_stop_returns_concatenated_frames(self, mock_stream_class, config: Config) -> None:
+    @patch("voicepad_core.audio._query_device_sample_rate", return_value=16000)
+    def test_stop_returns_concatenated_frames(self, _mock_rate, mock_stream_class, config: Config) -> None:
         """When stop() is called with frames, they are concatenated and returned."""
         mock_stream = MagicMock()
         mock_stream_class.return_value = mock_stream
@@ -197,6 +219,26 @@ class TestAudioRecorderStop:
 
         assert isinstance(audio, np.ndarray)
         assert len(audio) == 1
+
+    @patch("sounddevice.InputStream")
+    @patch("voicepad_core.audio._query_device_sample_rate", return_value=48000)
+    def test_stop_resamples_to_16khz_when_native_rate_differs(
+        self, _mock_rate, mock_stream_class, config: Config
+    ) -> None:
+        """When the device runs at a non-16 kHz rate, stop() resamples to 16 kHz."""
+        mock_stream = MagicMock()
+        mock_stream_class.return_value = mock_stream
+
+        recorder = AudioRecorder(config)
+        recorder.start()
+
+        # Simulate 1 second of audio at 48000 Hz
+        recorder._frames = [np.zeros(48000, dtype=np.float32)]
+        audio = recorder.stop()
+
+        # Should be resampled to 16000 samples (1 second at 16 kHz)
+        assert audio.dtype == np.float32
+        assert abs(len(audio) - 16000) < 100  # allow small rounding difference
 
 
 class TestAudioRecorderIsRecording:
