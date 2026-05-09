@@ -1,0 +1,7 @@
+[
+  {
+    "id": "sample_audio",
+    "wav": "sample_audio.wav",
+    "ground_truth": "The quick brown fox jumps over the lazy dog. VoicePad records audio locally at sixteen kilohertz and transcribes it using the Whisper model. No data is sent to any server. Press space to start, press space again to stop. The transcription appears in under two seconds on most modern hardware."
+  }
+]
