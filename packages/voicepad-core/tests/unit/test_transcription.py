@@ -146,7 +146,7 @@ class TestEnsureModelDownloaded:
         (repo_dir / "model.bin").write_bytes(b"fake")
         with (
             patch.dict(os.environ, {"HF_HOME": str(tmp_path)}),
-            patch("voicepad_core.transcription.snapshot_download") as mock_dl,
+            patch("voicepad_core.transcription.download.snapshot_download") as mock_dl,
         ):
             from voicepad_core.transcription import ensure_model_downloaded
 
@@ -156,7 +156,7 @@ class TestEnsureModelDownloaded:
     def test_calls_snapshot_download_if_missing(self, tmp_path: Path) -> None:
         with (
             patch.dict(os.environ, {"HF_HOME": str(tmp_path)}),
-            patch("voicepad_core.transcription.snapshot_download") as mock_dl,
+            patch("voicepad_core.transcription.download.snapshot_download") as mock_dl,
         ):
             from voicepad_core.transcription import ensure_model_downloaded
 
@@ -171,7 +171,7 @@ class TestEnsureModelDownloaded:
         with (
             patch.dict(os.environ, {"HF_HOME": str(tmp_path)}),
             patch(
-                "voicepad_core.transcription.snapshot_download",
+                "voicepad_core.transcription.download.snapshot_download",
                 side_effect=HfHubHTTPError("404", response=mock_response),
             ),
         ):
@@ -183,7 +183,7 @@ class TestEnsureModelDownloaded:
     def test_raises_on_generic_error(self, tmp_path: Path) -> None:
         with (
             patch.dict(os.environ, {"HF_HOME": str(tmp_path)}),
-            patch("voicepad_core.transcription.snapshot_download", side_effect=OSError("disk full")),
+            patch("voicepad_core.transcription.download.snapshot_download", side_effect=OSError("disk full")),
         ):
             from voicepad_core.transcription import ensure_model_downloaded
 
@@ -199,7 +199,7 @@ class TestEnsureModelDownloaded:
 class TestLoadCpuFallback:
     def test_loads_model_with_empty_cache(self) -> None:
         _model_cache.clear()
-        with patch("voicepad_core.transcription.WhisperModel"):
+        with patch("voicepad_core.transcription.model_manager.WhisperModel"):
             model, device, compute = _load_cpu_fallback("tiny")
         assert device == "cpu"
         assert compute == "int8"

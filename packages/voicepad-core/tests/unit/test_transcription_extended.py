@@ -53,7 +53,7 @@ class TestEnsureModelDownloadedExtended:
     def test_passes_repo_id_to_snapshot_download(self, tmp_path: Path) -> None:
         with (
             patch("voicepad_core.transcription.model_downloaded", return_value=False),
-            patch("voicepad_core.transcription.snapshot_download") as mock_dl,
+            patch("voicepad_core.transcription.download.snapshot_download") as mock_dl,
         ):
             ensure_model_downloaded("base")
         # Should call with correct repo_id as keyword argument

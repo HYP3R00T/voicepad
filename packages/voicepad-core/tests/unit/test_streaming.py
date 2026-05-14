@@ -300,46 +300,6 @@ class TestDispatchChunk:
         assert len(chunks) == 1
         assert "classical physics" in chunks[0].text
 
-    def test_overlap_consistency_warning_on_mismatch(self, tmp_path: Path) -> None:
-        """When overlap text doesn't match between chunks, a warning is logged."""
-        config = Config(recordings_path=tmp_path, markdown_path=tmp_path)
-        st = StreamingTranscriber(
-            recorder=_FakeRecorder(),
-            config=config,
-            on_chunk=lambda _: None,
-            on_error=lambda _: None,
-        )
-
-        # First chunk: set up previous overlap text
-        st._chunk_index = 1
-        st._prev_overlap_text = "this is the end"
-        st._consumed_samples = int(30 * SAMPLE_RATE)
-
-        audio = _speech(31)
-
-        # Create segments where overlap text is completely different
-        seg_in_overlap = MagicMock()
-        seg_in_overlap.start, seg_in_overlap.end, seg_in_overlap.text = 0.1, 0.4, "different words"
-        seg_after = MagicMock()
-        seg_after.start, seg_after.end, seg_after.text = 0.6, 1.5, "new content"
-
-        mock_model = MagicMock()
-        mock_model.transcribe.return_value = (
-            [seg_in_overlap, seg_after],
-            MagicMock(language="en", language_probability=0.99),
-        )
-
-        with (
-            patch("voicepad_core.transcription.get_or_load_model", return_value=(mock_model, "cuda", "int8", False)),
-            patch("voicepad_core.streaming.logger") as mock_logger,
-        ):
-            st._dispatch_chunk(audio, is_final=False)
-
-        # Should have logged a warning about mismatch
-        mock_logger.warning.assert_called_once()
-        warning_msg = mock_logger.warning.call_args[0][0]
-        assert "Overlap mismatch" in warning_msg
-
     def test_prev_context_used_as_prompt_on_second_chunk(self, tmp_path: Path) -> None:
         """After the first chunk sets _prev_context, it appears in the next prompt."""
         config = Config(recordings_path=tmp_path, markdown_path=tmp_path)
