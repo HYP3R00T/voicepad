@@ -77,10 +77,10 @@ class TestAddHistoryEntry:
     """Tests for add_history_entry method."""
 
     def test_adds_entry_to_option_list(self):
-        """Test that method adds entry to the option list."""
+        """Test that method refreshes the option list with existing entries."""
         mock_app = Mock()
         mock_ol = Mock()
-        mock_ol.option_count = 1  # After adding one option
+        mock_ol.option_count = 1  # After refresh
         mock_app.query_one.return_value = mock_ol
 
         entry = SessionEntry(
@@ -93,12 +93,76 @@ class TestAddHistoryEntry:
             device="cuda",
         )
 
+        # Entry must already be in _entries when add_history_entry is called
+        mock_app._entries = [entry]
+        mock_app._sort_ascending = False
+        mock_app._selected_entry_idx = None
+
         handler = HistoryHandler(mock_app)
         handler.add_history_entry(entry)
 
+        # refresh_history_list should have cleared and re-added the option
+        mock_ol.clear_options.assert_called_once()
         mock_ol.add_option.assert_called_once()
         # After adding, highlighted should be set to option_count - 1 (which is 0)
         assert mock_ol.highlighted == 0
+
+
+class TestToggleSortOrder:
+    """Tests for toggle_sort_order method."""
+
+    def test_shows_transient_sorted_status_on_toggle(self):
+        """Test that sort toggle shows a temporary sorted status message."""
+        entry = SessionEntry(
+            index=0,
+            wav_path=Path("test.wav"),
+            md_path=None,
+            duration_s=1.5,
+            text="Test",
+            latency_ms=150.0,
+            device="cuda",
+        )
+
+        mock_app = Mock()
+        mock_app._entries = [entry]
+        mock_app._sort_ascending = True
+        mock_app._selected_entry_idx = None
+        mock_ol = Mock()
+        mock_ol.option_count = 1
+        mock_app.query_one.return_value = mock_ol
+
+        handler = HistoryHandler(mock_app)
+        handler.toggle_sort_order()
+
+        # Sort direction toggles and status is shown only as a transient notice.
+        assert mock_app._sort_ascending is False
+        mock_app._set_status.assert_called_once_with("ready", "Sorted ↑")
+        mock_app.set_timer.assert_called_once()
+
+    def test_refresh_history_list_does_not_update_status(self):
+        """Test that generic history refresh does not emit a sort status message."""
+        entry = SessionEntry(
+            index=0,
+            wav_path=Path("test.wav"),
+            md_path=None,
+            duration_s=1.5,
+            text="Test",
+            latency_ms=150.0,
+            device="cuda",
+        )
+
+        mock_app = Mock()
+        mock_app._entries = [entry]
+        mock_app._sort_ascending = True
+        mock_app._selected_entry_idx = None
+        mock_ol = Mock()
+        mock_ol.option_count = 1
+        mock_app.query_one.return_value = mock_ol
+
+        handler = HistoryHandler(mock_app)
+        handler.refresh_history_list()
+
+        mock_app._set_status.assert_not_called()
 
 
 class TestActionRetranscribeEntry:
@@ -154,6 +218,92 @@ class TestActionRetranscribeEntry:
         with patch.object(handler, "retranscribe_file") as mock_retranscribe:
             handler.action_retranscribe_entry()
             mock_retranscribe.assert_called_once_with(wav_path, None)
+
+
+class TestActionOpenEntry:
+    """Tests for open-entry actions."""
+
+    def test_opens_selected_recording(self, tmp_path):
+        """Test that the selected recording is opened with the system handler."""
+        wav_path = tmp_path / "test.wav"
+        wav_path.touch()
+
+        entry = SessionEntry(
+            index=0,
+            wav_path=wav_path,
+            md_path=None,
+            duration_s=1.0,
+            text="Test",
+            latency_ms=100.0,
+            device="cpu",
+        )
+
+        mock_app = Mock()
+        mock_app._selected_entry_idx = 0
+        mock_app._entries = [entry]
+
+        handler = HistoryHandler(mock_app)
+
+        with patch.object(handler, "_open_path") as mock_open:
+            handler.action_open_recording()
+            mock_open.assert_called_once_with(wav_path)
+
+    def test_opens_selected_markdown(self, tmp_path):
+        """Test that the selected markdown file is opened with the system handler."""
+        md_path = tmp_path / "test.md"
+        md_path.touch()
+
+        entry = SessionEntry(
+            index=0,
+            wav_path=None,
+            md_path=md_path,
+            duration_s=1.0,
+            text="Test",
+            latency_ms=100.0,
+            device="cpu",
+        )
+
+        mock_app = Mock()
+        mock_app._selected_entry_idx = 0
+        mock_app._entries = [entry]
+
+        handler = HistoryHandler(mock_app)
+
+        with patch.object(handler, "_open_path") as mock_open:
+            handler.action_open_markdown()
+            mock_open.assert_called_once_with(md_path)
+
+    def test_falls_back_to_browser_uri_when_native_open_fails(self, tmp_path):
+        """Test that a browser URI fallback is attempted if the native opener fails."""
+        md_path = tmp_path / "test.md"
+        md_path.touch()
+
+        entry = SessionEntry(
+            index=0,
+            wav_path=None,
+            md_path=md_path,
+            duration_s=1.0,
+            text="Test",
+            latency_ms=100.0,
+            device="cpu",
+        )
+
+        mock_app = Mock()
+        mock_app._selected_entry_idx = 0
+        mock_app._entries = [entry]
+        mock_app._set_status = Mock()
+
+        handler = HistoryHandler(mock_app)
+
+        with (
+            patch("voicepad.tui.handlers.history_handler.sys.platform", "linux"),
+            patch("subprocess.Popen", side_effect=FileNotFoundError),
+            patch("voicepad.tui.handlers.history_handler.webbrowser.open", return_value=True) as mock_open,
+        ):
+            handler.action_open_markdown()
+
+        mock_open.assert_called_once()
+        mock_app._set_status.assert_not_called()
 
 
 class TestActionDeleteEntry:

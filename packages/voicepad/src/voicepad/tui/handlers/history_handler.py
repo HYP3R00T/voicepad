@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import contextlib
+import os
+import sys
+import webbrowser
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -38,19 +41,22 @@ class HistoryHandler:
                 md_path, index=len(self.app._entries), recordings_path=self.app.config.recordings_path
             )
             if entry is not None:
-                # Delegate adding to add_history_entry which will append and
-                # refresh the displayed list.
-                self.add_history_entry(entry)
+                # Append entry to the canonical chronological list
+                self.app._entries.append(entry)
+        # Refresh the displayed list once after all entries are loaded
+        self.refresh_history_list()
 
     def add_history_entry(self, entry: SessionEntry) -> None:
-        """Add a new entry to the history list."""
-        # Ensure there's a list to append to (tests may provide a Mock)
+        """Add a new entry to the history list and refresh the display.
+
+        Note: The caller is responsible for appending the entry to self.app._entries.
+        This method only refreshes the displayed OptionList.
+        """
+        # Ensure there's a list to work with (tests may provide a Mock)
         if not hasattr(self.app, "_entries") or not isinstance(self.app._entries, list):
             self.app._entries = []
 
-        # Keep the canonical chronological list in memory, then refresh the
-        # displayed OptionList so it respects the current sort order.
-        self.app._entries.append(entry)
+        # Refresh the displayed OptionList so it respects the current sort order
         self.refresh_history_list()
 
     def on_history_option_selected(self, event: OptionList.OptionSelected) -> None:
@@ -95,10 +101,47 @@ class HistoryHandler:
         if entry.wav_path and entry.wav_path.exists():
             self.retranscribe_file(entry.wav_path, entry.md_path)
 
+    def action_open_recording(self) -> None:
+        """Open the selected recording in the system default app."""
+        if self.app._selected_entry_idx is None:
+            return
+        entry = self.app._entries[self.app._selected_entry_idx]
+        if entry.wav_path and entry.wav_path.exists():
+            self._open_path(entry.wav_path)
+
+    def action_open_markdown(self) -> None:
+        """Open the selected markdown file in the system default app."""
+        if self.app._selected_entry_idx is None:
+            return
+        entry = self.app._entries[self.app._selected_entry_idx]
+        if entry.md_path and entry.md_path.exists():
+            self._open_path(entry.md_path)
+
     def retranscribe_file(self, wav_path: Path, md_path: Path | None) -> None:
         """Retranscribe a WAV file and prepend the result to the markdown."""
         # Delegate to app's worker method (App is a DOMNode, so @work decorator works there)
         self.app._retranscribe_file(wav_path, md_path)
+
+    def _open_path(self, path: Path) -> None:
+        """Open a local file with the platform default handler."""
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        try:
+            if sys.platform.startswith("win"):
+                os.startfile(str(path))
+                return
+
+        except Exception as opener_error:
+            logger.debug(f"Native open failed for {path}: {opener_error}")
+
+        with contextlib.suppress(Exception):
+            if webbrowser.open(path.resolve().as_uri()):
+                return
+
+        logger.error(f"Failed to open {path}")
+        self.app._set_status("error", f"could not open {path.name}")
 
     def on_retranscribe_done(self, wav_path: Path, md_path: Path | None, result, error: str | None) -> None:
         """Handle completion of retranscription."""
@@ -143,6 +186,11 @@ class HistoryHandler:
         self.app._sort_ascending = not self.app._sort_ascending
         self.refresh_history_list()
 
+        # Show a transient sort notification only for explicit user toggles.
+        sort_status = "↓" if self.app._sort_ascending else "↑"
+        self.app._set_status("ready", f"Sorted {sort_status}")
+        self.app.set_timer(1.5, lambda: self.app._set_status("ready", "ready"))
+
     def refresh_history_list(self) -> None:
         """Refresh the history list by clearing and re-adding entries in sorted order."""
         import logging
@@ -163,10 +211,6 @@ class HistoryHandler:
         # which means reversing the chronological order so highest index
         # appears first.
         sorted_entries = sorted(self.app._entries, key=lambda e: e.index, reverse=sort_newest_first)
-
-        # Update the sort status
-        sort_status = "↓" if self.app._sort_ascending else "↑"
-        self.app._set_status("ready", f"Sorted {sort_status}")
 
         # Clear and rebuild the OptionList
         ol = self.app.query_one("#history-options", OptionList)

@@ -25,18 +25,9 @@ class TabManager:
                 # Only treat _sort_ascending as True when it's an actual bool
                 # True; mocks used in tests may return a Mock which should be
                 # treated as False here to preserve expected behavior.
-                sort_newest_first = getattr(self.app, "_sort_ascending", False)
-                if not isinstance(sort_newest_first, bool):
-                    sort_newest_first = False
-
-                if sort_newest_first:
-                    ol.highlighted = 0
-                else:
-                    ol.highlighted = ol.option_count - 1
-
                 # Select the most recent (last) entry by default so the
-                # viewer shows the newest transcription regardless of which
-                # end of the list is highlighted.
+                # viewer shows the newest transcription without forcing the
+                # list cursor to jump to the bottom.
                 target_entry = self.app._entries[-1]
 
                 self.app._selected_entry_idx = target_entry.index
@@ -52,13 +43,15 @@ class TabManager:
             "copy_transcription": "tab-record",
             "retranscribe_entry": "tab-history",
             "delete_entry": "tab-history",
+            "open_recording": "tab-history",
+            "open_markdown": "tab-history",
             "toggle_sort_order": "tab-history",
             "save_settings": "tab-settings",
         }
         if action in tab_specific:
             if active != tab_specific[action]:
                 return False
-            # t and d also require an entry to be selected
-            if action in ("retranscribe_entry", "delete_entry"):
+            # These history actions also require an entry to be selected.
+            if action in ("retranscribe_entry", "delete_entry", "open_recording", "open_markdown"):
                 return self.app._selected_entry_idx is not None
         return True

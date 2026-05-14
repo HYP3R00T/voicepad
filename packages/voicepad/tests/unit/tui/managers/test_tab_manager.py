@@ -76,12 +76,38 @@ class TestOnTabActivated:
 
         manager.on_tab_activated(event)
 
-        # Should highlight last option
-        assert mock_ol.highlighted == 1
         # Should select last entry
         assert mock_app._selected_entry_idx == 2
         # Should load the history viewer
         mock_app._load_history_viewer.assert_called_once_with(entry2.md_path)
+
+    def test_does_not_force_history_cursor_to_bottom(self, mock_app: Mock) -> None:
+        """Test that history activation does not force the list cursor to the end."""
+        from voicepad.tui.managers.tab_manager import TabManager
+
+        entry = Mock()
+        entry.index = 1
+        entry.md_path = Mock(spec=Path)
+        entry.md_path.exists.return_value = True
+
+        mock_app._entries = [entry]
+        mock_app._selected_entry_idx = None
+        mock_app._load_history_viewer = Mock()
+
+        mock_ol = Mock()
+        mock_ol.option_count = 1
+        mock_app.query_one = Mock(return_value=mock_ol)
+
+        manager = TabManager(mock_app)
+        event = Mock()
+        event.tab.id = "tab-history"
+
+        manager.on_tab_activated(event)
+
+        assert mock_app._selected_entry_idx == 1
+        mock_app._load_history_viewer.assert_called_once_with(entry.md_path)
+        # The tab activation should not force a cursor position on the list.
+        assert mock_ol.highlighted.call_count == 0
 
     def test_does_not_auto_select_if_already_selected(self, mock_app: Mock) -> None:
         """Test that auto-selection is skipped if an entry is already selected."""
@@ -243,6 +269,32 @@ class TestCheckAction:
 
         # retranscribe_entry should be blocked without selection
         result = manager.check_action("retranscribe_entry", ())
+        assert result is False
+
+    def test_blocks_open_recording_without_selection(self, mock_app: Mock) -> None:
+        """Test that open_recording requires a selected entry."""
+        from voicepad.tui.managers.tab_manager import TabManager
+
+        manager = TabManager(mock_app)
+
+        mock_tabs = mock_app.query_one.return_value
+        mock_tabs.active = "tab-history"
+        mock_app._selected_entry_idx = None
+
+        result = manager.check_action("open_recording", ())
+        assert result is False
+
+    def test_blocks_open_markdown_without_selection(self, mock_app: Mock) -> None:
+        """Test that open_markdown requires a selected entry."""
+        from voicepad.tui.managers.tab_manager import TabManager
+
+        manager = TabManager(mock_app)
+
+        mock_tabs = mock_app.query_one.return_value
+        mock_tabs.active = "tab-history"
+        mock_app._selected_entry_idx = None
+
+        result = manager.check_action("open_markdown", ())
         assert result is False
 
     def test_allows_retranscribe_with_selection(self, mock_app: Mock) -> None:
