@@ -1,34 +1,7 @@
-"""voicepad-core — audio capture and transcription engine.
+"""Audio capture and transcription engine.
 
-GPU support:
-    CUDA DLLs (cublas, cudnn, nvrtc) are provided by nvidia-cublas-cu12 and
-    nvidia-cudnn-cu12.  On Windows, ctranslate2 cannot discover them from
-    site-packages on its own, so we pre-load them via ctypes.WinDLL before
-    any ctranslate2 import.  A DLL already loaded in memory is found by
-    name without any path search — this is the most reliable approach.
-    If CUDA is unavailable, transcription falls back to CPU transparently.
-
-Public API:
-
-    Recording:
-        AudioRecorder       — open mic → collect samples → return np.ndarray
-        AudioRecorderError  — raised on device errors
-        SAMPLE_RATE         — 16000 Hz (fixed for Whisper)
-
-    Transcription:
-        transcribe_buffer   — np.ndarray → TranscriptionResult  (primary)
-        transcribe_file     — Path → TranscriptionResult         (convenience)
-        get_or_load_model   — pre-warm the model cache
-        TranscriptionResult — text, segments, latency, device info
-        Segment             — (start, end, text)
-        TranscriptionError  — base exception
-        AudioTooShortError  — audio below MIN_AUDIO_DURATION_S
-        AudioTooLongWarning — audio above MAX_AUDIO_DURATION_S
-
-    Configuration:
-        Config              — 5-field Pydantic model
-        get_config          — load from YAML / env / defaults
-        get_config_with_metadata — load + per-field source info
+On Windows, ctranslate2 cannot discover CUDA DLLs from site-packages.
+We pre-load them via ctypes.WinDLL so they're found by name in memory.
 """
 
 import sys
@@ -41,7 +14,7 @@ if sys.platform == "win32":
 
     _cuda_dll_dirs: set[str] = set()
 
-    # Find nvidia DLL directories from sys.path (works with any installer)
+    # Find nvidia DLL directories from sys.path
     for _path_entry in sys.path:
         _nvidia_dir = pathlib.Path(_path_entry) / "nvidia"
         if _nvidia_dir.is_dir():
@@ -49,11 +22,7 @@ if sys.platform == "win32":
                 _cuda_dll_dirs.add(str(_dll_file.parent))
             break
 
-    # Register directories AND pre-load each DLL into the process.
-    # Three mechanisms for maximum compatibility:
-    #  1. os.add_dll_directory  — Python extension module loading
-    #  2. PATH prepend          — C++ LoadLibrary calls
-    #  3. ctypes.WinDLL         — pre-load into memory (most reliable)
+    # Register directories and pre-load DLLs for ctranslate2 discovery
     _loaded = 0
     for _d in sorted(_cuda_dll_dirs):
         os.add_dll_directory(_d)

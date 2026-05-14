@@ -32,19 +32,7 @@ logger = logging.getLogger(__name__)
 
 
 def transcribe_buffer(audio: np.ndarray, config: Config) -> TranscriptionResult:
-    """Transcribe audio from numpy array.
-
-    Args:
-        audio: float32 array at 16 kHz mono
-        config: Configuration with model settings
-
-    Returns:
-        TranscriptionResult with text, segments, timing, and metadata
-
-    Raises:
-        AudioTooShortError: If audio below minimum duration
-        TranscriptionError: If transcription fails
-    """
+    """Transcribe audio buffer to text with segments and timing."""
 
     call_start = time.perf_counter()
 
@@ -140,7 +128,7 @@ def transcribe_buffer(audio: np.ndarray, config: Config) -> TranscriptionResult:
 
 
 def transcribe_file(audio_path: Path, config: Config) -> TranscriptionResult:
-    """Load audio file and transcribe with transcribe_buffer()."""
+    """Load audio file and transcribe."""
     if not audio_path.exists():
         raise TranscriptionError(f"Audio file not found: {audio_path}")
     if not audio_path.is_file():

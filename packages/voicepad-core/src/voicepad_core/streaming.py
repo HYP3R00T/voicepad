@@ -1,16 +1,8 @@
 """VAD-triggered streaming transcription.
 
-Monitors AudioRecorder buffer in real time, detects silence boundaries,
-and dispatches chunks to Whisper during recording for live transcription.
-
-Architecture:
-    AudioRecorder._frames  ←  sounddevice callback (16 kHz)
-           ↓  (polled every 0.3s)
-    StreamingTranscriber   ←  background thread
-      - accumulates audio
-      - silence after MIN_CHUNK_S → dispatch chunk
-      - transcribe → on_chunk callback → TUI updates
-      - on stop() → transcribe tail → on_chunk(is_final=True)
+Polls AudioRecorder buffer, detects silence boundaries, and dispatches chunks
+to Whisper during recording. Background thread accumulates audio until silence
+detected after MIN_CHUNK_S, transcribes, and calls on_chunk callback.
 """
 
 from __future__ import annotations
@@ -42,20 +34,7 @@ OVERLAP_S: float = 0.5  # Audio overlap for acoustic context at boundaries
 
 @dataclass
 class ChunkResult:
-    """Result of transcribing one streaming chunk.
-
-    Attributes:
-        index: Chunk sequence number (1-based)
-        text: Transcribed text for this chunk
-        segments: Individual timed segments within chunk
-        start_s: Chunk start position in full recording (seconds)
-        end_s: Chunk end position in full recording (seconds)
-        latency_ms: Processing time for this chunk (milliseconds)
-        device: Device used for transcription
-        language: Detected language code
-        language_probability: Language detection confidence
-        is_final: Whether this is the last chunk
-    """
+    """Result of transcribing one streaming chunk."""
 
     index: int
     text: str
@@ -72,11 +51,9 @@ class ChunkResult:
 class StreamingTranscriber:
     """Real-time transcription by monitoring active AudioRecorder.
 
-    Usage:
-        streamer = StreamingTranscriber(recorder, config, on_chunk, on_error)
-        streamer.start()
-        # ... recording ...
-        streamer.stop()  # blocks until final chunk transcribed
+    Polls recorder buffer, detects silence boundaries, and dispatches chunks
+    to Whisper. Calls on_chunk callback with results. stop() blocks until
+    final chunk is transcribed.
     """
 
     def __init__(

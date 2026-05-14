@@ -1,13 +1,7 @@
 """Microphone capture with automatic resampling to 16 kHz.
 
-Public API:
-    recorder.start()          — open mic, begin collecting samples
-    audio = recorder.stop()   — close mic, return float32 array at 16 kHz
-    recorder.is_recording()   — True while mic is open
-
-Sample rate handling:
-    Records at device's native rate (44100/48000 Hz) to avoid PaErrorCode -9997
-    on WASAPI/ALSA devices that reject 16 kHz. Resamples to 16 kHz in stop().
+Records at device's native sample rate to avoid PaErrorCode -9997 on
+WASAPI/ALSA devices that reject 16 kHz. Resamples to 16 kHz on stop().
 """
 
 from __future__ import annotations
@@ -35,7 +29,7 @@ class AudioRecorderError(Exception):
 
 
 def _query_device_sample_rate(device_index: int | None) -> int:
-    """Return device's native sample rate, fallback to 16000."""
+    """Query device's native sample rate, fallback to 16000."""
     try:
         info = sd.query_devices(device_index, kind="input")
         rate = int(info.get("default_samplerate", SAMPLE_RATE))
@@ -45,19 +39,7 @@ def _query_device_sample_rate(device_index: int | None) -> int:
 
 
 def _resample(audio: np.ndarray, from_rate: int, to_rate: int) -> np.ndarray:
-    """Resample float32 mono array using scipy.signal.resample_poly.
-
-    Args:
-        audio: Input audio array
-        from_rate: Source sample rate in Hz
-        to_rate: Target sample rate in Hz
-
-    Returns:
-        Resampled audio array
-
-    Note:
-        Falls back to linear interpolation if scipy unavailable.
-    """
+    """Resample audio using scipy.signal.resample_poly, fallback to linear interpolation."""
     if from_rate == to_rate:
         return audio
     try:
