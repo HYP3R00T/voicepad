@@ -38,19 +38,22 @@ class HistoryHandler:
                 md_path, index=len(self.app._entries), recordings_path=self.app.config.recordings_path
             )
             if entry is not None:
-                # Delegate adding to add_history_entry which will append and
-                # refresh the displayed list.
-                self.add_history_entry(entry)
+                # Append entry to the canonical chronological list
+                self.app._entries.append(entry)
+        # Refresh the displayed list once after all entries are loaded
+        self.refresh_history_list()
 
     def add_history_entry(self, entry: SessionEntry) -> None:
-        """Add a new entry to the history list."""
-        # Ensure there's a list to append to (tests may provide a Mock)
+        """Add a new entry to the history list and refresh the display.
+
+        Note: The caller is responsible for appending the entry to self.app._entries.
+        This method only refreshes the displayed OptionList.
+        """
+        # Ensure there's a list to work with (tests may provide a Mock)
         if not hasattr(self.app, "_entries") or not isinstance(self.app._entries, list):
             self.app._entries = []
 
-        # Keep the canonical chronological list in memory, then refresh the
-        # displayed OptionList so it respects the current sort order.
-        self.app._entries.append(entry)
+        # Refresh the displayed OptionList so it respects the current sort order
         self.refresh_history_list()
 
     def on_history_option_selected(self, event: OptionList.OptionSelected) -> None:
@@ -143,6 +146,11 @@ class HistoryHandler:
         self.app._sort_ascending = not self.app._sort_ascending
         self.refresh_history_list()
 
+        # Show a transient sort notification only for explicit user toggles.
+        sort_status = "↓" if self.app._sort_ascending else "↑"
+        self.app._set_status("ready", f"Sorted {sort_status}")
+        self.app.set_timer(1.5, lambda: self.app._set_status("ready", "ready"))
+
     def refresh_history_list(self) -> None:
         """Refresh the history list by clearing and re-adding entries in sorted order."""
         import logging
@@ -163,10 +171,6 @@ class HistoryHandler:
         # which means reversing the chronological order so highest index
         # appears first.
         sorted_entries = sorted(self.app._entries, key=lambda e: e.index, reverse=sort_newest_first)
-
-        # Update the sort status
-        sort_status = "↓" if self.app._sort_ascending else "↑"
-        self.app._set_status("ready", f"Sorted {sort_status}")
 
         # Clear and rebuild the OptionList
         ol = self.app.query_one("#history-options", OptionList)

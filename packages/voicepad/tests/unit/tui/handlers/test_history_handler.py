@@ -77,10 +77,10 @@ class TestAddHistoryEntry:
     """Tests for add_history_entry method."""
 
     def test_adds_entry_to_option_list(self):
-        """Test that method adds entry to the option list."""
+        """Test that method refreshes the option list with existing entries."""
         mock_app = Mock()
         mock_ol = Mock()
-        mock_ol.option_count = 1  # After adding one option
+        mock_ol.option_count = 1  # After refresh
         mock_app.query_one.return_value = mock_ol
 
         entry = SessionEntry(
@@ -93,12 +93,76 @@ class TestAddHistoryEntry:
             device="cuda",
         )
 
+        # Entry must already be in _entries when add_history_entry is called
+        mock_app._entries = [entry]
+        mock_app._sort_ascending = False
+        mock_app._selected_entry_idx = None
+
         handler = HistoryHandler(mock_app)
         handler.add_history_entry(entry)
 
+        # refresh_history_list should have cleared and re-added the option
+        mock_ol.clear_options.assert_called_once()
         mock_ol.add_option.assert_called_once()
         # After adding, highlighted should be set to option_count - 1 (which is 0)
         assert mock_ol.highlighted == 0
+
+
+class TestToggleSortOrder:
+    """Tests for toggle_sort_order method."""
+
+    def test_shows_transient_sorted_status_on_toggle(self):
+        """Test that sort toggle shows a temporary sorted status message."""
+        entry = SessionEntry(
+            index=0,
+            wav_path=Path("test.wav"),
+            md_path=None,
+            duration_s=1.5,
+            text="Test",
+            latency_ms=150.0,
+            device="cuda",
+        )
+
+        mock_app = Mock()
+        mock_app._entries = [entry]
+        mock_app._sort_ascending = True
+        mock_app._selected_entry_idx = None
+        mock_ol = Mock()
+        mock_ol.option_count = 1
+        mock_app.query_one.return_value = mock_ol
+
+        handler = HistoryHandler(mock_app)
+        handler.toggle_sort_order()
+
+        # Sort direction toggles and status is shown only as a transient notice.
+        assert mock_app._sort_ascending is False
+        mock_app._set_status.assert_called_once_with("ready", "Sorted ↑")
+        mock_app.set_timer.assert_called_once()
+
+    def test_refresh_history_list_does_not_update_status(self):
+        """Test that generic history refresh does not emit a sort status message."""
+        entry = SessionEntry(
+            index=0,
+            wav_path=Path("test.wav"),
+            md_path=None,
+            duration_s=1.5,
+            text="Test",
+            latency_ms=150.0,
+            device="cuda",
+        )
+
+        mock_app = Mock()
+        mock_app._entries = [entry]
+        mock_app._sort_ascending = True
+        mock_app._selected_entry_idx = None
+        mock_ol = Mock()
+        mock_ol.option_count = 1
+        mock_app.query_one.return_value = mock_ol
+
+        handler = HistoryHandler(mock_app)
+        handler.refresh_history_list()
+
+        mock_app._set_status.assert_not_called()
 
 
 class TestActionRetranscribeEntry:
