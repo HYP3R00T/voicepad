@@ -38,19 +38,20 @@ class HistoryHandler:
                 md_path, index=len(self.app._entries), recordings_path=self.app.config.recordings_path
             )
             if entry is not None:
-                self.app._entries.append(entry)
+                # Delegate adding to add_history_entry which will append and
+                # refresh the displayed list.
                 self.add_history_entry(entry)
 
     def add_history_entry(self, entry: SessionEntry) -> None:
         """Add a new entry to the history list."""
-        ol = self.app.query_one("#history-options", OptionList)
-        name = entry.wav_path.stem if entry.wav_path else f"clip-{entry.index + 1}"
-        label = (
-            f"[bold]{entry.timestamp}[/]  [dim]{name}[/]\n"
-            f"  [dim]{entry.duration_s:.1f}s · {entry.latency_ms:.0f}ms · {entry.device}[/]"
-        )
-        ol.add_option(Option(label, id=str(entry.index)))
-        ol.highlighted = ol.option_count - 1
+        # Ensure there's a list to append to (tests may provide a Mock)
+        if not hasattr(self.app, "_entries") or not isinstance(self.app._entries, list):
+            self.app._entries = []
+
+        # Keep the canonical chronological list in memory, then refresh the
+        # displayed OptionList so it respects the current sort order.
+        self.app._entries.append(entry)
+        self.refresh_history_list()
 
     def on_history_option_selected(self, event: OptionList.OptionSelected) -> None:
         """Handle selection of a history entry."""
@@ -136,6 +137,63 @@ class HistoryHandler:
         if active != "tab-history" or self.app._selected_entry_idx is None:
             return
         self.show_delete_confirm()
+
+    def toggle_sort_order(self) -> None:
+        """Toggle between ascending and descending sort order for history entries."""
+        self.app._sort_ascending = not self.app._sort_ascending
+        self.refresh_history_list()
+
+    def refresh_history_list(self) -> None:
+        """Refresh the history list by clearing and re-adding entries in sorted order."""
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        if not self.app._entries:
+            return
+
+        # Sort entries by index (chronological order). Only treat
+        # `_sort_ascending` as True when it's explicitly a bool True; tests
+        # may provide a Mock object instead.
+        sort_newest_first = getattr(self.app, "_sort_ascending", False)
+        if not isinstance(sort_newest_first, bool):
+            sort_newest_first = False
+
+        # When `sort_newest_first` is True we want newest-first display,
+        # which means reversing the chronological order so highest index
+        # appears first.
+        sorted_entries = sorted(self.app._entries, key=lambda e: e.index, reverse=sort_newest_first)
+
+        # Update the sort status
+        sort_status = "↓" if self.app._sort_ascending else "↑"
+        self.app._set_status("ready", f"Sorted {sort_status}")
+
+        # Clear and rebuild the OptionList
+        ol = self.app.query_one("#history-options", OptionList)
+        ol.clear_options()
+
+        for e in sorted_entries:
+            name = e.wav_path.stem if e.wav_path else f"clip-{e.index + 1}"
+            label = (
+                f"[bold]{e.timestamp}[/]  [dim]{name}[/]\n"
+                f"  [dim]{e.duration_s:.1f}s · {e.latency_ms:.0f}ms · {e.device}[/]"
+            )
+            ol.add_option(Option(label, id=str(e.index)))
+        # Determine which entry should be highlighted (and therefore shown
+        # at the top of the OptionList viewport). When the UI is showing
+        # newest-first, highlight the first option; otherwise highlight the
+        # last option.
+        if sort_newest_first:
+            ol.highlighted = 0
+            # The newest entry is the first in sorted_entries when newest-first
+            self.app._selected_entry_idx = sorted_entries[0].index
+        else:
+            ol.highlighted = ol.option_count - 1
+            self.app._selected_entry_idx = sorted_entries[-1].index
+
+        logger.info(
+            f"History list refreshed with sort order: {'newest first' if self.app._sort_ascending else 'oldest first'}"
+        )
 
     def show_delete_confirm(self) -> None:
         """Show the delete confirmation modal."""

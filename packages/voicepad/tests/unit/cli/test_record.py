@@ -195,6 +195,9 @@ class TestFormatMarkdown:
 class TestStartRecording:
     def test_exits_on_model_download_failure(self, tmp_path: Path) -> None:
         mock_config = Config(recordings_path=tmp_path, markdown_path=tmp_path)
+        mock_recorder = MagicMock()
+        mock_recorder.stop.return_value = np.zeros(16000, dtype=np.float32)  # 1s of audio
+        mock_recorder.make_wav_path.return_value = tmp_path / "test.wav"
         with (
             patch("voicepad.cli.record.get_config", return_value=mock_config),
             patch("voicepad.cli.record.model_downloaded", return_value=False),
@@ -202,8 +205,10 @@ class TestStartRecording:
                 "voicepad.cli.record.ensure_model_downloaded",
                 side_effect=TranscriptionError("Download failed"),
             ),
+            patch("voicepad.cli.record.AudioRecorder", return_value=mock_recorder),
+            patch("voicepad.cli.record.time.sleep"),
         ):
-            result = runner.invoke(record_app, ["start", "--no-transcribe"])
+            result = runner.invoke(record_app, ["start", "--no-transcribe", "--duration", "0.5"])
         # When --no-transcribe is used, model download is skipped
         assert result.exit_code == 0
 
