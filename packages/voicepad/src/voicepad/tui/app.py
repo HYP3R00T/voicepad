@@ -73,6 +73,8 @@ class VoicePadApp(App[None]):
         # History tab
         Binding("t", "retranscribe_entry", "Retranscribe", show=True),
         Binding("d", "delete_entry", "Delete", show=True),
+        Binding("v", "open_recording", "Open recording", show=True),
+        Binding("m", "open_markdown", "Open markdown", show=True),
         Binding("o", "toggle_sort_order", "Sort", show=True),
         # Settings tab
         Binding("s", "save_settings", "Save", show=True),
@@ -422,6 +424,14 @@ class VoicePadApp(App[None]):
     def action_retranscribe_entry(self) -> None:
         """Retranscribe the selected history entry via keyboard shortcut."""
         self._history_handler.action_retranscribe_entry()
+
+    def action_open_recording(self) -> None:
+        """Open the selected recording in the default audio app."""
+        self._history_handler.action_open_recording()
+
+    def action_open_markdown(self) -> None:
+        """Open the selected markdown in the default editor."""
+        self._history_handler.action_open_markdown()
 
     def action_save_settings(self) -> None:
         """Save settings via keyboard shortcut."""

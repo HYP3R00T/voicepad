@@ -271,6 +271,32 @@ class TestCheckAction:
         result = manager.check_action("retranscribe_entry", ())
         assert result is False
 
+    def test_blocks_open_recording_without_selection(self, mock_app: Mock) -> None:
+        """Test that open_recording requires a selected entry."""
+        from voicepad.tui.managers.tab_manager import TabManager
+
+        manager = TabManager(mock_app)
+
+        mock_tabs = mock_app.query_one.return_value
+        mock_tabs.active = "tab-history"
+        mock_app._selected_entry_idx = None
+
+        result = manager.check_action("open_recording", ())
+        assert result is False
+
+    def test_blocks_open_markdown_without_selection(self, mock_app: Mock) -> None:
+        """Test that open_markdown requires a selected entry."""
+        from voicepad.tui.managers.tab_manager import TabManager
+
+        manager = TabManager(mock_app)
+
+        mock_tabs = mock_app.query_one.return_value
+        mock_tabs.active = "tab-history"
+        mock_app._selected_entry_idx = None
+
+        result = manager.check_action("open_markdown", ())
+        assert result is False
+
     def test_allows_retranscribe_with_selection(self, mock_app: Mock) -> None:
         """Test that retranscribe_entry is allowed with a selected entry."""
         from voicepad.tui.managers.tab_manager import TabManager

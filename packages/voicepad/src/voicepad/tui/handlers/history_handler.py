@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import contextlib
+import os
+import sys
+import webbrowser
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -98,10 +101,47 @@ class HistoryHandler:
         if entry.wav_path and entry.wav_path.exists():
             self.retranscribe_file(entry.wav_path, entry.md_path)
 
+    def action_open_recording(self) -> None:
+        """Open the selected recording in the system default app."""
+        if self.app._selected_entry_idx is None:
+            return
+        entry = self.app._entries[self.app._selected_entry_idx]
+        if entry.wav_path and entry.wav_path.exists():
+            self._open_path(entry.wav_path)
+
+    def action_open_markdown(self) -> None:
+        """Open the selected markdown file in the system default app."""
+        if self.app._selected_entry_idx is None:
+            return
+        entry = self.app._entries[self.app._selected_entry_idx]
+        if entry.md_path and entry.md_path.exists():
+            self._open_path(entry.md_path)
+
     def retranscribe_file(self, wav_path: Path, md_path: Path | None) -> None:
         """Retranscribe a WAV file and prepend the result to the markdown."""
         # Delegate to app's worker method (App is a DOMNode, so @work decorator works there)
         self.app._retranscribe_file(wav_path, md_path)
+
+    def _open_path(self, path: Path) -> None:
+        """Open a local file with the platform default handler."""
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        try:
+            if sys.platform.startswith("win"):
+                os.startfile(str(path))
+                return
+
+        except Exception as opener_error:
+            logger.debug(f"Native open failed for {path}: {opener_error}")
+
+        with contextlib.suppress(Exception):
+            if webbrowser.open(path.resolve().as_uri()):
+                return
+
+        logger.error(f"Failed to open {path}")
+        self.app._set_status("error", f"could not open {path.name}")
 
     def on_retranscribe_done(self, wav_path: Path, md_path: Path | None, result, error: str | None) -> None:
         """Handle completion of retranscription."""

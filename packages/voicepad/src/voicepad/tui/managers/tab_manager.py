@@ -43,13 +43,15 @@ class TabManager:
             "copy_transcription": "tab-record",
             "retranscribe_entry": "tab-history",
             "delete_entry": "tab-history",
+            "open_recording": "tab-history",
+            "open_markdown": "tab-history",
             "toggle_sort_order": "tab-history",
             "save_settings": "tab-settings",
         }
         if action in tab_specific:
             if active != tab_specific[action]:
                 return False
-            # t and d also require an entry to be selected
-            if action in ("retranscribe_entry", "delete_entry"):
+            # These history actions also require an entry to be selected.
+            if action in ("retranscribe_entry", "delete_entry", "open_recording", "open_markdown"):
                 return self.app._selected_entry_idx is not None
         return True

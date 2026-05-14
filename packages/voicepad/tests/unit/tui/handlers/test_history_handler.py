@@ -220,6 +220,92 @@ class TestActionRetranscribeEntry:
             mock_retranscribe.assert_called_once_with(wav_path, None)
 
 
+class TestActionOpenEntry:
+    """Tests for open-entry actions."""
+
+    def test_opens_selected_recording(self, tmp_path):
+        """Test that the selected recording is opened with the system handler."""
+        wav_path = tmp_path / "test.wav"
+        wav_path.touch()
+
+        entry = SessionEntry(
+            index=0,
+            wav_path=wav_path,
+            md_path=None,
+            duration_s=1.0,
+            text="Test",
+            latency_ms=100.0,
+            device="cpu",
+        )
+
+        mock_app = Mock()
+        mock_app._selected_entry_idx = 0
+        mock_app._entries = [entry]
+
+        handler = HistoryHandler(mock_app)
+
+        with patch.object(handler, "_open_path") as mock_open:
+            handler.action_open_recording()
+            mock_open.assert_called_once_with(wav_path)
+
+    def test_opens_selected_markdown(self, tmp_path):
+        """Test that the selected markdown file is opened with the system handler."""
+        md_path = tmp_path / "test.md"
+        md_path.touch()
+
+        entry = SessionEntry(
+            index=0,
+            wav_path=None,
+            md_path=md_path,
+            duration_s=1.0,
+            text="Test",
+            latency_ms=100.0,
+            device="cpu",
+        )
+
+        mock_app = Mock()
+        mock_app._selected_entry_idx = 0
+        mock_app._entries = [entry]
+
+        handler = HistoryHandler(mock_app)
+
+        with patch.object(handler, "_open_path") as mock_open:
+            handler.action_open_markdown()
+            mock_open.assert_called_once_with(md_path)
+
+    def test_falls_back_to_browser_uri_when_native_open_fails(self, tmp_path):
+        """Test that a browser URI fallback is attempted if the native opener fails."""
+        md_path = tmp_path / "test.md"
+        md_path.touch()
+
+        entry = SessionEntry(
+            index=0,
+            wav_path=None,
+            md_path=md_path,
+            duration_s=1.0,
+            text="Test",
+            latency_ms=100.0,
+            device="cpu",
+        )
+
+        mock_app = Mock()
+        mock_app._selected_entry_idx = 0
+        mock_app._entries = [entry]
+        mock_app._set_status = Mock()
+
+        handler = HistoryHandler(mock_app)
+
+        with (
+            patch("voicepad.tui.handlers.history_handler.sys.platform", "linux"),
+            patch("voicepad.tui.handlers.history_handler.subprocess.Popen", side_effect=FileNotFoundError),
+            patch("voicepad.tui.handlers.history_handler.webbrowser.open", return_value=True) as mock_open,
+        ):
+            handler.action_open_markdown()
+
+        mock_open.assert_called_once()
+        mock_app._set_status.assert_not_called()
+
+
 class TestActionDeleteEntry:
     """Tests for action_delete_entry method."""
 
