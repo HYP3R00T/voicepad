@@ -297,7 +297,7 @@ class TestActionOpenEntry:
 
         with (
             patch("voicepad.tui.handlers.history_handler.sys.platform", "linux"),
-            patch("voicepad.tui.handlers.history_handler.subprocess.Popen", side_effect=FileNotFoundError),
+            patch("subprocess.Popen", side_effect=FileNotFoundError),
             patch("voicepad.tui.handlers.history_handler.webbrowser.open", return_value=True) as mock_open,
         ):
             handler.action_open_markdown()
