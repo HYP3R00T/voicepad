@@ -1,23 +1,13 @@
-"""Microphone capture for push-to-talk dictation.
+"""Microphone capture with automatic resampling to 16 kHz.
 
-The entire public API is three methods:
-
-    recorder.start()          — open the mic, begin collecting samples
-    audio = recorder.stop()   — close the mic, return float32 array at 16 kHz
+Public API:
+    recorder.start()          — open mic, begin collecting samples
+    audio = recorder.stop()   — close mic, return float32 array at 16 kHz
     recorder.is_recording()   — True while mic is open
 
-That array goes straight into transcribe_buffer(). Nothing else happens here.
-
 Sample rate handling:
-    Whisper requires 16 kHz mono audio. Some devices (especially WASAPI on
-    Windows and ALSA/PipeWire on Linux) only accept their native sample rate
-    (commonly 44100 or 48000 Hz) and reject 16000 Hz with PaErrorCode -9997.
-
-    AudioRecorder handles this transparently:
-    - It queries the device's native sample rate before opening the stream.
-    - If the native rate differs from 16000 Hz, it records at the native rate
-      and resamples to 16000 Hz in stop() using scipy.signal.resample_poly.
-    - The caller always receives a 16 kHz float32 array regardless of device.
+    Records at device's native rate (44100/48000 Hz) to avoid PaErrorCode -9997
+    on WASAPI/ALSA devices that reject 16 kHz. Resamples to 16 kHz in stop().
 """
 
 from __future__ import annotations
@@ -36,8 +26,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Target sample rate for Whisper — never changes
-SAMPLE_RATE: int = 16000
+SAMPLE_RATE: int = 16000  # Target sample rate for Whisper
 CHANNELS: int = 1
 
 
@@ -46,10 +35,7 @@ class AudioRecorderError(Exception):
 
 
 def _query_device_sample_rate(device_index: int | None) -> int:
-    """Return the native sample rate for a device index.
-
-    Falls back to 16000 if the device cannot be queried.
-    """
+    """Return device's native sample rate, fallback to 16000."""
     try:
         info = sd.query_devices(device_index, kind="input")
         rate = int(info.get("default_samplerate", SAMPLE_RATE))
@@ -59,10 +45,18 @@ def _query_device_sample_rate(device_index: int | None) -> int:
 
 
 def _resample(audio: np.ndarray, from_rate: int, to_rate: int) -> np.ndarray:
-    """Resample a float32 mono array from from_rate to to_rate.
+    """Resample float32 mono array using scipy.signal.resample_poly.
 
-    Uses scipy.signal.resample_poly for high-quality integer-ratio resampling.
-    Falls back to linear interpolation if scipy is unavailable.
+    Args:
+        audio: Input audio array
+        from_rate: Source sample rate in Hz
+        to_rate: Target sample rate in Hz
+
+    Returns:
+        Resampled audio array
+
+    Note:
+        Falls back to linear interpolation if scipy unavailable.
     """
     if from_rate == to_rate:
         return audio
@@ -75,7 +69,6 @@ def _resample(audio: np.ndarray, from_rate: int, to_rate: int) -> np.ndarray:
         up, down = to_rate // g, from_rate // g
         return resample_poly(audio, up, down).astype(np.float32)
     except ImportError:
-        # scipy not available — fall back to linear interpolation
         logger.warning("scipy not available; using linear interpolation for resampling")
         n_out = int(len(audio) * to_rate / from_rate)
         return np.interp(
@@ -86,18 +79,13 @@ def _resample(audio: np.ndarray, from_rate: int, to_rate: int) -> np.ndarray:
 
 
 class AudioRecorder:
-    """Captures microphone audio as a numpy array at 16 kHz.
+    """Captures microphone audio and resamples to 16 kHz.
 
-    Records at the device's native sample rate and resamples to 16 kHz on
-    stop() if needed. This avoids PaErrorCode -9997 (Invalid sample rate)
-    on WASAPI (Windows) and ALSA/PipeWire (Linux) devices that reject 16 kHz.
+    Records at device's native sample rate to avoid compatibility issues,
+    then resamples to 16 kHz (required by Whisper) when recording stops.
 
-    Example:
-        recorder = AudioRecorder(config)
-        recorder.start()
-        # ... user speaks ...
-        audio = recorder.stop()                    # float32, 16 kHz, mono
-        result = transcribe_buffer(audio, config)
+    Attributes:
+        config: Configuration with input device settings
     """
 
     def __init__(self, config: Config) -> None:
@@ -106,28 +94,20 @@ class AudioRecorder:
         self._frames: list[np.ndarray] = []
         self._lock = threading.Lock()
         self._stream: sd.InputStream | None = None
-        self._capture_rate: int = SAMPLE_RATE  # actual rate used for the open stream
+        self._capture_rate: int = SAMPLE_RATE
         self._ensure_recordings_dir()
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
     def start(self) -> None:
-        """Open the microphone and start collecting audio.
-
-        Queries the device's native sample rate first. If it differs from
-        16 kHz, records at the native rate and resamples in stop().
+        """Open microphone and start collecting audio.
 
         Raises:
-            AudioRecorderError: If already recording or the device cannot be opened.
+            AudioRecorderError: If already recording or device cannot be opened
         """
         if self._recording:
             raise AudioRecorderError("Already recording")
 
         self._frames = []
 
-        # Query native rate — avoids PaErrorCode -9997 on WASAPI/ALSA devices
         native_rate = _query_device_sample_rate(self.config.input_device_index)
         if native_rate != SAMPLE_RATE:
             logger.info(f"Device native rate is {native_rate} Hz — will resample to {SAMPLE_RATE} Hz after recording")
@@ -150,16 +130,13 @@ class AudioRecorder:
         logger.info(f"Recording started (device={self.config.input_device_index}, rate={self._capture_rate} Hz)")
 
     def stop(self) -> np.ndarray:
-        """Close the microphone and return all captured audio at 16 kHz.
-
-        Resamples from the device's native rate to 16 kHz if needed.
+        """Close microphone and return captured audio at 16 kHz.
 
         Returns:
-            float32 numpy array at 16 kHz mono.
-            Empty array (length 0) if nothing was captured.
+            float32 numpy array at 16 kHz mono (empty if nothing captured)
 
         Raises:
-            AudioRecorderError: If not currently recording.
+            AudioRecorderError: If not currently recording
         """
         if not self._recording:
             raise AudioRecorderError("Not recording")
@@ -184,7 +161,6 @@ class AudioRecorder:
 
         audio = np.concatenate(frames).flatten()
 
-        # Resample to 16 kHz if the device ran at a different rate
         if self._capture_rate != SAMPLE_RATE:
             audio = _resample(audio, self._capture_rate, SAMPLE_RATE)
             logger.debug(f"Resampled {self._capture_rate} Hz → {SAMPLE_RATE} Hz")
@@ -193,26 +169,34 @@ class AudioRecorder:
         return audio
 
     def is_recording(self) -> bool:
-        """Return True while the microphone is open."""
+        """Check if microphone is currently recording."""
         return self._recording
 
     def save_wav(self, audio: np.ndarray, path: Path) -> None:
-        """Save a float32 audio array to a 16-bit WAV file."""
+        """Save audio array to 16-bit WAV file.
+
+        Args:
+            audio: float32 audio array at 16 kHz
+            path: Output file path (parent directories created automatically)
+        """
         path.parent.mkdir(parents=True, exist_ok=True)
         sf.write(str(path), audio, SAMPLE_RATE, subtype="PCM_16")
         logger.debug(f"Saved {len(audio) / SAMPLE_RATE:.2f}s → {path}")
 
     def make_wav_path(self, prefix: str | None = None) -> Path:
-        """Return a timestamped WAV path under the recordings directory."""
+        """Generate timestamped WAV path in recordings directory.
+
+        Args:
+            prefix: Optional filename prefix (defaults to config.recording_prefix)
+
+        Returns:
+            Path with format: {prefix}_{YYYYMMDD_HHMMSS}.wav
+        """
         from datetime import datetime
 
         pfx = prefix or self.config.recording_prefix
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         return self.config.recordings_path / f"{pfx}_{ts}.wav"
-
-    # ------------------------------------------------------------------
-    # Internal
-    # ------------------------------------------------------------------
 
     def _callback(
         self,

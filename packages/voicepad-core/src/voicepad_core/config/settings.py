@@ -8,19 +8,14 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from utilityhub_config import expand_path, load_settings
 
-# ---------------------------------------------------------------------------
-# Valid model names — queried live from faster_whisper at import time.
-# This means new models added upstream are automatically available.
-# ---------------------------------------------------------------------------
-
 
 def _get_available_models() -> tuple[str, ...]:
+    """Query available models from faster_whisper at import time."""
     try:
         from faster_whisper.utils import available_models
 
         return tuple(available_models())
     except Exception:
-        # Fallback mirrors faster_whisper's internal _MODELS dict keys
         return (
             "tiny.en",
             "tiny",
@@ -48,17 +43,16 @@ VALID_TRANSCRIPTION_MODELS: tuple[str, ...] = _get_available_models()
 
 
 class Config(BaseModel):
-    """Voicepad configuration.
+    """Voicepad configuration with hierarchical loading.
 
-    Loaded from voicepad.yaml with precedence:
-    env vars (VOICEPAD_*) > ./voicepad.yaml > ~/.config/voicepad/voicepad.yaml > defaults
+    Configuration sources (highest to lowest precedence):
+    1. Environment variables (VOICEPAD_*)
+    2. ./voicepad.yaml (current directory)
+    3. ~/.config/voicepad/voicepad.yaml (user config)
+    4. Default values
     """
 
     model_config = ConfigDict(frozen=True)
-
-    # ------------------------------------------------------------------
-    # File paths
-    # ------------------------------------------------------------------
 
     recordings_path: Path = Field(
         default_factory=lambda: expand_path("~/.config/voicepad/data/recordings"),
@@ -73,10 +67,6 @@ class Config(BaseModel):
         description="Directory where Whisper model weights are cached.",
     )
 
-    # ------------------------------------------------------------------
-    # Audio input
-    # ------------------------------------------------------------------
-
     input_device_index: int | None = Field(
         default=None,
         description="Audio input device index. None = system default. "
@@ -86,10 +76,6 @@ class Config(BaseModel):
         default="recording",
         description="Filename prefix for recordings (timestamp is appended automatically).",
     )
-
-    # ------------------------------------------------------------------
-    # Transcription
-    # ------------------------------------------------------------------
 
     transcription_model: str = Field(
         default="turbo",
@@ -103,7 +89,7 @@ class Config(BaseModel):
     @field_validator("transcription_model")
     @classmethod
     def validate_transcription_model(cls, v: str) -> str:
-        """Reject unknown model names before any download or inference attempt."""
+        """Validate model name against faster_whisper's available models."""
         if v not in VALID_TRANSCRIPTION_MODELS:
             valid = ", ".join(VALID_TRANSCRIPTION_MODELS)
             raise ValueError(f"Unknown transcription model '{v}'. Valid models: {valid}.")
@@ -130,10 +116,6 @@ class Config(BaseModel):
         ),
     )
 
-    # ------------------------------------------------------------------
-    # Global hotkey
-    # ------------------------------------------------------------------
-
     global_hotkey: str = Field(
         default="<ctrl>+<alt>+v",
         description=(
@@ -152,18 +134,24 @@ class Config(BaseModel):
 
     @model_validator(mode="after")
     def ensure_paths_expanded(self) -> Config:
-        """Ensure all paths are expanded, even if defaults weren't properly expanded."""
-        # This is a safety check for the default values
+        """Expand all path fields (safety check for default values)."""
         for path_field in ("recordings_path", "markdown_path", "model_cache_path"):
             current_path = getattr(self, path_field)
             expanded = expand_path(str(current_path))
-            # Re-assign via object.__setattr__ because the model is frozen
             object.__setattr__(self, path_field, expanded)
         return self
 
 
 def get_config(cwd: Path | None = None, app_name: str = "voicepad") -> Config:
-    """Load configuration using utilityhub_config precedence rules."""
+    """Load configuration with hierarchical precedence.
+
+    Args:
+        cwd: Optional working directory for config search
+        app_name: Application name for config file lookup
+
+    Returns:
+        Loaded configuration object
+    """
     settings, _ = load_settings(Config, app_name=app_name, cwd=cwd)
     return settings
 
@@ -172,5 +160,13 @@ def get_config_with_metadata(
     cwd: Path | None = None,
     app_name: str = "voicepad",
 ) -> tuple[Config, Any]:
-    """Load configuration and return source metadata for each field."""
+    """Load configuration with source metadata.
+
+    Args:
+        cwd: Optional working directory for config search
+        app_name: Application name for config file lookup
+
+    Returns:
+        Tuple of (config, metadata) where metadata tracks source of each field
+    """
     return load_settings(Config, app_name=app_name, cwd=cwd)
