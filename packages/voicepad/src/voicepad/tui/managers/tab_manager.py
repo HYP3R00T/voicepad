@@ -22,11 +22,26 @@ class TabManager:
         if str(event.tab.id) == "tab-history" and self.app._entries and self.app._selected_entry_idx is None:
             ol = self.app.query_one("#history-options", OptionList)
             if ol.option_count > 0:
-                ol.highlighted = ol.option_count - 1
-                last_entry = self.app._entries[-1]
-                self.app._selected_entry_idx = last_entry.index
-                if last_entry.md_path and last_entry.md_path.exists():
-                    self.app._load_history_viewer(last_entry.md_path)
+                # Only treat _sort_ascending as True when it's an actual bool
+                # True; mocks used in tests may return a Mock which should be
+                # treated as False here to preserve expected behavior.
+                sort_newest_first = getattr(self.app, "_sort_ascending", False)
+                if not isinstance(sort_newest_first, bool):
+                    sort_newest_first = False
+
+                if sort_newest_first:
+                    ol.highlighted = 0
+                else:
+                    ol.highlighted = ol.option_count - 1
+
+                # Select the most recent (last) entry by default so the
+                # viewer shows the newest transcription regardless of which
+                # end of the list is highlighted.
+                target_entry = self.app._entries[-1]
+
+                self.app._selected_entry_idx = target_entry.index
+                if target_entry.md_path and target_entry.md_path.exists():
+                    self.app._load_history_viewer(target_entry.md_path)
         self.app.refresh_bindings()
 
     def check_action(self, action: str, parameters: tuple) -> bool | None:
@@ -37,6 +52,7 @@ class TabManager:
             "copy_transcription": "tab-record",
             "retranscribe_entry": "tab-history",
             "delete_entry": "tab-history",
+            "toggle_sort_order": "tab-history",
             "save_settings": "tab-settings",
         }
         if action in tab_specific:

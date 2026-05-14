@@ -73,6 +73,7 @@ class VoicePadApp(App[None]):
         # History tab
         Binding("t", "retranscribe_entry", "Retranscribe", show=True),
         Binding("d", "delete_entry", "Delete", show=True),
+        Binding("o", "toggle_sort_order", "Sort", show=True),
         # Settings tab
         Binding("s", "save_settings", "Save", show=True),
         # Hidden utility
@@ -82,6 +83,7 @@ class VoicePadApp(App[None]):
     _model_ready: reactive[bool] = reactive(False)
     _recording: reactive[bool] = reactive(False)
     _transcribing: reactive[bool] = reactive(False)
+    _sort_ascending: reactive[bool] = reactive(True)
 
     def __init__(self, config: Config) -> None:
         super().__init__()
@@ -427,6 +429,10 @@ class VoicePadApp(App[None]):
 
     def action_copy_transcription(self) -> None:
         self._history_handler.action_copy_transcription()
+
+    def action_toggle_sort_order(self) -> None:
+        """Toggle the sort order (ascending/descending) for history entries."""
+        self._history_handler.toggle_sort_order()
 
     @on(Button.Pressed, "#tx-copy-btn")
     def on_copy_btn_pressed(self) -> None:
