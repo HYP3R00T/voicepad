@@ -25,18 +25,9 @@ class TabManager:
                 # Only treat _sort_ascending as True when it's an actual bool
                 # True; mocks used in tests may return a Mock which should be
                 # treated as False here to preserve expected behavior.
-                sort_newest_first = getattr(self.app, "_sort_ascending", False)
-                if not isinstance(sort_newest_first, bool):
-                    sort_newest_first = False
-
-                if sort_newest_first:
-                    ol.highlighted = 0
-                else:
-                    ol.highlighted = ol.option_count - 1
-
                 # Select the most recent (last) entry by default so the
-                # viewer shows the newest transcription regardless of which
-                # end of the list is highlighted.
+                # viewer shows the newest transcription without forcing the
+                # list cursor to jump to the bottom.
                 target_entry = self.app._entries[-1]
 
                 self.app._selected_entry_idx = target_entry.index
