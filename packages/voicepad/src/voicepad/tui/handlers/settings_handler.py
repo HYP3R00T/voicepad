@@ -296,6 +296,10 @@ class SettingsHandler:
 
         try:
             new_config = _Config(**raw)
+
+            for path_field in (new_config.recordings_path, new_config.markdown_path):
+                path_field.mkdir(parents=True, exist_ok=True)
+
             # Always write to the global config — never a project-local file
             global_path = get_config_path("voicepad", format="yaml")
             write_config(new_config, "voicepad", path=global_path, format="yaml")
