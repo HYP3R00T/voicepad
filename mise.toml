@@ -1,9 +1,10 @@
 [tools]
-python = "3.13"
-uv = "latest"
-prek = "latest"
-markdownlint-cli2 = "latest"
 git-cliff = "latest"
+markdownlint-cli2 = "latest"
+prek = "latest"
+python = "3.13"
+rumdl = "latest"
+uv = "latest"
 
 [settings]
 experimental = true
