@@ -35,6 +35,19 @@ logger = logging.getLogger(__name__)
 # Module-level cache — keyed by (model_name, device, compute_type)
 _model_cache: dict[tuple[str, str, str], WhisperModel] = {}
 
+# Session logger for detailed per-transcription logging
+_session_logger: logging.Logger | None = None
+
+
+def set_model_manager_session_logger(session_logger: logging.Logger | None) -> None:
+    """Set the session logger for detailed model manager logging.
+
+    Args:
+        session_logger: Logger instance for the current transcription session
+    """
+    global _session_logger
+    _session_logger = session_logger
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -66,16 +79,37 @@ def load(
         TranscriptionError: If the model cannot be loaded on any device.
         ModelNotFoundError: If the model files are missing and download fails.
     """
+    slog = _session_logger
     cache_key = (model_name, device, compute_type)
 
     if cache_key in _model_cache:
         logger.debug(f"Model cache hit: {cache_key}")
+        if slog:
+            slog.info(f"Model cache hit: {model_name} on {device} ({compute_type})")
+            slog.debug(f"  Cache key: {cache_key}")
+            slog.debug(f"  Model object: {type(_model_cache[cache_key]).__name__}")
         return _model_cache[cache_key]
 
+    if slog:
+        slog.info("Model not in cache, loading from disk...")
+        slog.debug(f"  Model name: {model_name}")
+        slog.debug(f"  Device: {device}")
+        slog.debug(f"  Compute type: {compute_type}")
+        slog.debug(f"  Cache key: {cache_key}")
+
     # Ensure weights are present before attempting to load
+    if slog:
+        slog.info("Checking if model is downloaded...")
+
     ensure_model_downloaded(model_name)
 
+    if slog:
+        slog.info("Model files confirmed present")
+
     logger.info(f"Loading '{model_name}' on {device} ({compute_type})")
+    if slog:
+        slog.info("Initializing WhisperModel...")
+
     load_start = time.perf_counter()
 
     try:
@@ -85,18 +119,61 @@ def load(
             compute_type=compute_type,
         )
         load_ms = (time.perf_counter() - load_start) * 1000
-        logger.info(f"Model '{model_name}' loaded in {load_ms:.0f}ms — cached as {cache_key}")
+
+        msg = f"Model '{model_name}' loaded in {load_ms:.0f}ms — cached as {cache_key}"
+        logger.info(msg)
+
+        if slog:
+            slog.info(msg)
+            slog.debug(f"  Model type: {type(model).__name__}")
+            try:
+                model_device = getattr(model, "device", "unknown")
+                model_compute = getattr(model, "compute_type", "unknown")
+                slog.debug(f"  Model device: {model_device}")
+                slog.debug(f"  Model compute type: {model_compute}")
+            except Exception:
+                slog.debug("  Model device/compute_type: unavailable")
+
+            # Try to get model size info
+            try:
+                from pathlib import Path
+
+                model_path = Path.home() / ".cache" / "huggingface" / "hub"
+                if model_path.exists():
+                    slog.debug(f"  Model cache path: {model_path}")
+            except Exception:
+                pass
+
         _model_cache[cache_key] = model
+
+        if slog:
+            slog.info(f"Model added to cache (total cached: {len(_model_cache)})")
+
         return model
 
     except RuntimeError as e:
         if _is_cuda_error(e):
-            logger.warning(f"CUDA unavailable at load time: {e}\n  Falling back to CPU ({CPU_COMPUTE_TYPE}).")
+            msg = f"CUDA unavailable at load time: {e}\n  Falling back to CPU ({CPU_COMPUTE_TYPE})."
+            logger.warning(msg)
+            if slog:
+                slog.warning(msg)
+                slog.debug(f"  Original device: {device}")
+                slog.debug(f"  Original compute type: {compute_type}")
+                slog.debug("  Fallback device: cpu")
+                slog.debug(f"  Fallback compute type: {CPU_COMPUTE_TYPE}")
             return _load_cpu_fallback(model_name)
-        raise TranscriptionError(f"Failed to load model '{model_name}': {e}") from e
+
+        msg = f"Failed to load model '{model_name}': {e}"
+        if slog:
+            slog.error(msg)
+        raise TranscriptionError(msg) from e
 
     except Exception as e:
-        raise TranscriptionError(f"Failed to load model '{model_name}': {e}") from e
+        msg = f"Failed to load model '{model_name}': {e}"
+        if slog:
+            slog.error(msg)
+            slog.debug(f"  Exception type: {type(e).__name__}")
+        raise TranscriptionError(msg) from e
 
 
 def unload(model_name: str = DEFAULT_MODEL) -> None:

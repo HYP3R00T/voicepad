@@ -48,6 +48,20 @@ from ..vad import SileroVAD
 
 logger = logging.getLogger(__name__)
 
+# Session logger for detailed per-transcription logging
+_session_logger: logging.Logger | None = None
+
+
+def set_streaming_session_logger(session_logger: logging.Logger | None) -> None:
+    """Set the session logger for detailed streaming transcription logging.
+
+    Args:
+        session_logger: Logger instance for the current transcription session
+    """
+    global _session_logger
+    _session_logger = session_logger
+
+
 # ---------------------------------------------------------------------------
 # Module-level defaults — overridable via constructor
 # ---------------------------------------------------------------------------
@@ -307,6 +321,8 @@ class StreamingTranscriber:
         from ..inference import transcribe
         from ..inference.types import Segment
 
+        slog = _session_logger  # Use session logger if available
+
         overlap_samples = int(self._overlap_s * capture_rate)
         start_sample = max(0, self._consumed_samples - overlap_samples)
         chunk_audio = full_audio[start_sample:]
@@ -314,21 +330,38 @@ class StreamingTranscriber:
         chunk_start_s = self._consumed_samples / capture_rate
         chunk_end_s = len(full_audio) / capture_rate
         audio_offset_s = start_sample / capture_rate
+        chunk_duration_s = len(chunk_audio) / capture_rate
 
-        logger.debug(
+        msg = (
             f"Chunk {self._chunk_index + 1}: "
             f"{chunk_start_s:.1f}s–{chunk_end_s:.1f}s "
-            f"({len(chunk_audio) / capture_rate:.1f}s incl. {self._overlap_s}s overlap)"
+            f"({chunk_duration_s:.1f}s incl. {self._overlap_s}s overlap)"
         )
+        logger.debug(msg)
+        if slog:
+            slog.info(msg)
+            slog.debug(
+                f"  start_sample={start_sample}, consumed={self._consumed_samples}, "
+                f"overlap_samples={overlap_samples}, chunk_samples={len(chunk_audio)}"
+            )
 
         # Resample to 16kHz if the recorder captures at a different rate
         if capture_rate != SAMPLE_RATE:
+            if slog:
+                slog.debug(f"Resampling from {capture_rate}Hz to {SAMPLE_RATE}Hz")
             chunk_audio = _resample(chunk_audio, capture_rate, SAMPLE_RATE)
 
         try:
             # --- Build initial prompt for cross-chunk coherence ---
             is_distil = self._model_name in DISTIL_MODELS
             prompt = None if is_distil else _build_prompt(self._prev_context)
+
+            if slog:
+                slog.debug(
+                    f"Transcribing chunk {self._chunk_index + 1} with prompt: {prompt[:50] if prompt else '(none)'}..."
+                )
+
+            chunk_start_time = time.perf_counter()
 
             result = transcribe(
                 chunk_audio,
@@ -337,6 +370,11 @@ class StreamingTranscriber:
                 compute_type=self._compute_type,
                 initial_prompt=prompt,
             )
+
+            chunk_latency = (time.perf_counter() - chunk_start_time) * 1000
+
+            if slog:
+                slog.info(f"Chunk {self._chunk_index + 1} transcribed in {chunk_latency:.0f}ms")
 
             # --- Reconstruct segments with absolute timestamps ---
             segments = []
@@ -359,13 +397,27 @@ class StreamingTranscriber:
                     )
                 )
 
+            if slog:
+                slog.debug(f"Reconstructed {len(segments)} segments with absolute timestamps")
+
             # --- Post-processing pipeline ---
             if self._prev_chunk_text and segments:
+                if slog:
+                    slog.debug("Deduplicating overlap with previous chunk")
                 segments = deduplicate_overlap(segments, chunk_start_s, self._prev_chunk_text)
 
             text = " ".join(s.text for s in segments if s.text).strip()
+
+            if slog:
+                slog.debug(f"Raw text before post-processing: '{text[:100]}{'...' if len(text) > 100 else ''}'")
+
             text = remove_hallucinations(text)
             text = normalize(text)
+
+            if slog:
+                slog.info(
+                    f"Chunk {self._chunk_index + 1} final text ({len(text)} chars): '{text[:100]}{'...' if len(text) > 100 else ''}'"
+                )
 
             # Update rolling context for next chunk
             if text:
@@ -390,9 +442,12 @@ class StreamingTranscriber:
                 )
             )
 
-        except AudioTooShortError:
+        except AudioTooShortError as e:
             # Audio was too short to transcribe — advance pointer and
             # emit an empty final marker if this was the last chunk
+            if slog:
+                slog.warning(f"Chunk {self._chunk_index + 1} too short: {e}")
+
             self._consumed_samples = len(full_audio)
             if is_final:
                 self._on_chunk(
@@ -406,7 +461,10 @@ class StreamingTranscriber:
                 )
 
         except (TranscriptionError, Exception) as e:
-            logger.error(f"Chunk {self._chunk_index + 1} failed: {e}")
+            msg = f"Chunk {self._chunk_index + 1} failed: {e}"
+            logger.error(msg)
+            if slog:
+                slog.error(msg)
             self._on_error(str(e))
 
 

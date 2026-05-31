@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import atexit
 import logging
+import signal
+import sys
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
 from typing import Any
@@ -26,6 +29,7 @@ from voicepad_core import (
     get_config,
 )
 from voicepad_core.config import Config
+from voicepad_core.logging_utils import configure_global_logging
 
 from voicepad.tui.components import VoiceButton
 from voicepad.tui.config import TUIConfig, load_tui_config, save_tui_config
@@ -51,6 +55,39 @@ try:
     _APP_VERSION = f"v{_pkg_version('voicepad')}"
 except Exception:
     _APP_VERSION = "dev"
+
+# ---------------------------------------------------------------------------
+# Graceful shutdown handling
+# ---------------------------------------------------------------------------
+
+_app_instance: VoicePadApp | None = None
+
+
+def _cleanup_on_exit() -> None:
+    """Clean up resources on program exit."""
+    if _app_instance is not None:
+        logger.info("Cleaning up resources on exit...")
+        # Flush all logging handlers
+        for handler in logging.root.handlers:
+            handler.flush()
+
+
+def _signal_handler(signum: int, frame: Any) -> None:
+    """Handle interrupt signals (Ctrl+C, SIGTERM).
+
+    Args:
+        signum: Signal number
+        frame: Current stack frame
+    """
+    logger.info(f"Received signal {signum}, initiating graceful shutdown...")
+    _cleanup_on_exit()
+    sys.exit(0)
+
+
+# Register cleanup handlers
+atexit.register(_cleanup_on_exit)
+signal.signal(signal.SIGINT, _signal_handler)
+signal.signal(signal.SIGTERM, _signal_handler)
 
 # ---------------------------------------------------------------------------
 # App
@@ -89,6 +126,9 @@ class VoicePadApp(App[None]):
 
     def __init__(self, config: Config) -> None:
         super().__init__()
+        global _app_instance
+        _app_instance = self
+
         self.config = config
         self.tui_config: TUIConfig = load_tui_config()
         self._session: RecordingSession | None = None
@@ -121,6 +161,14 @@ class VoicePadApp(App[None]):
         self._recording_handler = RecordingHandler(self)
         self._history_handler = HistoryHandler(self)
         self._hotkey_handler = HotkeyHandler(self)
+
+        # Ensure logs directory exists
+        config.logs_path.mkdir(parents=True, exist_ok=True)
+        # Configure global logging for the app and core packages
+        # Do not write logs to the console (Textual renders the UI to the terminal);
+        # keep logs in files only to avoid polluting the TUI display.
+        configure_global_logging(config.log_level, config.logs_path, console=False)
+        logger.info(f"Logs directory: {config.logs_path}")
 
     # ------------------------------------------------------------------
     # Layout

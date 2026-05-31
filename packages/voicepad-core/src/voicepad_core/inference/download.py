@@ -162,6 +162,20 @@ def ensure_model_downloaded(
         )
         logger.info(f"Model '{model_name}' downloaded successfully.")
 
+        # Attempt to detect which snapshot directory was used and log it
+        try:
+            repo_cache_dir = f"models--{repo_id.replace('/', '--')}"
+            snapshots_dir = cache_dir / repo_cache_dir / "snapshots"
+            if snapshots_dir.exists():
+                snaps = [d for d in snapshots_dir.iterdir() if d.is_dir() and (d / "model.bin").exists()]
+                if snaps:
+                    # Pick the most recent snapshot by mtime
+                    used = max(snaps, key=lambda p: p.stat().st_mtime)
+                    total_bytes = sum(f.stat().st_size for f in used.rglob("*") if f.is_file())
+                    logger.info(f"Snapshot used: {used} ({total_bytes} bytes)")
+        except Exception:
+            logger.debug("Could not determine snapshot directory after download", exc_info=True)
+
     except HfHubHTTPError as e:
         raise ModelNotFoundError(
             f"Failed to download model '{model_name}' from HuggingFace.\n"

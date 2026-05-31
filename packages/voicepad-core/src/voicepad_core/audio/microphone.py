@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from pathlib import Path
 
@@ -40,6 +41,7 @@ class MicrophoneStream:
         self._lock = threading.Lock()
         self._stream: sd.InputStream | None = None
         self._recording = False
+        self._logger = logging.getLogger(__name__)
 
     # ------------------------------------------------------------------
     # Public interface
@@ -78,6 +80,9 @@ class MicrophoneStream:
         )
         self._stream.start()
         self._recording = True
+        self._logger.info(
+            f"MicrophoneStream started: device_index={self._device_index}, sample_rate={self._sample_rate}"
+        )
 
     def stop(self) -> np.ndarray:
         """
@@ -104,7 +109,11 @@ class MicrophoneStream:
                 return np.zeros(0, dtype=np.float32)
             audio = np.concatenate(self._frames, axis=0).flatten()
 
-        return audio.astype(np.float32)
+        out = audio.astype(np.float32)
+        self._logger.info(
+            f"MicrophoneStream stopped: samples={len(out)}, duration_s={len(out) / self._sample_rate:.3f}"
+        )
+        return out
 
     def get_snapshot(self) -> np.ndarray:
         """
@@ -121,7 +130,10 @@ class MicrophoneStream:
         with self._lock:
             if not self._frames:
                 return np.zeros(0, dtype=np.float32)
-            return np.concatenate(self._frames, axis=0).flatten().copy()
+            out = np.concatenate(self._frames, axis=0).flatten().copy()
+            # Lightweight debug log for snapshot retrieval
+            self._logger.debug(f"MicrophoneStream snapshot: samples={len(out)}")
+            return out
 
     def save_wav(
         self,
@@ -148,6 +160,7 @@ class MicrophoneStream:
         rate = sample_rate if sample_rate is not None else self._sample_rate
         path.parent.mkdir(parents=True, exist_ok=True)
         sf.write(str(path), audio, rate, subtype="PCM_16")
+        self._logger.info(f"Saved WAV: {path} ({len(audio) / rate:.3f}s, {len(audio)} samples, rate={rate})")
 
     # ------------------------------------------------------------------
     # Internal

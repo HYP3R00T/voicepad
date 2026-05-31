@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
 from textual.widgets import Label, Static, TabbedContent
-from voicepad_core import ChunkResult, MicrophoneStream, StreamingTranscriber
+from voicepad_core import ChunkResult, MicrophoneStream, StreamingTranscriber, setup_transcription_logger
+from voicepad_core.inference.engine import set_session_logger
+from voicepad_core.streaming.transcriber import set_streaming_session_logger
 
 from voicepad.tui.components import VoiceButton
 from voicepad.tui.utils.clipboard import copy_to_clipboard as _copy_to_clipboard
@@ -26,6 +29,8 @@ class RecordingHandler:
     def __init__(self, app: VoicePadApp) -> None:
         self.app = app
         self._final_chunk_event: threading.Event | None = None
+        self._session_logger = None
+        self._log_file = None
 
     def action_toggle_recording(self) -> None:
         """Toggle recording on/off (space bar binding)."""
@@ -41,11 +46,44 @@ class RecordingHandler:
 
     def start_recording(self) -> None:
         """Start recording audio."""
+        # Set up per-session logging (be defensive in tests where config may be a Mock)
+        session_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        logs_path = getattr(self.app.config, "logs_path", None)
+        log_level = getattr(self.app.config, "log_level", "INFO")
+        if not isinstance(log_level, str):
+            log_level = "INFO"
+        try:
+            # Prefer a real Path-like object; fall back to CWD for mocks
+            if logs_path is None or not hasattr(logs_path, "__fspath__"):
+                from pathlib import Path
+
+                logs_path = Path.cwd()
+        except Exception:
+            from pathlib import Path
+
+            logs_path = Path.cwd()
+
+        self._session_logger, self._log_file = setup_transcription_logger(
+            logs_path,
+            log_level,
+            f"streaming_{session_id}",
+        )
+
+        # Set the session logger for streaming transcription
+        set_streaming_session_logger(self._session_logger)
+        # Also set the session logger for the inference engine so engine logs
+        # (model loading, inference) are included in per-session logs.
+        set_session_logger(self._session_logger)
+
+        self._session_logger.info("Starting recording session")
+
         self._final_chunk_event = threading.Event()
         self.app._session = RecordingSession(config=self.app.config)
         try:
             self.app._session.start()
+            self._session_logger.info("Recording session started successfully")
         except Exception as e:
+            self._session_logger.error(f"Failed to start recording: {e}")
             self.app._set_status("error", f"mic error: {e}")
             return
 
@@ -58,11 +96,19 @@ class RecordingHandler:
         # Start streaming transcriber — transcribes chunks during recording
         recorder = self.app._session._recorder
         if recorder is None:
+            self._session_logger.error("Recorder is None, cannot start streaming")
             return
+
+        self._session_logger.info(
+            f"Starting streaming transcriber: model={self.app.config.transcription_model}, "
+            f"device={self.app.config.transcription_device}, "
+            f"min_chunk={self.app.config.min_chunk_s}s, max_chunk={self.app.config.max_chunk_s}s"
+        )
+
         self.app._streamer = StreamingTranscriber(
             recorder=recorder,
             on_chunk=lambda chunk: self.app.call_from_thread(self._handle_stream_chunk, chunk),
-            on_error=lambda err: self.app.call_from_thread(self.app._set_status, "error", err),
+            on_error=lambda err: self.app.call_from_thread(self._handle_stream_error, err),
             model_name=self.app.config.transcription_model,
             device=self.app.config.transcription_device,
             compute_type=self.app.config.transcription_compute_type,
@@ -72,11 +118,15 @@ class RecordingHandler:
             silence_threshold_ms=self.app.config.silence_threshold_ms,
         )
         self.app._streamer.start()
+        self._session_logger.info("Streaming transcriber started")
 
     def stop_recording(self) -> None:
         """Stop recording audio."""
         if self.app._session is None:
             return
+
+        if self._session_logger:
+            self._session_logger.info("Stopping recording session")
 
         self.app._recording = False
         self.app._stop_timer()
@@ -84,7 +134,11 @@ class RecordingHandler:
 
         try:
             audio = self.app._session.stop()
+            if self._session_logger:
+                self._session_logger.info(f"Recording stopped, audio length: {len(audio)} samples")
         except Exception as e:
+            if self._session_logger:
+                self._session_logger.error(f"Failed to stop recording: {e}")
             self.app._set_status("error", f"stop error: {e}")
             if self.app._streamer:
                 self.app._streamer._stop_event.set()
@@ -97,16 +151,39 @@ class RecordingHandler:
 
     def finalize_worker(self, audio: np.ndarray) -> None:
         """Stop the streamer (transcribes tail) then save the full recording."""
+        if self._session_logger:
+            self._session_logger.info("Finalizing transcription...")
+
         if self.app._streamer:
             self.app._streamer.stop()  # blocks until final chunk callback fires
+            if self._session_logger:
+                self._session_logger.info("Streamer stopped")
+
         if self._final_chunk_event is not None:
             self._final_chunk_event.wait(timeout=5.0)
+
         self.app.call_from_thread(self.save_recording, audio)
+
+        # Clear the session logger
+        set_streaming_session_logger(None)
+        set_session_logger(None)
+
+        if self._session_logger and self._log_file:
+            self._session_logger.info("=" * 80)
+            self._session_logger.info(f"Session complete. Log saved to: {self._log_file}")
+            self._session_logger.info("=" * 80)
 
     def _handle_stream_chunk(self, chunk: ChunkResult) -> None:
         """Handle streamed chunks on the main thread and signal completion for the final chunk."""
         self.on_stream_chunk(chunk)
         if chunk.is_final and self._final_chunk_event is not None:
+            self._final_chunk_event.set()
+
+    def _handle_stream_error(self, error: str) -> None:
+        """Handle a chunk transcription error and release the recording state."""
+        self.app._transcribing = False
+        self.app._set_status("error", error)
+        if self._final_chunk_event is not None:
             self._final_chunk_event.set()
 
     def on_stream_chunk(self, chunk: ChunkResult) -> None:

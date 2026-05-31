@@ -78,6 +78,25 @@ from .inference.model_manager import unload_all as unload_all_models
 from .inference.types import Segment, TranscriptionResult, WordTimestamp
 
 # ---------------------------------------------------------------------------
+# Public API — logging
+# ---------------------------------------------------------------------------
+from .logging_utils import (
+    configure_global_logging,
+    log_audio_info,
+    log_chunk_processing,
+    log_config_info,
+    log_model_cache_info,
+    log_model_load,
+    log_postprocessing_step,
+    log_segments_info,
+    log_system_info,
+    log_transcription_end,
+    log_transcription_start,
+    log_vad_info,
+    setup_transcription_logger,
+)
+
+# ---------------------------------------------------------------------------
 # Public API — postprocessing
 # ---------------------------------------------------------------------------
 from .postprocessing import (
@@ -212,4 +231,19 @@ __all__ = [
     "SileroVAD",
     "SpeechSegment",
     "ensure_vad_model",
+    # Logging
+    "configure_global_logging",
+    "setup_transcription_logger",
+    "log_transcription_start",
+    "log_transcription_end",
+    "log_chunk_processing",
+    "log_model_load",
+    "log_system_info",
+    "log_config_info",
+    "log_audio_info",
+    "log_vad_info",
+    "log_model_cache_info",
+    "log_segments_info",
+    "log_postprocessing_step",
+    "configure_global_logging",
 ]

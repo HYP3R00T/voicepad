@@ -33,7 +33,13 @@ from .constants import (
     SAMPLE_RATE,
 )
 from .exceptions import AudioTooLongWarning, AudioTooShortError, TranscriptionError
-from .model_manager import _is_cuda_error, _load_cpu_fallback, _model_cache, load
+from .model_manager import (
+    _is_cuda_error,
+    _load_cpu_fallback,
+    _model_cache,
+    load,
+    set_model_manager_session_logger,
+)
 from .types import Segment, TranscriptionResult, WordTimestamp
 
 # Post-processing is imported here so the engine applies the full pipeline.
@@ -43,6 +49,22 @@ from ..postprocessing.hallucination import remove_hallucinations
 from ..postprocessing.normalizer import normalize
 
 logger = logging.getLogger(__name__)
+
+# Session logger for detailed per-transcription logging
+_session_logger: logging.Logger | None = None
+
+
+def set_session_logger(session_logger: logging.Logger | None) -> None:
+    """Set the session logger for detailed transcription logging.
+
+    Args:
+        session_logger: Logger instance for the current transcription session
+    """
+    global _session_logger
+    _session_logger = session_logger
+
+    # Also set it for the model manager
+    set_model_manager_session_logger(session_logger)
 
 
 # ---------------------------------------------------------------------------
@@ -83,49 +105,85 @@ def transcribe(
         TranscriptionError: If transcription fails on all devices.
     """
     call_start = time.perf_counter()
+    slog = _session_logger  # Use session logger if available
+
+    if slog:
+        slog.debug(f"transcribe() called with model={model_name}, device={device}, compute={compute_type}")
 
     # --- Language warning for non-English ---
     if language != "en":
-        logger.warning(
+        msg = (
             f"Language '{language}' selected. English is the primary supported language. "
             "Non-English results may have reduced accuracy."
         )
+        logger.warning(msg)
+        if slog:
+            slog.warning(msg)
 
     # --- Normalise input ---
     audio = np.asarray(audio, dtype=np.float32)
     if audio.ndim > 1:
+        if slog:
+            slog.debug(f"Audio has {audio.ndim} dimensions, flattening to mono")
         audio = audio.flatten()
+
+    if slog:
+        slog.debug(f"Audio shape before trim: {audio.shape}")
 
     audio = _trim_trailing_silence(audio)
 
+    if slog:
+        slog.debug(f"Audio shape after trim: {audio.shape}")
+
     duration_s = len(audio) / SAMPLE_RATE
 
+    if slog:
+        slog.info(f"Audio duration: {duration_s:.2f}s (min={MIN_AUDIO_DURATION_S}s, max={MAX_AUDIO_DURATION_S}s)")
+
     if duration_s < MIN_AUDIO_DURATION_S:
-        raise AudioTooShortError(
-            f"Audio is {duration_s:.2f}s — below minimum {MIN_AUDIO_DURATION_S}s. Speak for at least 0.5 seconds."
-        )
+        msg = f"Audio is {duration_s:.2f}s — below minimum {MIN_AUDIO_DURATION_S}s. Speak for at least 0.5 seconds."
+        if slog:
+            slog.error(msg)
+        raise AudioTooShortError(msg)
 
     if duration_s > MAX_AUDIO_DURATION_S:
-        warnings.warn(
+        msg = (
             f"Audio is {duration_s:.1f}s — exceeds recommended maximum "
-            f"{MAX_AUDIO_DURATION_S}s. Transcription may be slow.",
-            AudioTooLongWarning,
-            stacklevel=2,
+            f"{MAX_AUDIO_DURATION_S}s. Transcription may be slow."
         )
+        warnings.warn(msg, AudioTooLongWarning, stacklevel=2)
         logger.info(f"Long audio: {duration_s:.1f}s — transcription will take a moment.")
+        if slog:
+            slog.warning(msg)
 
     # --- Load model (cached after first call) ---
+    if slog:
+        slog.info(f"Loading model: {model_name} on {device} ({compute_type})")
+
+    model_load_start = time.perf_counter()
     model = load(model_name, device, compute_type)
+    model_load_time = (time.perf_counter() - model_load_start) * 1000
+
+    if slog:
+        slog.info(f"Model loaded in {model_load_time:.0f}ms")
 
     # --- Build prompt (distil models don't support initial_prompt) ---
     is_distil = model_name in DISTIL_MODELS
     prompt = None if is_distil else (initial_prompt if initial_prompt is not None else INITIAL_PROMPT)
+
+    if slog:
+        slog.debug(f"Using prompt: {prompt if prompt else '(none - distil model)'}")
 
     fallback = False
     actual_device = device
     actual_compute = compute_type
 
     # --- Run inference ---
+    if slog:
+        slog.info("Starting inference...")
+
+    inference_start = time.perf_counter()
+
     try:
         segments_raw, info = model.transcribe(
             audio,
@@ -139,19 +197,38 @@ def transcribe(
             condition_on_previous_text=False,
             word_timestamps=word_timestamps,
         )
+
+        inference_time = (time.perf_counter() - inference_start) * 1000
+        if slog:
+            slog.info(f"Inference completed in {inference_time:.0f}ms")
+
         segments = _build_segments(segments_raw, duration_s, word_timestamps)
+
+        if slog:
+            slog.info(f"Built {len(segments)} segments")
 
     except RuntimeError as e:
         if _is_cuda_error(e):
-            logger.warning(f"CUDA inference error: {e} — retrying on CPU.")
+            msg = f"CUDA inference error: {e} — retrying on CPU."
+            logger.warning(msg)
+            if slog:
+                slog.warning(msg)
 
             # Evict the broken GPU entry from cache
             _model_cache.pop((model_name, device, compute_type), None)
+
+            if slog:
+                slog.info("Loading CPU fallback model...")
 
             cpu_model = _load_cpu_fallback(model_name)
             fallback = True
             actual_device = "cpu"
             actual_compute = "int8"
+
+            if slog:
+                slog.info("Retrying inference on CPU...")
+
+            inference_start = time.perf_counter()
 
             segments_raw, info = cpu_model.transcribe(
                 audio,
@@ -165,18 +242,42 @@ def transcribe(
                 condition_on_previous_text=False,
                 word_timestamps=word_timestamps,
             )
+
+            inference_time = (time.perf_counter() - inference_start) * 1000
+            if slog:
+                slog.info(f"CPU inference completed in {inference_time:.0f}ms")
+
             segments = _build_segments(segments_raw, duration_s, word_timestamps)
 
+            if slog:
+                slog.info(f"Built {len(segments)} segments (CPU fallback)")
+
         else:
-            raise TranscriptionError(f"Transcription failed: {e}") from e
+            msg = f"Transcription failed: {e}"
+            if slog:
+                slog.error(msg)
+            raise TranscriptionError(msg) from e
 
     except Exception as e:
-        raise TranscriptionError(f"Transcription failed: {e}") from e
+        msg = f"Transcription failed: {e}"
+        if slog:
+            slog.error(msg)
+        raise TranscriptionError(msg) from e
 
     # --- Post-process text ---
+    if slog:
+        slog.debug("Starting post-processing...")
+
     text = " ".join(s.text for s in segments if s.text).strip()
+
+    if slog:
+        slog.debug(f"Raw text length: {len(text)} characters")
+
     text = remove_hallucinations(text)
     text = normalize(text)
+
+    if slog:
+        slog.debug(f"Post-processed text length: {len(text)} characters")
 
     # --- Compute quality metrics ---
     avg_confidence = sum(s.avg_logprob for s in segments) / len(segments) if segments else 0.0
@@ -184,12 +285,16 @@ def transcribe(
 
     latency_ms = (time.perf_counter() - call_start) * 1000
 
-    logger.info(
+    msg = (
         f"Transcribed {duration_s:.1f}s in {latency_ms:.0f}ms "
         f"on {actual_device} ({actual_compute}) — "
         f"{len(segments)} segments, avg_conf={avg_confidence:.2f}, "
         f"low_conf={low_confidence_count}"
     )
+    logger.info(msg)
+    if slog:
+        slog.info(msg)
+        slog.info(f"Transcription result: '{text[:100]}{'...' if len(text) > 100 else ''}'")
 
     return TranscriptionResult(
         text=text,

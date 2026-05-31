@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import urllib.request
 from pathlib import Path
 
@@ -15,6 +16,8 @@ MODEL_PATH = _VAD_DIR / _MODEL_FILENAME
 # Direct ONNX file URL from the HuggingFace repo.
 # onnx/model.onnx is the correct filename in that tree.
 _DOWNLOAD_URL = "https://huggingface.co/onnx-community/silero-vad/resolve/main/onnx/model.onnx"
+
+logger = logging.getLogger(__name__)
 
 
 def ensure_model_exists(verbose: bool = True) -> Path:
@@ -41,13 +44,13 @@ def ensure_model_exists(verbose: bool = True) -> Path:
     """
     if MODEL_PATH.exists():
         if verbose:
-            print(f"[VAD] Silero model found at: {MODEL_PATH}")
+            logger.info(f"[VAD] Silero model found at: {MODEL_PATH}")
         return MODEL_PATH
 
     if verbose:
-        print("[VAD] Silero ONNX model not found. Downloading...")
-        print(f"      Source : {_DOWNLOAD_URL}")
-        print(f"      Target : {MODEL_PATH}")
+        logger.info("[VAD] Silero ONNX model not found. Downloading...")
+        logger.info(f"      Source : {_DOWNLOAD_URL}")
+        logger.info(f"      Target : {MODEL_PATH}")
 
     _download(verbose=verbose)
 
@@ -87,15 +90,20 @@ def _download(verbose: bool = True) -> None:
 
                     if verbose and total > 0:
                         pct = downloaded * 100 // total
-                        print(f"\r      Progress: {pct:3d}%", end="", flush=True)
+                        # Use debug-level progress updates to avoid spamming INFO logs
+                        logger.debug(f"[VAD] Progress: {pct:3d}%")
 
         if verbose:
-            print()  # newline after progress line
+            logger.debug("[VAD] Download completed stream read")
 
     except Exception as e:
         # Clean up a partial file if the download failed mid-way
         if MODEL_PATH.exists():
-            MODEL_PATH.unlink()
+            try:
+                MODEL_PATH.unlink()
+            except Exception:
+                logger.exception("Failed to remove partial VAD model file")
+        logger.exception("Failed to download Silero ONNX model")
         raise RuntimeError(
             f"[VAD] Failed to download Silero ONNX model.\n"
             f"      URL   : {_DOWNLOAD_URL}\n"
