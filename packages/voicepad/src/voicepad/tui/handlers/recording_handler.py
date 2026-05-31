@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -24,6 +25,7 @@ class RecordingHandler:
 
     def __init__(self, app: VoicePadApp) -> None:
         self.app = app
+        self._final_chunk_event: threading.Event | None = None
 
     def action_toggle_recording(self) -> None:
         """Toggle recording on/off (space bar binding)."""
@@ -39,6 +41,7 @@ class RecordingHandler:
 
     def start_recording(self) -> None:
         """Start recording audio."""
+        self._final_chunk_event = threading.Event()
         self.app._session = RecordingSession(config=self.app.config)
         try:
             self.app._session.start()
@@ -58,7 +61,7 @@ class RecordingHandler:
             return
         self.app._streamer = StreamingTranscriber(
             recorder=recorder,
-            on_chunk=lambda chunk: self.app.call_from_thread(self.on_stream_chunk, chunk),
+            on_chunk=lambda chunk: self.app.call_from_thread(self._handle_stream_chunk, chunk),
             on_error=lambda err: self.app.call_from_thread(self.app._set_status, "error", err),
             model_name=self.app.config.transcription_model,
             device=self.app.config.transcription_device,
@@ -96,7 +99,15 @@ class RecordingHandler:
         """Stop the streamer (transcribes tail) then save the full recording."""
         if self.app._streamer:
             self.app._streamer.stop()  # blocks until final chunk callback fires
+        if self._final_chunk_event is not None:
+            self._final_chunk_event.wait(timeout=5.0)
         self.app.call_from_thread(self.save_recording, audio)
+
+    def _handle_stream_chunk(self, chunk: ChunkResult) -> None:
+        """Handle streamed chunks on the main thread and signal completion for the final chunk."""
+        self.on_stream_chunk(chunk)
+        if chunk.is_final and self._final_chunk_event is not None:
+            self._final_chunk_event.set()
 
     def on_stream_chunk(self, chunk: ChunkResult) -> None:
         """Called from the streaming thread for each transcribed chunk."""
