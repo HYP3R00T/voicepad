@@ -74,7 +74,7 @@ def _get_vad_parameters() -> dict[str, float | int]:
     return {
         "threshold": 0.5,
         "min_speech_duration_ms": 250,
-        "max_speech_duration_s": 15.0,
+        "max_speech_duration_s": 8.0,  # Optimized for better performance
         "min_silence_duration_ms": 1000,
         "speech_pad_ms": 1000,
     }

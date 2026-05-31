@@ -16,6 +16,12 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from voicepad_core.transcription.postprocessing import (
+    CapitalizationFixer,
+    PostProcessorChain,
+    PunctuationNormalizer,
+)
+
 if TYPE_CHECKING:
     from voicepad_core.audio import AudioRecorder
     from voicepad_core.config import Config
@@ -25,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 SAMPLE_RATE = 16000
 
-MIN_CHUNK_S: float = 15.0  # Minimum audio before splitting (aligned with standard transcription)
+MIN_CHUNK_S: float = 6.0  # Minimum audio before splitting (optimized for latency)
 SILENCE_RMS_THRESHOLD: float = 0.01  # RMS threshold for silence detection
 SILENCE_TRIGGER_S: float = 1.0  # Silence duration to trigger split (aligned with VAD params)
 POLL_INTERVAL_S: float = 0.3  # Monitor thread poll interval
@@ -188,8 +194,9 @@ class StreamingTranscriber:
 
         try:
             is_distil = self._config.transcription_model in DISTIL_MODELS
+            # Distil models: short prompt within token budget
             if is_distil:
-                prompt = None
+                prompt = "Transcription with proper punctuation and capitalization."
             elif self._prev_context:
                 prompt = (INITIAL_PROMPT + " " + self._prev_context[-200:]).strip()
             else:
@@ -232,7 +239,14 @@ class StreamingTranscriber:
                     )
                 )
 
-            text = " ".join(s.text for s in segments if s.text).strip()
+            raw_text = " ".join(s.text for s in segments if s.text).strip()
+
+            # Apply post-processing
+            post_chain = PostProcessorChain([
+                CapitalizationFixer(),
+                PunctuationNormalizer(),
+            ])
+            text = post_chain.process(raw_text)
 
             if text:
                 self._prev_context = " ".join(text.split()[-30:])

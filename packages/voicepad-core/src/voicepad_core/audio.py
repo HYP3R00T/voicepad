@@ -141,7 +141,11 @@ class AudioRecorder:
             logger.warning("No audio captured")
             return np.array([], dtype=np.float32)
 
-        audio = np.concatenate(frames).flatten()
+        audio = np.concatenate(frames)
+        if audio.ndim > 1:
+            # Average stereo channels to mono (not interleave)
+            audio = audio.mean(axis=1)
+        audio = audio.flatten()
 
         if self._capture_rate != SAMPLE_RATE:
             audio = _resample(audio, self._capture_rate, SAMPLE_RATE)

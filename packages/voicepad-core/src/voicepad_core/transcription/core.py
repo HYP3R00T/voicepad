@@ -22,6 +22,7 @@ from .constants import (
 )
 from .exceptions import AudioTooShortError, TranscriptionError
 from .model_manager import _is_cuda_error, _load_cpu_fallback, get_or_load_model
+from .postprocessing import CapitalizationFixer, PostProcessorChain, PunctuationNormalizer
 from .types import TranscriptionResult
 from .utils import _filter_segments, _get_vad_parameters, _trim_trailing_silence
 
@@ -38,7 +39,8 @@ def transcribe_buffer(audio: np.ndarray, config: Config) -> TranscriptionResult:
 
     audio = np.asarray(audio, dtype=np.float32)
     if audio.ndim > 1:
-        audio = audio.flatten()
+        # Average channels for proper mono conversion
+        audio = audio.mean(axis=1 if audio.shape[1] > 1 else 0)
 
     audio = _trim_trailing_silence(audio)
 
@@ -53,7 +55,8 @@ def transcribe_buffer(audio: np.ndarray, config: Config) -> TranscriptionResult:
     model, device, compute, fallback = get_or_load_model(config)
 
     is_distil = config.transcription_model in DISTIL_MODELS
-    prompt = None if is_distil else INITIAL_PROMPT
+    # Distil models: short prompt within token budget
+    prompt = "Transcription with proper punctuation and capitalization." if is_distil else INITIAL_PROMPT
 
     try:
         vad_params = _get_vad_parameters()
@@ -99,7 +102,14 @@ def transcribe_buffer(audio: np.ndarray, config: Config) -> TranscriptionResult:
     except Exception as e:
         raise TranscriptionError(f"Transcription failed: {e}") from e
 
-    text = " ".join(s.text for s in segments if s.text).strip()
+    raw_text = " ".join(s.text for s in segments if s.text).strip()
+
+    # Apply post-processing
+    post_chain = PostProcessorChain([
+        CapitalizationFixer(),
+        PunctuationNormalizer(),
+    ])
+    text = post_chain.process(raw_text)
 
     avg_confidence = sum(s.avg_logprob for s in segments) / len(segments) if segments else 0.0
     low_confidence_segments = sum(1 for s in segments if s.avg_logprob < -1.0)
