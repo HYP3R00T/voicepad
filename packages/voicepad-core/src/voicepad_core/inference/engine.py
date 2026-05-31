@@ -36,6 +36,12 @@ from .exceptions import AudioTooLongWarning, AudioTooShortError, TranscriptionEr
 from .model_manager import _is_cuda_error, _load_cpu_fallback, _model_cache, load
 from .types import Segment, TranscriptionResult, WordTimestamp
 
+# Post-processing is imported here so the engine applies the full pipeline.
+# _trim_trailing_silence lives in this module because it is a pre-inference
+# concern (prevents hallucinations on quiet tails), not a text post-process.
+from ..postprocessing.hallucination import remove_hallucinations
+from ..postprocessing.normalizer import normalize
+
 logger = logging.getLogger(__name__)
 
 
@@ -51,6 +57,7 @@ def transcribe(
     compute_type: str = COMPUTE_TYPE,
     word_timestamps: bool = False,
     language: str = LANGUAGE,
+    initial_prompt: str | None = None,
 ) -> TranscriptionResult:
     """Transcribe a pre-chunked audio buffer to text.
 
@@ -76,6 +83,13 @@ def transcribe(
         TranscriptionError: If transcription fails on all devices.
     """
     call_start = time.perf_counter()
+
+    # --- Language warning for non-English ---
+    if language != "en":
+        logger.warning(
+            f"Language '{language}' selected. English is the primary supported language. "
+            "Non-English results may have reduced accuracy."
+        )
 
     # --- Normalise input ---
     audio = np.asarray(audio, dtype=np.float32)
@@ -105,7 +119,7 @@ def transcribe(
 
     # --- Build prompt (distil models don't support initial_prompt) ---
     is_distil = model_name in DISTIL_MODELS
-    prompt = None if is_distil else INITIAL_PROMPT
+    prompt = None if is_distil else (initial_prompt if initial_prompt is not None else INITIAL_PROMPT)
 
     fallback = False
     actual_device = device
@@ -161,7 +175,8 @@ def transcribe(
 
     # --- Post-process text ---
     text = " ".join(s.text for s in segments if s.text).strip()
-    text = _remove_hallucinated_repetitions(text)
+    text = remove_hallucinations(text)
+    text = normalize(text)
 
     # --- Compute quality metrics ---
     avg_confidence = sum(s.avg_logprob for s in segments) / len(segments) if segments else 0.0
@@ -305,71 +320,3 @@ def _vad_parameters() -> dict[str, float | int]:
         "min_silence_duration_ms": 1000,
         "speech_pad_ms": 500,
     }
-
-
-# ---------------------------------------------------------------------------
-# Internal — hallucination removal
-# ---------------------------------------------------------------------------
-
-
-def _remove_hallucinated_repetitions(text: str, max_repetitions: int = 3) -> str:
-    """Remove hallucinated repetitive patterns from transcription output.
-
-    Whisper occasionally repeats the same word or short phrase many times,
-    especially on silence or low-quality audio. This function:
-      1. Detects single-word repetitions exceeding max_repetitions.
-      2. Detects 2-word phrase repetitions (3+ consecutive occurrences).
-      3. Keeps at most max_repetitions copies of any repeated token.
-
-    Args:
-        text:            Raw transcription text.
-        max_repetitions: Maximum allowed consecutive repetitions.
-
-    Returns:
-        Cleaned text with excess repetitions removed.
-    """
-    if not text:
-        return text
-
-    words = text.split()
-    if len(words) < max_repetitions + 1:
-        return text
-
-    # --- Pass 1: single-word repetitions ---
-    cleaned: list[str] = []
-    i = 0
-    while i < len(words):
-        word = words[i]
-        count = 1
-        while i + count < len(words) and words[i + count].lower() == word.lower():
-            count += 1
-        if count > max_repetitions:
-            cleaned.extend([word] * max_repetitions)
-            i += count
-        else:
-            cleaned.append(word)
-            i += 1
-
-    # --- Pass 2: 2-word phrase repetitions ---
-    words = cleaned
-    final: list[str] = []
-    i = 0
-    while i < len(words):
-        if i + 5 < len(words):
-            phrase = f"{words[i]} {words[i + 1]}"
-            phrase2 = f"{words[i + 2]} {words[i + 3]}"
-            phrase3 = f"{words[i + 4]} {words[i + 5]}"
-            if phrase.lower() == phrase2.lower() == phrase3.lower():
-                final.extend([words[i], words[i + 1]])
-                j = i + 6
-                while j + 1 < len(words):
-                    if f"{words[j]} {words[j + 1]}".lower() == phrase.lower():
-                        j += 2
-                    else:
-                        break
-                i = j
-                continue
-        final.append(words[i])
-        i += 1
-
-    return " ".join(final)

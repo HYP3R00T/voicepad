@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from math import gcd
 
 import numpy as np
 
 from .base import AudioSource
+
+logger = logging.getLogger(__name__)
 
 TARGET_SAMPLE_RATE = 16_000  # Whisper requires exactly 16kHz
 
@@ -50,14 +53,14 @@ class AudioPreProcessor:
         channels = self._source.get_channels()
 
         # Emit lightweight diagnostic output for tests that capture stdout
-        print(f"[PreProcessor] Input: {audio.shape} {sample_rate}Hz {channels}ch")
+        logger.debug(f"PreProcessor: input {audio.shape} {sample_rate}Hz {channels}ch")
 
         audio = self._to_float32(audio)
         audio = self._to_mono(audio, channels)
         audio = self._resample(audio, sample_rate, TARGET_SAMPLE_RATE)
         audio = self._normalize(audio)
 
-        print(f"[PreProcessor] Output: {len(audio)} samples {TARGET_SAMPLE_RATE}Hz")
+        logger.debug(f"PreProcessor: output {len(audio)} samples {TARGET_SAMPLE_RATE}Hz")
 
         return audio
 

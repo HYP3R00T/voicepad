@@ -13,8 +13,8 @@ _MODEL_FILENAME = "silero_vad.onnx"
 MODEL_PATH = _VAD_DIR / _MODEL_FILENAME
 
 # Direct ONNX file URL from the HuggingFace repo.
-# onnx/silero_vad.onnx is the correct filename in that tree.
-_DOWNLOAD_URL = "https://huggingface.co/onnx-community/silero-vad/resolve/main/onnx/silero_vad.onnx"
+# onnx/model.onnx is the correct filename in that tree.
+_DOWNLOAD_URL = "https://huggingface.co/onnx-community/silero-vad/resolve/main/onnx/model.onnx"
 
 
 def ensure_model_exists(verbose: bool = True) -> Path:

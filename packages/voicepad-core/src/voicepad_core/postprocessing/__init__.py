@@ -13,14 +13,16 @@ Typical call order:
     text     = normalize(text)
 """
 
+from .agreement import apply_local_agreement
 from .deduplication import deduplicate_overlap
 from .filters import filter_segments
 from .hallucination import remove_hallucinations
 from .normalizer import normalize
 
 __all__ = [
-    "filter_segments",
+    "apply_local_agreement",
     "deduplicate_overlap",
+    "filter_segments",
     "remove_hallucinations",
     "normalize",
 ]

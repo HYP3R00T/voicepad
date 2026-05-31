@@ -5,6 +5,7 @@ We pre-load them via ctypes.WinDLL so they're found by name in memory.
 """
 
 import sys
+from pathlib import Path
 
 # Pre-load CUDA DLLs on Windows so ctranslate2 can find them.
 if sys.platform == "win32":
@@ -45,27 +46,170 @@ if sys.platform == "win32":
         if not _remaining:
             break
 
+# ---------------------------------------------------------------------------
+# Public API — audio
+# ---------------------------------------------------------------------------
+from .audio import TARGET_SAMPLE_RATE, AudioPreProcessor, FileSource, MicrophoneStream
+
+# ---------------------------------------------------------------------------
+# Public API — config
+# ---------------------------------------------------------------------------
+from .config import Config, get_config, get_config_with_metadata
+from .config.settings import VALID_TRANSCRIPTION_MODELS
+
+# ---------------------------------------------------------------------------
+# Public API — inference
+# ---------------------------------------------------------------------------
 from .inference import transcribe
-from .inference.exceptions import AudioTooShortError, TranscriptionError
-from .inference.types import Segment, TranscriptionResult
+from .inference.constants import COMPUTE_TYPE, DEFAULT_MODEL, DEVICE, LANGUAGE, SAMPLE_RATE
+from .inference.download import ensure_model_downloaded, model_downloaded
+from .inference.exceptions import (
+    AudioTooLongWarning,
+    AudioTooShortError,
+    ModelNotFoundError,
+    TranscriptionError,
+)
+from .inference.model_manager import _model_cache
+from .inference.model_manager import get as get_model
+from .inference.model_manager import is_loaded as is_model_loaded
+from .inference.model_manager import load as load_model
+from .inference.model_manager import unload as unload_model
+from .inference.model_manager import unload_all as unload_all_models
+from .inference.types import Segment, TranscriptionResult, WordTimestamp
+
+# ---------------------------------------------------------------------------
+# Public API — postprocessing
+# ---------------------------------------------------------------------------
 from .postprocessing import (
     deduplicate_overlap,
     filter_segments,
     normalize,
     remove_hallucinations,
 )
+
+# ---------------------------------------------------------------------------
+# Public API — streaming
+# ---------------------------------------------------------------------------
 from .streaming import ChunkResult, StreamingTranscriber
 
+# ---------------------------------------------------------------------------
+# Public API — VAD
+# ---------------------------------------------------------------------------
+from .vad import SileroVAD, SpeechSegment
+from .vad import ensure_model_exists as ensure_vad_model
+
+# ---------------------------------------------------------------------------
+# High-level transcription functions
+# ---------------------------------------------------------------------------
+
+
+def transcribe_file(
+    wav_path: str | Path,
+    model_name: str = DEFAULT_MODEL,
+    device: str = DEVICE,
+    compute_type: str = COMPUTE_TYPE,
+    language: str = LANGUAGE,
+    local_agreement: bool = False,
+) -> TranscriptionResult:
+    """Transcribe a WAV file using the new architecture.
+
+    Blueprint Part 8 implementation. Loads audio via FileSource,
+    preprocesses to 16kHz mono, and transcribes using the inference engine.
+
+    Args:
+        wav_path: Path to WAV file to transcribe
+        model_name: Whisper model to use (default: 'turbo')
+        device: Inference device ('cuda' or 'cpu')
+        compute_type: CTranslate2 precision string
+        language: BCP-47 language code (default: 'en')
+        local_agreement: Enable two-pass verification for higher accuracy
+
+    Returns:
+        TranscriptionResult with full transcription, segments, and metadata
+
+    Raises:
+        FileNotFoundError: If WAV file doesn't exist
+        AudioTooShortError: If audio is below minimum duration
+        TranscriptionError: If transcription fails
+    """
+    from pathlib import Path
+
+    wav_path = Path(wav_path)
+    if not wav_path.exists():
+        raise FileNotFoundError(f"WAV file not found: {wav_path}")
+
+    # 1. Load audio via FileSource
+    source = FileSource(wav_path)
+    audio, sample_rate = source.read()
+
+    # 2. Preprocess to 16kHz mono using process_array (standalone method)
+    preprocessor = AudioPreProcessor(source)
+    audio = preprocessor.process()
+
+    # 3. Transcribe
+    result = transcribe(
+        audio,
+        model_name=model_name,
+        device=device,
+        compute_type=compute_type,
+        language=language,
+    )
+
+    # 4. Apply LocalAgreement if enabled
+    if local_agreement:
+        from .postprocessing.agreement import apply_local_agreement
+
+        result = apply_local_agreement(audio, result, model_name, device, compute_type, language)
+
+    return result
+
+
 __all__ = [
+    # Audio
+    "MicrophoneStream",
+    "FileSource",
+    "AudioPreProcessor",
+    "TARGET_SAMPLE_RATE",
+    "SAMPLE_RATE",
+    # Config
+    "Config",
+    "get_config",
+    "get_config_with_metadata",
+    "VALID_TRANSCRIPTION_MODELS",
+    # Inference
     "transcribe",
-    "Segment",
+    "transcribe_file",
+    "DEVICE",
+    "COMPUTE_TYPE",
+    "DEFAULT_MODEL",
+    "LANGUAGE",
+    "load_model",
+    "unload_model",
+    "unload_all_models",
+    "is_model_loaded",
+    "get_model",
+    "model_downloaded",
+    "ensure_model_downloaded",
+    "_model_cache",
+    # Types
     "TranscriptionResult",
-    "AudioTooShortError",
+    "Segment",
+    "WordTimestamp",
+    # Exceptions
     "TranscriptionError",
+    "AudioTooShortError",
+    "AudioTooLongWarning",
+    "ModelNotFoundError",
+    # Postprocessing
     "filter_segments",
     "deduplicate_overlap",
     "remove_hallucinations",
     "normalize",
+    # Streaming
     "ChunkResult",
     "StreamingTranscriber",
+    # VAD
+    "SileroVAD",
+    "SpeechSegment",
+    "ensure_vad_model",
 ]

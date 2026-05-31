@@ -126,6 +126,56 @@ class Config(BaseModel):
         ),
     )
 
+    language: str = Field(
+        default="en",
+        description=(
+            "Primary language for transcription. Non-English languages are supported "
+            "but may have reduced accuracy. A warning is emitted for non-English use."
+        ),
+    )
+
+    silence_threshold_ms: int = Field(
+        default=1000,
+        description=(
+            "VAD silence duration (ms) to trigger a chunk split during streaming. "
+            "Benchmarkable — test with 500, 800, 1000, 1500 to find optimal value."
+        ),
+    )
+
+    min_chunk_s: float = Field(
+        default=15.0,
+        description=(
+            "Minimum audio duration (seconds) before considering a silence-triggered split. "
+            "Benchmarkable — test with 10, 15, 20, 29."
+        ),
+    )
+
+    max_chunk_s: float = Field(
+        default=29.0,
+        description="Hard cap on chunk size in seconds. Whisper's context window is 30s.",
+    )
+
+    overlap_s: float = Field(
+        default=0.5,
+        description="Audio overlap (seconds) kept at chunk boundaries for acoustic continuity.",
+    )
+
+    local_agreement_mic: bool = Field(
+        default=False,
+        description=(
+            "Enable two-pass LocalAgreement verification for mic streaming mode. "
+            "Roughly doubles per-chunk latency but improves accuracy."
+        ),
+    )
+
+    local_agreement_file: bool = Field(
+        default=True,
+        description=(
+            "Enable two-pass LocalAgreement verification for file retranscription. "
+            "No latency impact — user is already waiting for full-file processing."
+        ),
+    )
+
     @field_validator("recordings_path", "markdown_path", "model_cache_path", mode="before")
     @classmethod
     def expand_paths(cls, v: Path | str) -> Path:

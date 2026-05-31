@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 import tempfile
@@ -11,6 +12,8 @@ import numpy as np
 import soundfile as sf
 
 from .base import AudioSource
+
+logger = logging.getLogger(__name__)
 
 # Formats soundfile handles natively (no external tool needed)
 _NATIVE_FORMATS = {".wav", ".flac", ".ogg"}
@@ -62,9 +65,9 @@ class FileSource(AudioSource):
                         Shape (N,) for mono, (N, C) for multi-channel.
         """
         if self._audio is None:
-            print(f"[FileSource] Loading: {self._file_path}")
+            logger.debug(f"FileSource: loading {self._file_path}")
             self._load()
-            print("[FileSource] Loaded")
+            logger.debug("FileSource: loaded")
 
         assert self._audio is not None
         return self._audio
@@ -133,10 +136,6 @@ class FileSource(AudioSource):
                     "-y",  # overwrite without asking
                     "-i",
                     str(self._file_path),
-                    "-ar",
-                    "44100",  # keep a known safe rate
-                    "-ac",
-                    "2",  # keep stereo if present
                     tmp_path,
                 ],
                 check=True,
