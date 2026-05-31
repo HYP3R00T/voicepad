@@ -11,20 +11,20 @@ class AudioSource(ABC):
     """
     Abstract base class for all audio sources.
 
-    Every audio source — microphone or file — must produce
-    a normalized, 16kHz, mono, float32 numpy array.
-    That is the only contract downstream cares about.
+    Every audio source must be able to report its native
+    sample rate and channel count. What it returns from
+    read() is raw — PreProcessor handles normalization.
     """
 
     @abstractmethod
     def read(self) -> np.ndarray:
         """
-        Read audio from the source.
+        Read audio from this source.
 
         Returns:
-            np.ndarray: Raw audio samples as float32.
-                        Sample rate and channels are NOT guaranteed here.
-                        PreProcessor handles that normalization.
+            np.ndarray: Raw float32 audio samples.
+                        Sample rate and channels are NOT normalized here.
+                        AudioPreProcessor handles that.
         """
         ...
 
@@ -41,7 +41,7 @@ class AudioSource(ABC):
     @abstractmethod
     def get_channels(self) -> int:
         """
-        Return the number of channels from this source.
+        Return the number of audio channels from this source.
 
         Returns:
             int: 1 for mono, 2 for stereo
