@@ -45,45 +45,27 @@ if sys.platform == "win32":
         if not _remaining:
             break
 
-from voicepad_core.audio import SAMPLE_RATE, AudioRecorder, AudioRecorderError
-from voicepad_core.config import Config, get_config, get_config_with_metadata
-from voicepad_core.config.settings import VALID_TRANSCRIPTION_MODELS
-from voicepad_core.streaming import ChunkResult, StreamingTranscriber
-from voicepad_core.transcription import (
-    AudioTooLongWarning,
-    AudioTooShortError,
-    Segment,
-    TranscriptionError,
-    TranscriptionResult,
-    ensure_model_downloaded,
-    get_or_load_model,
-    model_downloaded,
-    transcribe_buffer,
-    transcribe_file,
+from .inference import transcribe
+from .inference.exceptions import AudioTooShortError, TranscriptionError
+from .inference.types import Segment, TranscriptionResult
+from .postprocessing import (
+    deduplicate_overlap,
+    filter_segments,
+    normalize,
+    remove_hallucinations,
 )
+from .streaming import ChunkResult, StreamingTranscriber
 
 __all__ = [
-    # Streaming
-    "StreamingTranscriber",
-    "ChunkResult",
-    # Recording
-    "AudioRecorder",
-    "AudioRecorderError",
-    "SAMPLE_RATE",
-    # Transcription
-    "transcribe_buffer",
-    "transcribe_file",
-    "get_or_load_model",
-    "model_downloaded",
-    "ensure_model_downloaded",
-    "TranscriptionResult",
+    "transcribe",
     "Segment",
-    "TranscriptionError",
+    "TranscriptionResult",
     "AudioTooShortError",
-    "AudioTooLongWarning",
-    # Config
-    "Config",
-    "get_config",
-    "get_config_with_metadata",
-    "VALID_TRANSCRIPTION_MODELS",
+    "TranscriptionError",
+    "filter_segments",
+    "deduplicate_overlap",
+    "remove_hallucinations",
+    "normalize",
+    "ChunkResult",
+    "StreamingTranscriber",
 ]
