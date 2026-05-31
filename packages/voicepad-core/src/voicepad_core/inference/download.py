@@ -2,9 +2,8 @@
 
 """Model download and local cache management.
 
-Models are downloaded from HuggingFace via huggingface_hub and stored at:
-
-    inference/models/<model_name>/
+Models are downloaded from HuggingFace via huggingface_hub and stored under
+the configured VoicePad model cache directory.
 
 The public surface is two functions:
     model_downloaded(model_name)          -> bool
@@ -22,11 +21,22 @@ from huggingface_hub.utils import HfHubHTTPError
 
 from .constants import HF_REPO_PREFIX
 from .exceptions import ModelNotFoundError
+from ..config import get_config
 
 logger = logging.getLogger(__name__)
 
-# Models are stored here, co-located with this package.
-_MODELS_DIR = Path(__file__).parent / "models"
+
+def _get_models_dir(models_dir: Path | None = None) -> Path:
+    """Return the configured model cache directory or an explicit override."""
+    if models_dir is not None:
+        return models_dir
+    return get_config().model_cache_path
+
+
+def _get_cache_roots(models_dir: Path | None = None) -> tuple[Path, ...]:
+    """Return cache roots to inspect, newest HuggingFace layout first."""
+    base_dir = _get_models_dir(models_dir)
+    return (base_dir / "hub", base_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -71,19 +81,24 @@ def model_downloaded(model_name: str, models_dir: Path | None = None) -> bool:
     Args:
         model_name: Whisper model name (e.g. 'turbo').
         models_dir: Override the default models directory.
-                    Defaults to inference/models/.
+                Defaults to the configured model_cache_path.
 
     Returns:
         True if the model weights are fully cached locally.
     """
-    cache_root = models_dir or _MODELS_DIR
     repo_id = _get_repo_id(model_name)
-    snapshots = cache_root / f"models--{repo_id.replace('/', '--')}" / "snapshots"
+    repo_cache_dir = f"models--{repo_id.replace('/', '--')}"
 
-    if not snapshots.exists():
-        return False
+    for cache_root in _get_cache_roots(models_dir):
+        snapshots = cache_root / repo_cache_dir / "snapshots"
 
-    return any(snap.is_dir() and (snap / "model.bin").exists() for snap in snapshots.iterdir())
+        if not snapshots.exists():
+            continue
+
+        if any(snap.is_dir() and (snap / "model.bin").exists() for snap in snapshots.iterdir()):
+            return True
+
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -102,7 +117,7 @@ def ensure_model_downloaded(
     it is a no-op when the model is already present.
 
     Downloaded files are stored at:
-        inference/models/models--<repo_id>/snapshots/<hash>/
+        <model_cache_path>/models--<repo_id>/snapshots/<hash>/
 
     Ignored file patterns (not downloaded):
         *.msgpack, *.h5, flax_model*, tf_model*, rust_model*
@@ -117,12 +132,13 @@ def ensure_model_downloaded(
         ModelNotFoundError: If the download fails for any reason
                             (network error, HuggingFace unavailable, etc.)
     """
-    if model_downloaded(model_name, models_dir):
+    cache_dir = _get_models_dir(models_dir)
+
+    if model_downloaded(model_name, cache_dir):
         logger.debug(f"Model '{model_name}' already cached — skipping download.")
         return
 
     repo_id = _get_repo_id(model_name)
-    cache_dir = models_dir or _MODELS_DIR
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     logger.info(f"Downloading '{model_name}' from {repo_id} → {cache_dir}")
