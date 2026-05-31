@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import soundfile as sf
-from voicepad_core import AudioRecorderError
 
 from voicepad.tui.workers import RecordingSession
 
@@ -45,12 +44,12 @@ class RecordingService:
             session: The recording session to start
 
         Raises:
-            AudioRecorderError: If the recorder fails to start
+            RuntimeError: If the recorder fails to start
         """
         try:
             session.start()
             logger.info("Recording session started")
-        except AudioRecorderError as e:
+        except RuntimeError as e:
             logger.error(f"Failed to start recording: {e}")
             raise
 
@@ -64,13 +63,13 @@ class RecordingService:
             The recorded audio as a numpy array
 
         Raises:
-            AudioRecorderError: If the recorder fails to stop
+            RuntimeError: If the recorder fails to stop
         """
         try:
             audio = session.stop()
             logger.info(f"Recording stopped, captured {len(audio)} samples")
             return audio
-        except AudioRecorderError as e:
+        except RuntimeError as e:
             logger.error(f"Failed to stop recording: {e}")
             raise
 

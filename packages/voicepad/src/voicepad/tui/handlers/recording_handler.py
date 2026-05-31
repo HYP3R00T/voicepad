@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 from textual.widgets import Label, Static, TabbedContent
-from voicepad_core import AudioRecorder, AudioRecorderError, ChunkResult, StreamingTranscriber
+from voicepad_core import ChunkResult, MicrophoneStream, StreamingTranscriber
 
 from voicepad.tui.components import VoiceButton
 from voicepad.tui.utils.clipboard import copy_to_clipboard as _copy_to_clipboard
@@ -42,7 +42,7 @@ class RecordingHandler:
         self.app._session = RecordingSession(config=self.app.config)
         try:
             self.app._session.start()
-        except AudioRecorderError as e:
+        except Exception as e:
             self.app._set_status("error", f"mic error: {e}")
             return
 
@@ -58,9 +58,15 @@ class RecordingHandler:
             return
         self.app._streamer = StreamingTranscriber(
             recorder=recorder,
-            config=self.app.config,
             on_chunk=lambda chunk: self.app.call_from_thread(self.on_stream_chunk, chunk),
             on_error=lambda err: self.app.call_from_thread(self.app._set_status, "error", err),
+            model_name=self.app.config.transcription_model,
+            device=self.app.config.transcription_device,
+            compute_type=self.app.config.transcription_compute_type,
+            min_chunk_s=self.app.config.min_chunk_s,
+            max_chunk_s=self.app.config.max_chunk_s,
+            overlap_s=self.app.config.overlap_s,
+            silence_threshold_ms=self.app.config.silence_threshold_ms,
         )
         self.app._streamer.start()
 
@@ -75,7 +81,7 @@ class RecordingHandler:
 
         try:
             audio = self.app._session.stop()
-        except AudioRecorderError as e:
+        except Exception as e:
             self.app._set_status("error", f"stop error: {e}")
             if self.app._streamer:
                 self.app._streamer._stop_event.set()
@@ -136,9 +142,10 @@ class RecordingHandler:
         # Save WAV
         wav_path: Path | None = None
         md_path: Path | None = None
-        recorder_ref: AudioRecorder | None = self.app._session._recorder if self.app._session else None
+        recorder_ref: MicrophoneStream | None = self.app._session._recorder if self.app._session else None
         if recorder_ref is not None:
-            wav_path = recorder_ref.make_wav_path()
+            ts = time.strftime("%Y%m%d_%H%M%S")
+            wav_path = self.app.config.recordings_path / f"{self.app.config.recording_prefix}_{ts}.wav"
             try:
                 recorder_ref.save_wav(audio, wav_path)
                 # Build a synthetic TranscriptionResult-like object for _format_markdown

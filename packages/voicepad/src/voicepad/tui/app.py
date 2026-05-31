@@ -380,14 +380,21 @@ class VoicePadApp(App[None]):
     def _retranscribe_file(self, wav_path: Path, md_path: Path | None) -> None:
         """Retranscribe a WAV file and prepend the result to the markdown."""
         import soundfile as sf
-        from voicepad_core.transcription import transcribe_buffer
+        from voicepad_core import transcribe
 
         self.call_from_thread(self._set_status, "transcribing", f"retranscribing {wav_path.name}…")
         try:
             audio, _sr = sf.read(str(wav_path), dtype="float32", always_2d=False)
             if audio.ndim > 1:
                 audio = audio.mean(axis=1)
-            result = transcribe_buffer(audio, self.config)
+            result = transcribe(
+                audio,
+                model_name=self.config.transcription_model,
+                device=self.config.transcription_device,
+                compute_type=self.config.transcription_compute_type,
+                language=self.config.language,
+                word_timestamps=False,
+            )
             error: str | None = None
         except Exception as e:
             result = None

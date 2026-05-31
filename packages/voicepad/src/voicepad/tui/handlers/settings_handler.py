@@ -324,7 +324,7 @@ class SettingsHandler:
                 self.app._start_hotkey_listener()
 
             if model_changed and not self.app._recording and not self.app._transcribing:
-                from voicepad_core.transcription import _model_cache
+                from voicepad_core import _model_cache
 
                 _model_cache.clear()
                 self.app._model_ready = False
