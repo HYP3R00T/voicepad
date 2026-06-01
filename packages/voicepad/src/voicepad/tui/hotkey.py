@@ -66,7 +66,7 @@ class GlobalHotkeyListener:
         self._required_modifiers: set[Any] = set()
         self._target_key: Any = None
         self._currently_pressed: set[Any] = set()
-        self._last_modifier_time: float = 0.0
+        self._last_modifier_time: float | None = None
 
     def start(self) -> None:
         """Start the background hotkey listener thread."""
@@ -143,16 +143,29 @@ class GlobalHotkeyListener:
         """Handle key press events."""
         self._currently_pressed.add(key)
 
-        # Update last modifier time when a modifier is pressed
-        if key in self._required_modifiers:
+        # Update last modifier time when any required modifier is pressed
+        # Check if this key is part of any required modifier group
+        is_modifier = False
+        if self._required_modifiers:
+            # Check if the pressed key matches any of the required modifiers
+            for required_mod in self._required_modifiers:
+                if key == required_mod:
+                    is_modifier = True
+                    break
+
+        if is_modifier:
             self._last_modifier_time = time.time()
 
         # Check if this is our target key and all modifiers are pressed
         if key == self._target_key and self._check_modifiers_pressed():
             # Check timeout: ensure modifiers were pressed recently
-            time_since_modifier = time.time() - self._last_modifier_time
-            if time_since_modifier <= HOTKEY_TIMEOUT:
+            # If no modifier has been pressed yet, allow the trigger
+            if self._last_modifier_time is None:
                 self._trigger_hotkey()
+            else:
+                time_since_modifier = time.time() - self._last_modifier_time
+                if time_since_modifier <= HOTKEY_TIMEOUT:
+                    self._trigger_hotkey()
 
     def _on_release(self, key: Any) -> None:
         """Handle key release events."""
@@ -186,9 +199,6 @@ class GlobalHotkeyListener:
 
             # Parse hotkey components
             self._parse_hotkey_components(keyboard)
-
-            # Initialize last modifier time
-            self._last_modifier_time = time.time()
 
             # Create listener with press and release handlers
             self._listener = keyboard.Listener(
