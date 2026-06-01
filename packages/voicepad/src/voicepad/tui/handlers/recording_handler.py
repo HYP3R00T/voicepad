@@ -215,6 +215,8 @@ class RecordingHandler:
                     self.app._overlay_set("copied")
                 else:
                     self.app._overlay_set("hidden")
+            else:
+                self.app._overlay_set("hidden")
 
     def save_recording(self, audio: np.ndarray) -> None:
         """Save WAV + markdown and add history entry after streaming completes."""
