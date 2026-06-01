@@ -83,8 +83,8 @@ class BenchmarkResult:
 def run_fixture(fixture: dict, model_name: str, device: str) -> BenchmarkResult:
     """Run transcription on one fixture and return metrics."""
     from jiwer import cer, wer
+    from voicepad_core import transcribe
     from voicepad_core.config import get_config
-    from voicepad_core.transcription import transcribe_file
 
     wav_path = FIXTURES_DIR / fixture["wav"]
     if not wav_path.exists():
@@ -103,7 +103,19 @@ def run_fixture(fixture: dict, model_name: str, device: str) -> BenchmarkResult:
 
     print(f"  [{fixture['id']}] transcribing with {model_name} on {device}...", end=" ", flush=True)
     t0 = time.perf_counter()
-    result = transcribe_file(wav_path, config)
+    import soundfile as sf
+
+    audio, _ = sf.read(str(wav_path), dtype="float32", always_2d=False)
+    if audio.ndim > 1:
+        audio = audio.mean(axis=1)
+    result = transcribe(
+        audio,
+        model_name=config.transcription_model,
+        device=config.transcription_device,
+        compute_type=config.transcription_compute_type,
+        language=config.language,
+        word_timestamps=False,
+    )
     wall_ms = (time.perf_counter() - t0) * 1000
     print(f"done ({wall_ms:.0f}ms)")
 
