@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import onnxruntime as ort
 
 from .base import SpeechSegment, VADBase
-from .silero_download import MODEL_PATH, ensure_model_exists
+from .silero_download import ensure_model_exists
 
 # Silero VAD requires audio at exactly 16kHz.
 _REQUIRED_SAMPLE_RATE = 16_000
@@ -29,8 +31,9 @@ class SileroVAD(VADBase):
     enough that GPU is unnecessary for VAD — save the GPU for
     Whisper inference.
 
-    The ONNX file lives at vad/silero_vad.onnx and is downloaded
-    automatically on first app startup via ensure_model_exists().
+    The ONNX file is stored in the configured vad_model_path directory
+    (default: ~/.config/voicepad/models/vad/silero_vad_v6.onnx) and is
+    downloaded automatically on first use via ensure_model_exists().
 
     Processing:
       - Audio is sliced into 512-sample (32ms) windows.
@@ -54,6 +57,7 @@ class SileroVAD(VADBase):
         min_speech_duration_ms: int = 250,
         min_silence_duration_ms: int = 100,
         speech_pad_ms: int = 30,
+        vad_model_dir: Path | None = None,
     ) -> None:
         """
         Args:
@@ -73,11 +77,16 @@ class SileroVAD(VADBase):
             speech_pad_ms:
                 Extra padding (ms) added to the start and end of each
                 speech segment to avoid clipping first/last syllables.
+
+            vad_model_dir:
+                Directory where VAD model is stored. If None, uses
+                config default (~/.config/voicepad/models/vad).
         """
         self._threshold = threshold
         self._min_speech_samples = int(min_speech_duration_ms * _REQUIRED_SAMPLE_RATE / 1000)
         self._min_silence_samples = int(min_silence_duration_ms * _REQUIRED_SAMPLE_RATE / 1000)
         self._speech_pad_samples = int(speech_pad_ms * _REQUIRED_SAMPLE_RATE / 1000)
+        self._vad_model_dir = vad_model_dir
 
         self._session: ort.InferenceSession = self._load_session()
         self._h: np.ndarray
@@ -261,8 +270,7 @@ class SileroVAD(VADBase):
     # Internal — setup
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _load_session() -> ort.InferenceSession:
+    def _load_session(self) -> ort.InferenceSession:
         """
         Run the startup model check and load the ONNX session.
 
@@ -272,13 +280,13 @@ class SileroVAD(VADBase):
         Raises:
             RuntimeError: If download fails or ONNX session cannot load.
         """
-        ensure_model_exists(verbose=True)
+        model_path = ensure_model_exists(vad_model_dir=self._vad_model_dir, verbose=True)
 
         session_options = ort.SessionOptions()
         session_options.log_severity_level = 3  # suppress onnxruntime INFO logs
 
         session = ort.InferenceSession(
-            str(MODEL_PATH),
+            str(model_path),
             sess_options=session_options,
             providers=["CPUExecutionProvider"],
         )

@@ -6,12 +6,8 @@ import logging
 import urllib.request
 from pathlib import Path
 
-# ONNX model lives next to silero.py inside the package.
-# This path is resolved relative to this file so it works
-# regardless of where the process is launched from.
-_VAD_DIR = Path(__file__).parent
+# Model filename constant
 _MODEL_FILENAME = "silero_vad_v6.onnx"
-MODEL_PATH = _VAD_DIR / _MODEL_FILENAME
 
 # Direct ONNX file URL for Silero VAD v6 from SYSTRAN/faster-whisper
 _DOWNLOAD_URL = (
@@ -21,18 +17,34 @@ _DOWNLOAD_URL = (
 logger = logging.getLogger(__name__)
 
 
-def ensure_model_exists(verbose: bool = True) -> Path:
+def get_model_path(vad_model_dir: Path | None = None) -> Path:
+    """
+    Get the path where the VAD model should be stored.
+
+    Args:
+        vad_model_dir: Directory for VAD models. If None, uses config default.
+
+    Returns:
+        Full path to the VAD model file.
+    """
+    if vad_model_dir is None:
+        from ..config import get_config
+
+        vad_model_dir = get_config().vad_model_path
+
+    return vad_model_dir / _MODEL_FILENAME
+
+
+def ensure_model_exists(vad_model_dir: Path | None = None, verbose: bool = True) -> Path:
     """
     Check whether the Silero ONNX model file is present.
-    If it is missing, download it from HuggingFace and save it
-    next to this file at:
-
-        vad/silero_vad.onnx
+    If it is missing, download it from the configured location.
 
     This function is safe to call on every app startup — it is
     a no-op when the file already exists.
 
     Args:
+        vad_model_dir: Directory for VAD models. If None, uses config default.
         verbose: If True, print progress messages to stdout.
                  Set to False in tests or silent boot paths.
 
@@ -41,28 +53,30 @@ def ensure_model_exists(verbose: bool = True) -> Path:
 
     Raises:
         RuntimeError: If the download fails for any reason
-                      (no internet, HuggingFace unreachable, etc.)
+                      (no internet, network unreachable, etc.)
     """
-    if MODEL_PATH.exists():
+    model_path = get_model_path(vad_model_dir)
+
+    if model_path.exists():
         if verbose:
-            logger.info(f"[VAD] Silero model found at: {MODEL_PATH}")
-        return MODEL_PATH
+            logger.info(f"[VAD] Silero model found at: {model_path}")
+        return model_path
 
     if verbose:
         logger.info("[VAD] Silero ONNX model not found. Downloading...")
         logger.info(f"      Source : {_DOWNLOAD_URL}")
-        logger.info(f"      Target : {MODEL_PATH}")
+        logger.info(f"      Target : {model_path}")
 
-    _download(verbose=verbose)
+    _download(model_path, verbose=verbose)
 
     if verbose:
-        size_kb = MODEL_PATH.stat().st_size // 1024
+        size_kb = model_path.stat().st_size // 1024
         print(f"[VAD] Download complete. ({size_kb} KB)")
 
-    return MODEL_PATH
+    return model_path
 
 
-def _download(verbose: bool = True) -> None:
+def _download(model_path: Path, verbose: bool = True) -> None:
     """
     Stream the ONNX file from HuggingFace to disk with a
     simple progress indicator.
@@ -74,14 +88,14 @@ def _download(verbose: bool = True) -> None:
                       clear human-readable message.
     """
     try:
-        MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
+        model_path.parent.mkdir(parents=True, exist_ok=True)
 
         with urllib.request.urlopen(_DOWNLOAD_URL) as response:
             total = int(response.headers.get("Content-Length", 0))
             downloaded = 0
             chunk_size = 8192  # 8 KB per read
 
-            with open(MODEL_PATH, "wb") as f:
+            with open(model_path, "wb") as f:
                 while True:
                     chunk = response.read(chunk_size)
                     if not chunk:
@@ -99,9 +113,9 @@ def _download(verbose: bool = True) -> None:
 
     except Exception as e:
         # Clean up a partial file if the download failed mid-way
-        if MODEL_PATH.exists():
+        if model_path.exists():
             try:
-                MODEL_PATH.unlink()
+                model_path.unlink()
             except Exception:
                 logger.exception("Failed to remove partial VAD model file")
         logger.exception("Failed to download Silero ONNX model")

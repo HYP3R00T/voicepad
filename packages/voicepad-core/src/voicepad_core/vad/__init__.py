@@ -2,12 +2,12 @@
 
 from .base import SpeechSegment, VADBase
 from .silero import SileroVAD
-from .silero_download import MODEL_PATH, ensure_model_exists
+from .silero_download import ensure_model_exists, get_model_path
 
 __all__ = [
     "SpeechSegment",
     "VADBase",
     "SileroVAD",
     "ensure_model_exists",
-    "MODEL_PATH",
+    "get_model_path",
 ]

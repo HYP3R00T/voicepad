@@ -66,6 +66,10 @@ class Config(BaseModel):
         default_factory=lambda: expand_path("~/.config/voicepad/models"),
         description="Directory where Whisper model weights are cached.",
     )
+    vad_model_path: Path = Field(
+        default_factory=lambda: expand_path("~/.config/voicepad/models/vad"),
+        description="Directory where VAD (Voice Activity Detection) model files are stored.",
+    )
     logs_path: Path = Field(
         default_factory=lambda: expand_path("~/.config/voicepad/logs"),
         description="Directory where transcription logs are saved.",
@@ -187,7 +191,9 @@ class Config(BaseModel):
         ),
     )
 
-    @field_validator("recordings_path", "markdown_path", "model_cache_path", "logs_path", mode="before")
+    @field_validator(
+        "recordings_path", "markdown_path", "model_cache_path", "vad_model_path", "logs_path", mode="before"
+    )
     @classmethod
     def expand_paths(cls, v: Path | str) -> Path:
         """Expand ~ and environment variables in path fields."""
@@ -196,7 +202,7 @@ class Config(BaseModel):
     @model_validator(mode="after")
     def ensure_paths_expanded(self) -> Config:
         """Expand all path fields (safety check for default values)."""
-        for path_field in ("recordings_path", "markdown_path", "model_cache_path", "logs_path"):
+        for path_field in ("recordings_path", "markdown_path", "model_cache_path", "vad_model_path", "logs_path"):
             current_path = getattr(self, path_field)
             expanded = expand_path(str(current_path))
             object.__setattr__(self, path_field, expanded)
