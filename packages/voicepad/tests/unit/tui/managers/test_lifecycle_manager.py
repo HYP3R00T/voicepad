@@ -154,7 +154,7 @@ class TestOnUnmount:
         from voicepad.tui.managers.lifecycle_manager import LifecycleManager
 
         mock_listener = Mock()
-        mock_listener.stop.side_effect = Exception("Stop failed")
+        mock_listener.stop.side_effect = RuntimeError("Stop failed")
         mock_app._hotkey_listener = mock_listener
         manager = LifecycleManager(mock_app)
 
@@ -166,7 +166,7 @@ class TestOnUnmount:
         from voicepad.tui.managers.lifecycle_manager import LifecycleManager
 
         mock_overlay = Mock()
-        mock_overlay.stop.side_effect = Exception("Stop failed")
+        mock_overlay.stop.side_effect = RuntimeError("Stop failed")
         mock_app._overlay = mock_overlay
         manager = LifecycleManager(mock_app)
 
@@ -480,7 +480,7 @@ class TestOnSetupDone:
             mock_path = Mock(spec=Path)
             mock_path.parent = Mock()
             mock_get_path.return_value = mock_path
-            mock_write.side_effect = Exception("Write failed")
+            mock_write.side_effect = RuntimeError("Write failed")
 
             # Should not raise an exception
             manager.on_setup_done(result)

@@ -65,6 +65,22 @@ class TestConfigExpandPaths:
         assert "voicepad" in str(config.markdown_path)
         assert "markdown" in str(config.markdown_path)
 
+    def test_default_vad_model_path(self) -> None:
+        """When vad_model_path is not provided, the default points to ~/.config/voicepad/models/vad."""
+        config = Config(recordings_path="data/recordings", markdown_path="data/markdown")
+        assert "voicepad" in str(config.vad_model_path)
+        assert "vad" in str(config.vad_model_path)
+
+    def test_vad_model_path_is_expanded(self) -> None:
+        """The vad_model_path field is validated and expanded."""
+        config = Config(
+            recordings_path="data/recordings",
+            markdown_path="data/markdown",
+            vad_model_path="data/vad",
+        )
+        assert isinstance(config.vad_model_path, Path)
+        assert config.vad_model_path == Path("data/vad")
+
     def test_default_input_device_index_is_none(self) -> None:
         """When input_device_index is not provided, it defaults to None."""
         config = Config(recordings_path="data/recordings", markdown_path="data/markdown")
@@ -431,3 +447,431 @@ class TestPathValidationEdgeCases:
         config = Config(recordings_path=rec_path, markdown_path=md_path)
         assert config.recordings_path == rec_path
         assert config.markdown_path == md_path
+
+
+# ---------------------------------------------------------------------------
+# Model validation tests
+# ---------------------------------------------------------------------------
+
+
+class TestTranscriptionModelValidation:
+    """Tests for transcription_model field validation."""
+
+    def test_valid_transcription_model_turbo(self) -> None:
+        """Valid model 'turbo' is accepted."""
+        config = Config(
+            recordings_path="data/recordings",
+            markdown_path="data/markdown",
+            transcription_model="turbo",
+        )
+        assert config.transcription_model == "turbo"
+
+    def test_valid_transcription_model_base(self) -> None:
+        """Valid model 'base' is accepted."""
+        config = Config(
+            recordings_path="data/recordings",
+            markdown_path="data/markdown",
+            transcription_model="base",
+        )
+        assert config.transcription_model == "base"
+
+    def test_valid_transcription_model_large_v3(self) -> None:
+        """Valid model 'large-v3' is accepted."""
+        config = Config(
+            recordings_path="data/recordings",
+            markdown_path="data/markdown",
+            transcription_model="large-v3",
+        )
+        assert config.transcription_model == "large-v3"
+
+    def test_invalid_transcription_model_raises_error(self) -> None:
+        """Invalid model name raises ValidationError."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match="Unknown transcription model"):
+            Config(
+                recordings_path="data/recordings",
+                markdown_path="data/markdown",
+                transcription_model="invalid-model",
+            )
+
+    def test_transcription_model_case_sensitive(self) -> None:
+        """Model names are case-sensitive."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            Config(
+                recordings_path="data/recordings",
+                markdown_path="data/markdown",
+                transcription_model="TURBO",  # Should be lowercase
+            )
+
+
+class TestLogLevelValidation:
+    """Tests for log_level field validation."""
+
+    def test_valid_log_level_debug(self) -> None:
+        """Valid log level 'DEBUG' is accepted."""
+        config = Config(
+            recordings_path="data/recordings",
+            markdown_path="data/markdown",
+            log_level="DEBUG",
+        )
+        assert config.log_level == "DEBUG"
+
+    def test_valid_log_level_info(self) -> None:
+        """Valid log level 'INFO' is accepted."""
+        config = Config(
+            recordings_path="data/recordings",
+            markdown_path="data/markdown",
+            log_level="INFO",
+        )
+        assert config.log_level == "INFO"
+
+    def test_valid_log_level_warning(self) -> None:
+        """Valid log level 'WARNING' is accepted."""
+        config = Config(
+            recordings_path="data/recordings",
+            markdown_path="data/markdown",
+            log_level="WARNING",
+        )
+        assert config.log_level == "WARNING"
+
+    def test_valid_log_level_error(self) -> None:
+        """Valid log level 'ERROR' is accepted."""
+        config = Config(
+            recordings_path="data/recordings",
+            markdown_path="data/markdown",
+            log_level="ERROR",
+        )
+        assert config.log_level == "ERROR"
+
+    def test_invalid_log_level_raises_error(self) -> None:
+        """Invalid log level raises ValidationError."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            Config(
+                recordings_path="data/recordings",
+                markdown_path="data/markdown",
+                log_level="TRACE",  # type: ignore[arg-type]
+            )
+
+    def test_default_log_level_is_info(self) -> None:
+        """Default log level is INFO."""
+        config = Config(recordings_path="data/recordings", markdown_path="data/markdown")
+        assert config.log_level == "INFO"
+
+
+class TestGlobalHotkeyField:
+    """Tests for global_hotkey field."""
+
+    def test_default_global_hotkey(self) -> None:
+        """Default global hotkey is '<ctrl>+<alt>+v'."""
+        config = Config(recordings_path="data/recordings", markdown_path="data/markdown")
+        assert config.global_hotkey == "<ctrl>+<alt>+v"
+
+    def test_custom_global_hotkey(self) -> None:
+        """Custom global hotkey is accepted."""
+        config = Config(
+            recordings_path="data/recordings",
+            markdown_path="data/markdown",
+            global_hotkey="<ctrl>+<shift>+space",
+        )
+        assert config.global_hotkey == "<ctrl>+<shift>+space"
+
+    def test_empty_global_hotkey_disables_feature(self) -> None:
+        """Empty string disables global hotkey."""
+        config = Config(
+            recordings_path="data/recordings",
+            markdown_path="data/markdown",
+            global_hotkey="",
+        )
+        assert config.global_hotkey == ""
+
+
+class TestLanguageField:
+    """Tests for language field."""
+
+    def test_default_language_is_english(self) -> None:
+        """Default language is 'en'."""
+        config = Config(recordings_path="data/recordings", markdown_path="data/markdown")
+        assert config.language == "en"
+
+    def test_custom_language(self) -> None:
+        """Custom language is accepted."""
+        config = Config(
+            recordings_path="data/recordings",
+            markdown_path="data/markdown",
+            language="es",
+        )
+        assert config.language == "es"
+
+    def test_language_accepts_any_string(self) -> None:
+        """Language field accepts any string value."""
+        config = Config(
+            recordings_path="data/recordings",
+            markdown_path="data/markdown",
+            language="zh-CN",
+        )
+        assert config.language == "zh-CN"
+
+
+class TestStreamingParameters:
+    """Tests for streaming-related parameters."""
+
+    def test_default_silence_threshold_ms(self) -> None:
+        """Default silence threshold is 1000ms."""
+        config = Config(recordings_path="data/recordings", markdown_path="data/markdown")
+        assert config.silence_threshold_ms == 1000
+
+    def test_custom_silence_threshold_ms(self) -> None:
+        """Custom silence threshold is accepted."""
+        config = Config(
+            recordings_path="data/recordings",
+            markdown_path="data/markdown",
+            silence_threshold_ms=500,
+        )
+        assert config.silence_threshold_ms == 500
+
+    def test_default_min_chunk_s(self) -> None:
+        """Default min_chunk_s is 15.0."""
+        config = Config(recordings_path="data/recordings", markdown_path="data/markdown")
+        assert config.min_chunk_s == 15.0
+
+    def test_custom_min_chunk_s(self) -> None:
+        """Custom min_chunk_s is accepted."""
+        config = Config(
+            recordings_path="data/recordings",
+            markdown_path="data/markdown",
+            min_chunk_s=10.0,
+        )
+        assert config.min_chunk_s == 10.0
+
+    def test_default_max_chunk_s(self) -> None:
+        """Default max_chunk_s is 29.0."""
+        config = Config(recordings_path="data/recordings", markdown_path="data/markdown")
+        assert config.max_chunk_s == 29.0
+
+    def test_custom_max_chunk_s(self) -> None:
+        """Custom max_chunk_s is accepted."""
+        config = Config(
+            recordings_path="data/recordings",
+            markdown_path="data/markdown",
+            max_chunk_s=25.0,
+        )
+        assert config.max_chunk_s == 25.0
+
+    def test_default_overlap_s(self) -> None:
+        """Default overlap_s is 0.5."""
+        config = Config(recordings_path="data/recordings", markdown_path="data/markdown")
+        assert config.overlap_s == 0.5
+
+    def test_custom_overlap_s(self) -> None:
+        """Custom overlap_s is accepted."""
+        config = Config(
+            recordings_path="data/recordings",
+            markdown_path="data/markdown",
+            overlap_s=1.0,
+        )
+        assert config.overlap_s == 1.0
+
+
+class TestLocalAgreementFields:
+    """Tests for local_agreement_mic and local_agreement_file fields."""
+
+    def test_default_local_agreement_mic_is_false(self) -> None:
+        """Default local_agreement_mic is False."""
+        config = Config(recordings_path="data/recordings", markdown_path="data/markdown")
+        assert config.local_agreement_mic is False
+
+    def test_custom_local_agreement_mic_true(self) -> None:
+        """local_agreement_mic can be set to True."""
+        config = Config(
+            recordings_path="data/recordings",
+            markdown_path="data/markdown",
+            local_agreement_mic=True,
+        )
+        assert config.local_agreement_mic is True
+
+    def test_default_local_agreement_file_is_true(self) -> None:
+        """Default local_agreement_file is True."""
+        config = Config(recordings_path="data/recordings", markdown_path="data/markdown")
+        assert config.local_agreement_file is True
+
+    def test_custom_local_agreement_file_false(self) -> None:
+        """local_agreement_file can be set to False."""
+        config = Config(
+            recordings_path="data/recordings",
+            markdown_path="data/markdown",
+            local_agreement_file=False,
+        )
+        assert config.local_agreement_file is False
+
+
+class TestLogsPathField:
+    """Tests for logs_path field."""
+
+    def test_default_logs_path_expands_tilde(self) -> None:
+        """Default logs_path expands tilde."""
+        config = Config(recordings_path="data/recordings", markdown_path="data/markdown")
+        assert "~" not in str(config.logs_path)
+        assert config.logs_path.is_absolute()
+        assert "voicepad" in str(config.logs_path).lower()
+
+    def test_custom_logs_path(self) -> None:
+        """Custom logs_path is accepted."""
+        config = Config(
+            recordings_path="data/recordings",
+            markdown_path="data/markdown",
+            logs_path="/tmp/logs",
+        )
+        assert config.logs_path == Path("/tmp/logs")
+
+    def test_logs_path_with_tilde_expands(self) -> None:
+        """logs_path with tilde is expanded."""
+        config = Config(
+            recordings_path="data/recordings",
+            markdown_path="data/markdown",
+            logs_path="~/mylogs",
+        )
+        assert "~" not in str(config.logs_path)
+        assert config.logs_path.is_absolute()
+
+
+class TestAllPathFieldsExpanded:
+    """Tests ensuring all path fields are properly expanded."""
+
+    def test_all_path_fields_expanded_in_defaults(self) -> None:
+        """All path fields with defaults are expanded."""
+        config = Config()
+        # All paths should be absolute
+        assert config.recordings_path.is_absolute()
+        assert config.markdown_path.is_absolute()
+        assert config.model_cache_path.is_absolute()
+        assert config.logs_path.is_absolute()
+        # None should contain literal tilde
+        assert "~" not in str(config.recordings_path)
+        assert "~" not in str(config.markdown_path)
+        assert "~" not in str(config.model_cache_path)
+        assert "~" not in str(config.logs_path)
+
+    def test_all_path_fields_with_custom_values(self) -> None:
+        """All path fields accept custom values."""
+        config = Config(
+            recordings_path="/custom/recordings",
+            markdown_path="/custom/markdown",
+            model_cache_path="/custom/models",
+            logs_path="/custom/logs",
+        )
+        assert config.recordings_path == Path("/custom/recordings")
+        assert config.markdown_path == Path("/custom/markdown")
+        assert config.model_cache_path == Path("/custom/models")
+        assert config.logs_path == Path("/custom/logs")
+
+
+class TestConfigImmutability:
+    """Tests for config immutability (frozen model)."""
+
+    def test_cannot_modify_recordings_path(self) -> None:
+        """Cannot modify recordings_path after creation."""
+        from pydantic import ValidationError
+
+        config = Config(recordings_path="data/recordings", markdown_path="data/markdown")
+        with pytest.raises(ValidationError):
+            config.recordings_path = Path("other")  # type: ignore[misc]
+
+    def test_cannot_modify_transcription_model(self) -> None:
+        """Cannot modify transcription_model after creation."""
+        from pydantic import ValidationError
+
+        config = Config(recordings_path="data/recordings", markdown_path="data/markdown")
+        with pytest.raises(ValidationError):
+            config.transcription_model = "base"  # type: ignore[misc]
+
+    def test_cannot_modify_log_level(self) -> None:
+        """Cannot modify log_level after creation."""
+        from pydantic import ValidationError
+
+        config = Config(recordings_path="data/recordings", markdown_path="data/markdown")
+        with pytest.raises(ValidationError):
+            config.log_level = "DEBUG"  # type: ignore[misc]
+
+
+class TestGetConfigWithCwd:
+    """Tests for get_config with custom cwd parameter."""
+
+    def test_get_config_with_cwd_parameter(self, tmp_path: Path) -> None:
+        """get_config accepts cwd parameter."""
+        config = get_config(cwd=tmp_path)
+        assert isinstance(config, ConfigModel)
+
+    def test_get_config_with_metadata_with_cwd_parameter(self, tmp_path: Path) -> None:
+        """get_config_with_metadata accepts cwd parameter."""
+        config, metadata = get_config_with_metadata(cwd=tmp_path)
+        assert isinstance(config, ConfigModel)
+        assert metadata is not None
+
+
+class TestGetConfigWithAppName:
+    """Tests for get_config with custom app_name parameter."""
+
+    def test_get_config_with_app_name_parameter(self) -> None:
+        """get_config accepts app_name parameter."""
+        config = get_config(app_name="voicepad")
+        assert isinstance(config, ConfigModel)
+
+    def test_get_config_with_metadata_with_app_name_parameter(self) -> None:
+        """get_config_with_metadata accepts app_name parameter."""
+        config, metadata = get_config_with_metadata(app_name="voicepad")
+        assert isinstance(config, ConfigModel)
+        assert metadata is not None
+
+
+class TestComputeTypeValidation:
+    """Tests for transcription_compute_type validation."""
+
+    def test_valid_compute_type_auto(self) -> None:
+        """Valid compute type 'auto' is accepted."""
+        config = Config(
+            recordings_path="data/recordings",
+            markdown_path="data/markdown",
+            transcription_compute_type="auto",
+        )
+        assert config.transcription_compute_type == "auto"
+
+    def test_valid_compute_type_float16(self) -> None:
+        """Valid compute type 'float16' is accepted."""
+        config = Config(
+            recordings_path="data/recordings",
+            markdown_path="data/markdown",
+            transcription_compute_type="float16",
+        )
+        assert config.transcription_compute_type == "float16"
+
+    def test_valid_compute_type_int8(self) -> None:
+        """Valid compute type 'int8' is accepted."""
+        config = Config(
+            recordings_path="data/recordings",
+            markdown_path="data/markdown",
+            transcription_compute_type="int8",
+        )
+        assert config.transcription_compute_type == "int8"
+
+    def test_valid_compute_type_float32(self) -> None:
+        """Valid compute type 'float32' is accepted."""
+        config = Config(
+            recordings_path="data/recordings",
+            markdown_path="data/markdown",
+            transcription_compute_type="float32",
+        )
+        assert config.transcription_compute_type == "float32"
+
+    def test_valid_compute_type_int8_float16(self) -> None:
+        """Valid compute type 'int8_float16' is accepted."""
+        config = Config(
+            recordings_path="data/recordings",
+            markdown_path="data/markdown",
+            transcription_compute_type="int8_float16",
+        )
+        assert config.transcription_compute_type == "int8_float16"

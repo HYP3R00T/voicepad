@@ -36,11 +36,14 @@ class TestOnSettingsSave:
         recordings_path: Path,
         markdown_path: Path,
         status: Mock,
+        vad_model_path: Path | None = None,
     ) -> dict[str, object]:
         recordings_input = Mock()
         recordings_input.value = str(recordings_path)
         markdown_input = Mock()
         markdown_input.value = str(markdown_path)
+        vad_input = Mock()
+        vad_input.value = str(vad_model_path) if vad_model_path else ""
 
         model_select = Mock()
         model_select.value = "turbo"
@@ -67,6 +70,7 @@ class TestOnSettingsSave:
             "#settings-status": status,
             "#setting-recordings_path": recordings_input,
             "#setting-markdown_path": markdown_input,
+            "#setting-vad_model_path": vad_input,
             "#setting-transcription_model": model_select,
             "#setting-input_device_index": device_select,
             "#setting-theme": theme_select,
@@ -81,9 +85,14 @@ class TestOnSettingsSave:
         """Saving settings creates the configured directories when they do not exist."""
         recordings_path = tmp_path / "custom" / "recordings"
         markdown_path = tmp_path / "notes" / "markdown"
-        config = Config(recordings_path=recordings_path, markdown_path=markdown_path)
+        vad_model_path = tmp_path / "models" / "vad"
+        config = Config(
+            recordings_path=recordings_path,
+            markdown_path=markdown_path,
+            vad_model_path=vad_model_path,
+        )
         status = Mock()
-        selector_map = self._build_selector_map(recordings_path, markdown_path, status)
+        selector_map = self._build_selector_map(recordings_path, markdown_path, status, vad_model_path)
         app = self._build_app(config, selector_map)
         handler = SettingsHandler(app)
 
@@ -95,6 +104,7 @@ class TestOnSettingsSave:
 
         assert recordings_path.exists()
         assert markdown_path.exists()
+        assert vad_model_path.exists()
         mock_write_config.assert_called_once()
         status.update.assert_called()
 
@@ -103,9 +113,14 @@ class TestOnSettingsSave:
         recordings_path = tmp_path / "blocked"
         recordings_path.write_text("not a directory", encoding="utf-8")
         markdown_path = tmp_path / "notes" / "markdown"
-        config = Config(recordings_path=recordings_path, markdown_path=markdown_path)
+        vad_model_path = tmp_path / "models" / "vad"
+        config = Config(
+            recordings_path=recordings_path,
+            markdown_path=markdown_path,
+            vad_model_path=vad_model_path,
+        )
         status = Mock()
-        selector_map = self._build_selector_map(recordings_path, markdown_path, status)
+        selector_map = self._build_selector_map(recordings_path, markdown_path, status, vad_model_path)
         app = self._build_app(config, selector_map)
         handler = SettingsHandler(app)
 
@@ -115,5 +130,62 @@ class TestOnSettingsSave:
         ):
             handler.on_settings_save()
 
+        mock_write_config.assert_not_called()
+        status.update.assert_called()
+
+    def test_vad_model_path_is_saved_correctly(self, tmp_path: Path) -> None:
+        """Saving settings persists the vad_model_path to config."""
+        recordings_path = tmp_path / "recordings"
+        markdown_path = tmp_path / "markdown"
+        vad_model_path = tmp_path / "custom_vad"
+        config = Config(
+            recordings_path=recordings_path,
+            markdown_path=markdown_path,
+            vad_model_path=vad_model_path,
+        )
+        status = Mock()
+        selector_map = self._build_selector_map(recordings_path, markdown_path, status, vad_model_path)
+        app = self._build_app(config, selector_map)
+        handler = SettingsHandler(app)
+
+        with (
+            patch("utilityhub_config.get_config_path", return_value=tmp_path / "voicepad.yaml"),
+            patch("utilityhub_config.write_config") as mock_write_config,
+        ):
+            handler.on_settings_save()
+
+        # Verify vad_model_path directory was created
+        assert vad_model_path.exists()
+
+        # Verify write_config was called with correct config
+        mock_write_config.assert_called_once()
+        saved_config = mock_write_config.call_args[0][0]
+        assert saved_config.vad_model_path == vad_model_path
+
+    def test_vad_model_path_directory_creation_fails_gracefully(self, tmp_path: Path) -> None:
+        """Saving settings handles vad_model_path directory creation failure."""
+        recordings_path = tmp_path / "recordings"
+        markdown_path = tmp_path / "markdown"
+        vad_model_path = tmp_path / "blocked_vad"
+        # Create a file where directory should be
+        vad_model_path.write_text("blocking file", encoding="utf-8")
+
+        config = Config(
+            recordings_path=recordings_path,
+            markdown_path=markdown_path,
+            vad_model_path=vad_model_path,
+        )
+        status = Mock()
+        selector_map = self._build_selector_map(recordings_path, markdown_path, status, vad_model_path)
+        app = self._build_app(config, selector_map)
+        handler = SettingsHandler(app)
+
+        with (
+            patch("utilityhub_config.get_config_path", return_value=tmp_path / "voicepad.yaml"),
+            patch("utilityhub_config.write_config") as mock_write_config,
+        ):
+            handler.on_settings_save()
+
+        # Should not write config if directory creation fails
         mock_write_config.assert_not_called()
         status.update.assert_called()

@@ -15,10 +15,14 @@ def mock_config() -> Mock:
     config = Mock(spec=Config)
     config.recordings_path = Path("/tmp/recordings")
     config.markdown_path = Path("/tmp/markdown")
+    config.vad_model_path = Path("/tmp/vad")
+    config.logs_path = Path("/tmp/logs")
+    config.log_level = "INFO"
     config.global_hotkey = "ctrl+shift+r"
     config.transcription_model = "base"
     config.transcription_device = "cpu"
     config.transcription_compute_type = "int8"
+    config.input_device_index = None
     return config
 
 
@@ -565,6 +569,140 @@ class TestActionMethods:
             from voicepad.tui.modals import InfoModal
 
             assert isinstance(args[0], InfoModal)
+
+
+class TestActionOpenConfigDir:
+    """Test action_open_config_dir method."""
+
+    @patch("voicepad.tui.handlers.settings_handler.SettingsHandler")
+    @patch("voicepad.tui.handlers.recording_handler.RecordingHandler")
+    @patch("voicepad.tui.handlers.history_handler.HistoryHandler")
+    @patch("voicepad.tui.handlers.hotkey_handler.HotkeyHandler")
+    @patch("platform.system")
+    @patch("subprocess.run")
+    @patch("utilityhub_config.get_config_path")
+    def test_opens_config_dir_on_windows(
+        self,
+        mock_get_config_path: Mock,
+        mock_subprocess_run: Mock,
+        mock_platform_system: Mock,
+        mock_hotkey_handler: Mock,
+        mock_history_handler: Mock,
+        mock_recording_handler: Mock,
+        mock_settings_handler: Mock,
+        mock_config: Mock,
+        tmp_path: Path,
+    ) -> None:
+        """Test that action_open_config_dir opens directory on Windows."""
+        from voicepad.tui.app import VoicePadApp
+
+        config_dir = tmp_path / "config"
+        config_file = config_dir / "voicepad.yaml"
+        mock_get_config_path.return_value = config_file
+        mock_platform_system.return_value = "Windows"
+
+        app = VoicePadApp(mock_config)
+        app.action_open_config_dir()
+
+        # Verify directory was created
+        assert config_dir.exists()
+        # Verify explorer was called with correct path
+        mock_subprocess_run.assert_called_once_with(["explorer", str(config_dir)], check=False)
+
+    @patch("voicepad.tui.handlers.settings_handler.SettingsHandler")
+    @patch("voicepad.tui.handlers.recording_handler.RecordingHandler")
+    @patch("voicepad.tui.handlers.history_handler.HistoryHandler")
+    @patch("voicepad.tui.handlers.hotkey_handler.HotkeyHandler")
+    @patch("platform.system")
+    @patch("subprocess.run")
+    @patch("utilityhub_config.get_config_path")
+    def test_opens_config_dir_on_macos(
+        self,
+        mock_get_config_path: Mock,
+        mock_subprocess_run: Mock,
+        mock_platform_system: Mock,
+        mock_hotkey_handler: Mock,
+        mock_history_handler: Mock,
+        mock_recording_handler: Mock,
+        mock_settings_handler: Mock,
+        mock_config: Mock,
+        tmp_path: Path,
+    ) -> None:
+        """Test that action_open_config_dir opens directory on macOS."""
+        from voicepad.tui.app import VoicePadApp
+
+        config_dir = tmp_path / "config"
+        config_file = config_dir / "voicepad.yaml"
+        mock_get_config_path.return_value = config_file
+        mock_platform_system.return_value = "Darwin"
+
+        app = VoicePadApp(mock_config)
+        app.action_open_config_dir()
+
+        # Verify directory was created
+        assert config_dir.exists()
+        # Verify open was called with correct path
+        mock_subprocess_run.assert_called_once_with(["open", str(config_dir)], check=False)
+
+    @patch("voicepad.tui.handlers.settings_handler.SettingsHandler")
+    @patch("voicepad.tui.handlers.recording_handler.RecordingHandler")
+    @patch("voicepad.tui.handlers.history_handler.HistoryHandler")
+    @patch("voicepad.tui.handlers.hotkey_handler.HotkeyHandler")
+    @patch("platform.system")
+    @patch("subprocess.run")
+    @patch("utilityhub_config.get_config_path")
+    def test_opens_config_dir_on_linux(
+        self,
+        mock_get_config_path: Mock,
+        mock_subprocess_run: Mock,
+        mock_platform_system: Mock,
+        mock_hotkey_handler: Mock,
+        mock_history_handler: Mock,
+        mock_recording_handler: Mock,
+        mock_settings_handler: Mock,
+        mock_config: Mock,
+        tmp_path: Path,
+    ) -> None:
+        """Test that action_open_config_dir opens directory on Linux."""
+        from voicepad.tui.app import VoicePadApp
+
+        config_dir = tmp_path / "config"
+        config_file = config_dir / "voicepad.yaml"
+        mock_get_config_path.return_value = config_file
+        mock_platform_system.return_value = "Linux"
+
+        app = VoicePadApp(mock_config)
+        app.action_open_config_dir()
+
+        # Verify directory was created
+        assert config_dir.exists()
+        # Verify xdg-open was called with correct path
+        mock_subprocess_run.assert_called_once_with(["xdg-open", str(config_dir)], check=False)
+
+    @patch("voicepad.tui.handlers.settings_handler.SettingsHandler")
+    @patch("voicepad.tui.handlers.recording_handler.RecordingHandler")
+    @patch("voicepad.tui.handlers.history_handler.HistoryHandler")
+    @patch("voicepad.tui.handlers.hotkey_handler.HotkeyHandler")
+    @patch("utilityhub_config.get_config_path")
+    def test_handles_exception_gracefully(
+        self,
+        mock_get_config_path: Mock,
+        mock_hotkey_handler: Mock,
+        mock_history_handler: Mock,
+        mock_recording_handler: Mock,
+        mock_settings_handler: Mock,
+        mock_config: Mock,
+    ) -> None:
+        """Test that action_open_config_dir handles exceptions gracefully."""
+        from voicepad.tui.app import VoicePadApp
+
+        # Make get_config_path raise an exception
+        mock_get_config_path.side_effect = Exception("Config path error")
+
+        app = VoicePadApp(mock_config)
+
+        # Should not raise - exception is caught internally
+        app.action_open_config_dir()
 
 
 class TestRunFunction:

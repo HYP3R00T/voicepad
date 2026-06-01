@@ -72,7 +72,7 @@ class TestCopyToClipboard:
     @patch("pyperclip.copy")
     def test_copy_to_clipboard_does_not_raise_on_error(self, mock_copy: MagicMock, mock_logger: MagicMock) -> None:
         """copy_to_clipboard does not raise exceptions."""
-        mock_copy.side_effect = Exception("Unexpected error")
+        mock_copy.side_effect = RuntimeError("Unexpected error")
 
         # Should not raise
         copy_to_clipboard("test")

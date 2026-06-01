@@ -78,7 +78,7 @@ class TestOnTabActivated:
 
         # Should select last entry
         assert mock_app._selected_entry_idx == 2
-        # Should load the history viewer
+        # Should load_model the history viewer
         mock_app._load_history_viewer.assert_called_once_with(entry2.md_path)
 
     def test_does_not_force_history_cursor_to_bottom(self, mock_app: Mock) -> None:
@@ -169,7 +169,7 @@ class TestOnTabActivated:
 
         manager.on_tab_activated(event)
 
-        # Should select entry but not load viewer
+        # Should select entry but not load_model viewer
         assert mock_app._selected_entry_idx == 1
         mock_app._load_history_viewer.assert_not_called()
 
@@ -196,7 +196,7 @@ class TestOnTabActivated:
 
         manager.on_tab_activated(event)
 
-        # Should select entry but not load viewer
+        # Should select entry but not load_model viewer
         assert mock_app._selected_entry_idx == 1
         mock_app._load_history_viewer.assert_not_called()
 

@@ -228,12 +228,9 @@ def test_mp3_conversion_via_ffmpeg(mock_subprocess: Mock, mock_sf_read: Mock, tm
     mock_subprocess.assert_called_once()
     call_args = mock_subprocess.call_args[0][0]
     assert call_args[0] == "ffmpeg"
+    assert "-y" in call_args
     assert "-i" in call_args
     assert str(mp3_file) in call_args
-    assert "-ar" in call_args
-    assert "44100" in call_args
-    assert "-ac" in call_args
-    assert "2" in call_args
 
     # Verify result
     npt.assert_array_equal(result, mock_audio)
@@ -409,11 +406,6 @@ def test_multiple_read_calls_cached(mock_sf_read: Mock, sample_wav_file: Path, c
     npt.assert_array_equal(result2, mock_audio)
     npt.assert_array_equal(result3, mock_audio)
 
-    # Verify print statement only appears once
-    captured = capsys.readouterr()
-    assert captured.out.count("[FileSource] Loading:") == 1
-    assert captured.out.count("[FileSource] Loaded") == 1
-
 
 # ============================================================================
 # Edge Cases & Additional Tests
@@ -468,3 +460,77 @@ def test_temp_file_cleanup_on_success(mock_subprocess: Mock, mock_sf_read: Mock,
 
             # Verify cleanup was called
             mock_remove.assert_called_once()
+
+
+@patch("voicepad_core.audio.file.subprocess.run")
+def test_ffmpeg_not_installed_raises_runtime_error(mock_subprocess: Mock, tmp_path: Path) -> None:
+    """Test ffmpeg not installed raises RuntimeError."""
+    mp3_file = tmp_path / "test.mp3"
+    mp3_file.touch()
+
+    # Mock FileNotFoundError (ffmpeg not found)
+    mock_subprocess.side_effect = FileNotFoundError("ffmpeg not found")
+
+    source = FileSource(mp3_file)
+
+    with pytest.raises(RuntimeError, match="ffmpeg is not installed"):
+        source.read()
+
+
+@patch("voicepad_core.audio.file.sf.read")
+def test_dtype_conversion_to_float32(mock_sf_read: Mock, sample_wav_file: Path) -> None:
+    """Test audio is converted to float32 if needed."""
+    # Mock soundfile returning int16
+    mock_audio = np.array([100, 200, 300], dtype=np.int16)
+    mock_sf_read.return_value = (mock_audio, 16000)
+
+    source = FileSource(sample_wav_file)
+    result = source.read()
+
+    # Should be converted to float32
+    assert result.dtype == np.float32
+    npt.assert_array_equal(result, mock_audio.astype(np.float32))
+
+
+@patch("voicepad_core.audio.file.sf.read")
+def test_multichannel_detection(mock_sf_read: Mock, sample_wav_file: Path) -> None:
+    """Test channel detection for various channel counts."""
+    test_cases = [
+        (1, np.array([0.1, 0.2], dtype=np.float32)),  # Mono 1D
+        (2, np.array([[0.1, 0.2], [0.3, 0.4]], dtype=np.float32)),  # Stereo
+        (4, np.random.randn(10, 4).astype(np.float32)),  # 4-channel
+        (6, np.random.randn(10, 6).astype(np.float32)),  # 5.1 surround
+    ]
+
+    for expected_channels, mock_audio in test_cases:
+        mock_sf_read.return_value = (mock_audio, 48000)
+        source = FileSource(sample_wav_file)
+        source.read()
+        assert source.get_channels() == expected_channels
+
+
+@patch("voicepad_core.audio.file.sf.read")
+def test_empty_audio_file(mock_sf_read: Mock, sample_wav_file: Path) -> None:
+    """Test handling of empty audio file."""
+    mock_audio = np.array([], dtype=np.float32)
+    mock_sf_read.return_value = (mock_audio, 16000)
+
+    source = FileSource(sample_wav_file)
+    result = source.read()
+
+    assert len(result) == 0
+    assert result.dtype == np.float32
+    assert source.get_channels() == 1
+
+
+@patch("voicepad_core.audio.file.sf.read")
+def test_very_short_audio(mock_sf_read: Mock, sample_wav_file: Path) -> None:
+    """Test handling of very short audio (single sample)."""
+    mock_audio = np.array([0.5], dtype=np.float32)
+    mock_sf_read.return_value = (mock_audio, 16000)
+
+    source = FileSource(sample_wav_file)
+    result = source.read()
+
+    assert len(result) == 1
+    assert result[0] == pytest.approx(0.5)

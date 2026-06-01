@@ -432,8 +432,185 @@ def test_process_end_to_end_stereo_to_mono(mock_audio_source: Mock, capsys) -> N
     assert np.min(result) >= -1.0
     assert np.max(result) <= 1.0
 
-    # Verify print statements were called (captured by capsys)
-    captured = capsys.readouterr()
-    assert "[PreProcessor] Input:" in captured.out
-    assert "[PreProcessor] Output:" in captured.out
-    assert "16000Hz" in captured.out
+
+# ============================================================================
+# process_array Tests (6 tests)
+# ============================================================================
+
+
+def test_process_array_mono_16khz(mock_audio_source: Mock) -> None:
+    """Test process_array with mono 16kHz audio (no conversion needed)."""
+    preprocessor = AudioPreProcessor(mock_audio_source)
+
+    audio = np.array([0.1, 0.2, 0.3, 0.4], dtype=np.float32)
+    result = preprocessor.process_array(audio, sample_rate=16000, channels=1)
+
+    # Should be normalized but otherwise unchanged
+    assert result.dtype == np.float32
+    assert result.ndim == 1
+    assert len(result) == 4
+    assert np.max(np.abs(result)) == pytest.approx(1.0, abs=1e-6)
+
+
+def test_process_array_stereo_to_mono(mock_audio_source: Mock) -> None:
+    """Test process_array converts stereo to mono."""
+    preprocessor = AudioPreProcessor(mock_audio_source)
+
+    # Stereo audio (N, 2)
+    audio = np.array([[0.1, 0.3], [0.2, 0.4], [0.3, 0.5]], dtype=np.float32)
+    result = preprocessor.process_array(audio, sample_rate=16000, channels=2)
+
+    # Should be mono
+    assert result.ndim == 1
+    assert len(result) == 3
+    # Values should be averaged: [0.2, 0.3, 0.4]
+    expected = np.array([0.2, 0.3, 0.4], dtype=np.float32)
+    # After normalization (peak=0.4), multiply by 1/0.4 = 2.5
+    npt.assert_array_almost_equal(result, expected * 2.5, decimal=5)
+
+
+def test_process_array_resampling_44khz_to_16khz(mock_audio_source: Mock) -> None:
+    """Test process_array resamples 44.1kHz to 16kHz."""
+    preprocessor = AudioPreProcessor(mock_audio_source)
+
+    # 1 second at 44.1kHz
+    audio = np.random.randn(44100).astype(np.float32) * 0.5
+    result = preprocessor.process_array(audio, sample_rate=44100, channels=1)
+
+    # Should be resampled to 16kHz
+    assert result.dtype == np.float32
+    assert abs(len(result) - 16000) < 10  # Allow small tolerance
+
+
+def test_process_array_multichannel_to_mono(mock_audio_source: Mock) -> None:
+    """Test process_array converts multi-channel to mono."""
+    preprocessor = AudioPreProcessor(mock_audio_source)
+
+    # 4-channel audio
+    audio = np.array([[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0]], dtype=np.float32)
+    result = preprocessor.process_array(audio, sample_rate=16000, channels=4)
+
+    # Should be mono
+    assert result.ndim == 1
+    assert len(result) == 2
+    # Average: [(1+2+3+4)/4, (5+6+7+8)/4] = [2.5, 6.5]
+    # After normalization (peak=6.5), multiply by 1/6.5
+    expected = np.array([2.5, 6.5], dtype=np.float32) / 6.5
+    npt.assert_array_almost_equal(result, expected, decimal=5)
+
+
+def test_process_array_int16_conversion(mock_audio_source: Mock) -> None:
+    """Test process_array converts int16 to float32."""
+    preprocessor = AudioPreProcessor(mock_audio_source)
+
+    audio = np.array([100, 200, 300, 400], dtype=np.int16)
+    result = preprocessor.process_array(audio, sample_rate=16000, channels=1)
+
+    # Should be float32
+    assert result.dtype == np.float32
+    # Should be normalized
+    assert np.max(np.abs(result)) == pytest.approx(1.0, abs=1e-6)
+
+
+def test_process_array_silent_audio(mock_audio_source: Mock) -> None:
+    """Test process_array handles silent audio without errors."""
+    preprocessor = AudioPreProcessor(mock_audio_source)
+
+    audio = np.zeros(1000, dtype=np.float32)
+    result = preprocessor.process_array(audio, sample_rate=16000, channels=1)
+
+    # Should return zeros without NaN or Inf
+    assert result.dtype == np.float32
+    assert len(result) == 1000
+    npt.assert_array_equal(result, audio)
+    assert not np.any(np.isnan(result))
+    assert not np.any(np.isinf(result))
+
+
+def test_process_array_upsampling(mock_audio_source: Mock) -> None:
+    """Test process_array upsamples 8kHz to 16kHz."""
+    preprocessor = AudioPreProcessor(mock_audio_source)
+
+    # 1 second at 8kHz
+    audio = np.random.randn(8000).astype(np.float32) * 0.5
+    result = preprocessor.process_array(audio, sample_rate=8000, channels=1)
+
+    # Should be upsampled to 16kHz
+    assert result.dtype == np.float32
+    assert abs(len(result) - 16000) < 10  # Allow small tolerance
+
+
+def test_process_array_downsampling(mock_audio_source: Mock) -> None:
+    """Test process_array downsamples 48kHz to 16kHz."""
+    preprocessor = AudioPreProcessor(mock_audio_source)
+
+    # 1 second at 48kHz
+    audio = np.random.randn(48000).astype(np.float32) * 0.5
+    result = preprocessor.process_array(audio, sample_rate=48000, channels=1)
+
+    # Should be downsampled to 16kHz
+    assert result.dtype == np.float32
+    assert abs(len(result) - 16000) < 10  # Allow small tolerance
+
+
+def test_process_array_interleaved_stereo(mock_audio_source: Mock) -> None:
+    """Test process_array handles interleaved stereo correctly."""
+    preprocessor = AudioPreProcessor(mock_audio_source)
+
+    # Interleaved stereo: [L1, R1, L2, R2, L3, R3]
+    audio = np.array([1.0, 3.0, 2.0, 4.0, 3.0, 5.0], dtype=np.float32)
+    result = preprocessor.process_array(audio, sample_rate=16000, channels=2)
+
+    # Should be mono
+    assert result.ndim == 1
+    assert len(result) == 3
+    # After reshape to (3, 2) and average: [2, 3, 4]
+    # After normalization (peak=4), multiply by 1/4 = 0.25
+    expected = np.array([2.0, 3.0, 4.0], dtype=np.float32) * 0.25
+    npt.assert_array_almost_equal(result, expected, decimal=5)
+
+
+# ============================================================================
+# Edge Cases & Scipy Fallback Tests
+# ============================================================================
+
+
+def test_resample_scipy_not_available_fallback(mock_audio_source: Mock) -> None:
+    """Test resampling falls back to np.interp when scipy unavailable."""
+    preprocessor = AudioPreProcessor(mock_audio_source)
+
+    # Mock the import to raise ImportError
+    import sys
+
+    original_modules = sys.modules.copy()
+
+    # Block scipy.signal import
+    sys.modules["scipy.signal"] = None  # type: ignore
+
+    try:
+        audio = np.array([0.0, 1.0, 0.0, -1.0, 0.0], dtype=np.float32)
+        result = preprocessor._resample(audio, from_rate=8000, to_rate=16000)
+
+        # Should still work (using np.interp fallback)
+        assert result.dtype == np.float32
+        assert len(result) > len(audio)  # Upsampled
+    finally:
+        # Restore original modules
+        sys.modules.clear()
+        sys.modules.update(original_modules)
+
+
+def test_normalize_very_small_values(mock_audio_source: Mock) -> None:
+    """Test normalization with very small values."""
+    preprocessor = AudioPreProcessor(mock_audio_source)
+
+    # Very small but non-zero values
+    audio = np.array([1e-10, 2e-10, 3e-10], dtype=np.float32)
+    result = preprocessor._normalize(audio)
+
+    # Should normalize to peak of 1.0
+    assert np.max(np.abs(result)) == pytest.approx(1.0, abs=1e-6)
+    # Relative ratios should be preserved
+    assert result[2] == pytest.approx(1.0, abs=1e-6)
+    assert result[1] == pytest.approx(2.0 / 3.0, abs=1e-6)
+    assert result[0] == pytest.approx(1.0 / 3.0, abs=1e-6)
