@@ -95,8 +95,9 @@ class StreamingTranscriber:
     silence lasting silence_threshold_ms, the chunk is dispatched to the
     inference engine and the result is delivered via on_chunk.
 
-    A hard cap of max_chunk_s forces a split even without silence — this
-    prevents exceeding Whisper's 30s context window.
+    A hard cap of max_chunk_s forces a split even without silence. This is
+    a per-chunk safety boundary, not a session-length limit, and it keeps
+    long recordings compatible with Whisper's 30s context window.
 
     Each chunk includes overlap_s of audio from the previous chunk's
     tail to preserve acoustic context at boundaries. The overlap region
@@ -113,7 +114,7 @@ class StreamingTranscriber:
         device:                Inference device ('cuda' or 'cpu').
         compute_type:          CTranslate2 precision string.
         min_chunk_s:           Minimum audio before considering a split.
-        max_chunk_s:           Hard cap on chunk duration.
+        max_chunk_s:           Per-chunk safety limit; sessions remain unbounded.
         overlap_s:             Cross-chunk audio overlap.
         silence_threshold_ms:  VAD silence duration to trigger a split.
     """

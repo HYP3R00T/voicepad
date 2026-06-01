@@ -10,12 +10,13 @@ from pathlib import Path
 # This path is resolved relative to this file so it works
 # regardless of where the process is launched from.
 _VAD_DIR = Path(__file__).parent
-_MODEL_FILENAME = "silero_vad.onnx"
+_MODEL_FILENAME = "silero_vad_v6.onnx"
 MODEL_PATH = _VAD_DIR / _MODEL_FILENAME
 
-# Direct ONNX file URL from the HuggingFace repo.
-# onnx/model.onnx is the correct filename in that tree.
-_DOWNLOAD_URL = "https://huggingface.co/onnx-community/silero-vad/resolve/main/onnx/model.onnx"
+# Direct ONNX file URL for Silero VAD v6 from SYSTRAN/faster-whisper
+_DOWNLOAD_URL = (
+    "https://raw.githubusercontent.com/SYSTRAN/faster-whisper/master/faster_whisper/assets/silero_vad_v6.onnx"
+)
 
 logger = logging.getLogger(__name__)
 

@@ -184,7 +184,7 @@ def start_recording(
         p = prefix or config.recording_prefix
         wav_path = config.recordings_path / f"{p}_{ts}.wav"
         try:
-            recorder.save_wav(audio, wav_path)
+            recorder.save_wav(audio, wav_path, sample_rate=16000)
             typer.echo(f"      saved  : {wav_path}")
         except Exception as e:
             typer.secho(f"[WARN] Could not save WAV: {e}", fg=typer.colors.YELLOW)

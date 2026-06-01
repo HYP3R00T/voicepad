@@ -102,7 +102,7 @@ class RecordingHandler:
         self._session_logger.info(
             f"Starting streaming transcriber: model={self.app.config.transcription_model}, "
             f"device={self.app.config.transcription_device}, "
-            f"min_chunk={self.app.config.min_chunk_s}s, max_chunk={self.app.config.max_chunk_s}s"
+            f"min_chunk={self.app.config.min_chunk_s}s, per_chunk_max={self.app.config.max_chunk_s}s"
         )
 
         self.app._streamer = StreamingTranscriber(
@@ -221,11 +221,9 @@ class RecordingHandler:
         from voicepad.tui.models import SessionEntry
 
         full_text = " ".join(c.text for c in self.app._stream_chunks).strip()
-        if not full_text:
-            return
-
         self.app._current_text = full_text
-        self.app.query_one("#tx-copy-btn", VoiceButton).disabled = False
+        copy_button = self.app.query_one("#tx-copy-btn", VoiceButton)
+        copy_button.disabled = not bool(full_text)
 
         # Save WAV
         wav_path: Path | None = None
@@ -235,21 +233,22 @@ class RecordingHandler:
             ts = time.strftime("%Y%m%d_%H%M%S")
             wav_path = self.app.config.recordings_path / f"{self.app.config.recording_prefix}_{ts}.wav"
             try:
-                recorder_ref.save_wav(audio, wav_path)
-                # Build a synthetic TranscriptionResult-like object for _format_markdown
-                md_path = self.app.config.markdown_path / f"{wav_path.stem}.md"
-                self.app.config.markdown_path.mkdir(parents=True, exist_ok=True)
-                duration_s = len(audio) / 16000
-                md_path.write_text(
-                    _format_markdown_streaming(
-                        wav_path,
-                        full_text,
-                        duration_s,
-                        self.app._stream_chunks,
-                        self.app.config.transcription_model,
-                    ),
-                    encoding="utf-8",
-                )
+                recorder_ref.save_wav(audio, wav_path, sample_rate=16000)
+                if full_text:
+                    # Build a synthetic TranscriptionResult-like object for _format_markdown
+                    md_path = self.app.config.markdown_path / f"{wav_path.stem}.md"
+                    self.app.config.markdown_path.mkdir(parents=True, exist_ok=True)
+                    duration_s = len(audio) / 16000
+                    md_path.write_text(
+                        _format_markdown_streaming(
+                            wav_path,
+                            full_text,
+                            duration_s,
+                            self.app._stream_chunks,
+                            self.app.config.transcription_model,
+                        ),
+                        encoding="utf-8",
+                    )
             except Exception:
                 wav_path = None
                 md_path = None

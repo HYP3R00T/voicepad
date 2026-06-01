@@ -40,7 +40,8 @@ INITIAL_PROMPT: str = "Hello. This is a transcription with proper punctuation, c
 
 SAMPLE_RATE: int = 16_000
 MIN_AUDIO_DURATION_S: float = 0.5
-MAX_AUDIO_DURATION_S: float = 300.0  # 5-minute hard cap
+# No finite total-duration cap; streaming chunking handles long sessions.
+MAX_AUDIO_DURATION_S: float = float("inf")
 
 # ---------------------------------------------------------------------------
 # HuggingFace

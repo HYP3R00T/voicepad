@@ -160,7 +160,10 @@ class Config(BaseModel):
 
     max_chunk_s: float = Field(
         default=29.0,
-        description="Hard cap on chunk size in seconds. Whisper's context window is 30s.",
+        description=(
+            "Per-chunk safety limit in seconds. Long recording sessions remain unbounded; "
+            "this only forces a split before Whisper's 30s context window is exceeded."
+        ),
     )
 
     overlap_s: float = Field(

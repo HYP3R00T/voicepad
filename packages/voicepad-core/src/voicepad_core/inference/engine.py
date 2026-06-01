@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import logging
 import time
-import warnings
 
 import numpy as np
 
@@ -27,12 +26,11 @@ from .constants import (
     HALLUCINATION_SILENCE_THRESHOLD,
     INITIAL_PROMPT,
     LANGUAGE,
-    MAX_AUDIO_DURATION_S,
     MIN_AUDIO_DURATION_S,
     NO_SPEECH_THRESHOLD,
     SAMPLE_RATE,
 )
-from .exceptions import AudioTooLongWarning, AudioTooShortError, TranscriptionError
+from .exceptions import AudioTooShortError, TranscriptionError
 from .model_manager import (
     _is_cuda_error,
     _load_cpu_fallback,
@@ -138,7 +136,7 @@ def transcribe(
     duration_s = len(audio) / SAMPLE_RATE
 
     if slog:
-        slog.info(f"Audio duration: {duration_s:.2f}s (min={MIN_AUDIO_DURATION_S}s, max={MAX_AUDIO_DURATION_S}s)")
+        slog.info(f"Audio duration: {duration_s:.2f}s (min={MIN_AUDIO_DURATION_S}s)")
 
     if duration_s < MIN_AUDIO_DURATION_S:
         msg = f"Audio is {duration_s:.2f}s — below minimum {MIN_AUDIO_DURATION_S}s. Speak for at least 0.5 seconds."
@@ -146,15 +144,7 @@ def transcribe(
             slog.error(msg)
         raise AudioTooShortError(msg)
 
-    if duration_s > MAX_AUDIO_DURATION_S:
-        msg = (
-            f"Audio is {duration_s:.1f}s — exceeds recommended maximum "
-            f"{MAX_AUDIO_DURATION_S}s. Transcription may be slow."
-        )
-        warnings.warn(msg, AudioTooLongWarning, stacklevel=2)
-        logger.info(f"Long audio: {duration_s:.1f}s — transcription will take a moment.")
-        if slog:
-            slog.warning(msg)
+    # No finite total-duration cap; chunking is handled by the streaming layer.
 
     # --- Load model (cached after first call) ---
     if slog:
@@ -412,7 +402,9 @@ def _trim_trailing_silence(
 def _vad_parameters() -> dict[str, float | int]:
     """Return standard VAD parameters for consistent transcription quality.
 
-    speech_pad_ms is kept at 500ms (reduced from 1000ms in the old codebase)
+    `max_speech_duration_s` is kept near Whisper's context window so a long
+    uninterrupted utterance is not artificially capped at 15 seconds.
+    `speech_pad_ms` is kept at 500ms (reduced from 1000ms in the old codebase)
     to minimise overlap duplication in chunked transcription.
 
     Returns:
@@ -421,7 +413,7 @@ def _vad_parameters() -> dict[str, float | int]:
     return {
         "threshold": 0.5,
         "min_speech_duration_ms": 250,
-        "max_speech_duration_s": 15.0,
+        "max_speech_duration_s": 29.0,
         "min_silence_duration_ms": 1000,
         "speech_pad_ms": 500,
     }

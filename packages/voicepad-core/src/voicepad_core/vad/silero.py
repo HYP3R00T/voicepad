@@ -16,10 +16,9 @@ _REQUIRED_SAMPLE_RATE = 16_000
 # the ONNX model weights were trained for exactly this window size.
 _WINDOW_SIZE = 512
 
-# Hidden and cell state dimensions for the Silero LSTM.
+# LSTM state dimensions for Silero VAD v6.
 # These are fixed by the model architecture — do not change.
-_H_SIZE = (2, 1, 64)
-_C_SIZE = (2, 1, 64)
+_STATE_SIZE = (1, 1, 128)
 
 
 class SileroVAD(VADBase):
@@ -81,6 +80,8 @@ class SileroVAD(VADBase):
         self._speech_pad_samples = int(speech_pad_ms * _REQUIRED_SAMPLE_RATE / 1000)
 
         self._session: ort.InferenceSession = self._load_session()
+        self._h: np.ndarray
+        self._c: np.ndarray
         self._h, self._c = self._init_states()
 
     # ------------------------------------------------------------------
@@ -147,32 +148,38 @@ class SileroVAD(VADBase):
         Returns:
             List of (window_start_sample, speech_probability) tuples.
         """
-        results: list[tuple[int, float]] = []
         num_samples = len(audio)
+        if num_samples % _WINDOW_SIZE != 0:
+            pad_size = _WINDOW_SIZE - (num_samples % _WINDOW_SIZE)
+            audio = np.pad(audio, (0, pad_size), "constant")
 
-        for start in range(0, num_samples - _WINDOW_SIZE + 1, _WINDOW_SIZE):
-            window = audio[start : start + _WINDOW_SIZE]
+        num_chunks = len(audio) // _WINDOW_SIZE
+        batched_audio = audio.reshape(num_chunks, _WINDOW_SIZE)
 
-            # ONNX input tensors — shapes must match the model exactly
-            inputs = {
-                "input": window[np.newaxis, :],  # (1, 512)
-                "sr": np.array([_REQUIRED_SAMPLE_RATE], dtype=np.int64),
+        # Context padding: prepend last 64 samples of previous chunk
+        context_size = 64
+        context = np.zeros((num_chunks, context_size), dtype=np.float32)
+        if num_chunks > 1:
+            context[1:] = batched_audio[:-1, -context_size:]
+
+        # Shape (num_chunks, 576)
+        inputs_audio = np.concatenate([context, batched_audio], axis=1)
+
+        outputs = self._session.run(
+            None,
+            {
+                "input": inputs_audio,
                 "h": self._h,
                 "c": self._c,
-            }
+            },
+        )
 
-            outputs = self._session.run(None, inputs)
+        # onnxruntime returns broad runtime value unions; normalize to ndarrays.
+        probs = np.asarray(outputs[0], dtype=np.float32).reshape(-1)
+        self._h = np.asarray(outputs[1], dtype=np.float32)
+        self._c = np.asarray(outputs[2], dtype=np.float32)
 
-            # outputs[0] : speech probability  shape (1, 1)
-            # outputs[1] : new h state         shape (2, 1, 64)
-            # outputs[2] : new c state         shape (2, 1, 64)
-            # ONNX session outputs are untyped; cast to ndarray for squeeze()
-            prob = float(np.asarray(outputs[0]).squeeze())  # type: ignore[arg-type]
-            self._h = outputs[1]
-            self._c = outputs[2]
-
-            results.append((start, prob))
-
+        results = [(i * _WINDOW_SIZE, float(probs[i])) for i in range(num_chunks)]
         return results
 
     # ------------------------------------------------------------------
@@ -283,11 +290,11 @@ class SileroVAD(VADBase):
         Initialise LSTM hidden and cell states to zeros.
 
         Shapes are fixed by the Silero ONNX model architecture:
-          h : (2, 1, 64)
-          c : (2, 1, 64)
+          h : (1, 1, 128)
+          c : (1, 1, 128)
         """
-        h = np.zeros(_H_SIZE, dtype=np.float32)
-        c = np.zeros(_C_SIZE, dtype=np.float32)
+        h = np.zeros(_STATE_SIZE, dtype=np.float32)
+        c = np.zeros(_STATE_SIZE, dtype=np.float32)
         return h, c
 
 
