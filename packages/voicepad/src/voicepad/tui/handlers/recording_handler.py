@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import threading
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
 from textual.widgets import Label, Static, TabbedContent
-from voicepad_core import AudioRecorder, AudioRecorderError, ChunkResult, StreamingTranscriber
+from voicepad_core import ChunkResult, MicrophoneStream, StreamingTranscriber, setup_transcription_logger
+from voicepad_core.inference.engine import set_session_logger
+from voicepad_core.streaming.transcriber import set_streaming_session_logger
 
 from voicepad.tui.components import VoiceButton
 from voicepad.tui.utils.clipboard import copy_to_clipboard as _copy_to_clipboard
@@ -24,6 +28,9 @@ class RecordingHandler:
 
     def __init__(self, app: VoicePadApp) -> None:
         self.app = app
+        self._final_chunk_event: threading.Event | None = None
+        self._session_logger = None
+        self._log_file = None
 
     def action_toggle_recording(self) -> None:
         """Toggle recording on/off (space bar binding)."""
@@ -39,10 +46,44 @@ class RecordingHandler:
 
     def start_recording(self) -> None:
         """Start recording audio."""
+        # Set up per-session logging (be defensive in tests where config may be a Mock)
+        session_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        logs_path = getattr(self.app.config, "logs_path", None)
+        log_level = getattr(self.app.config, "log_level", "INFO")
+        if not isinstance(log_level, str):
+            log_level = "INFO"
+        try:
+            # Prefer a real Path-like object; fall back to CWD for mocks
+            if logs_path is None or not hasattr(logs_path, "__fspath__"):
+                from pathlib import Path
+
+                logs_path = Path.cwd()
+        except Exception:
+            from pathlib import Path
+
+            logs_path = Path.cwd()
+
+        self._session_logger, self._log_file = setup_transcription_logger(
+            logs_path,
+            log_level,
+            f"streaming_{session_id}",
+        )
+
+        # Set the session logger for streaming transcription
+        set_streaming_session_logger(self._session_logger)
+        # Also set the session logger for the inference engine so engine logs
+        # (model loading, inference) are included in per-session logs.
+        set_session_logger(self._session_logger)
+
+        self._session_logger.info("Starting recording session")
+
+        self._final_chunk_event = threading.Event()
         self.app._session = RecordingSession(config=self.app.config)
         try:
             self.app._session.start()
-        except AudioRecorderError as e:
+            self._session_logger.info("Recording session started successfully")
+        except Exception as e:
+            self._session_logger.error(f"Failed to start recording: {e}")
             self.app._set_status("error", f"mic error: {e}")
             return
 
@@ -55,19 +96,37 @@ class RecordingHandler:
         # Start streaming transcriber — transcribes chunks during recording
         recorder = self.app._session._recorder
         if recorder is None:
+            self._session_logger.error("Recorder is None, cannot start streaming")
             return
+
+        self._session_logger.info(
+            f"Starting streaming transcriber: model={self.app.config.transcription_model}, "
+            f"device={self.app.config.transcription_device}, "
+            f"min_chunk={self.app.config.min_chunk_s}s, per_chunk_max={self.app.config.max_chunk_s}s"
+        )
+
         self.app._streamer = StreamingTranscriber(
             recorder=recorder,
-            config=self.app.config,
-            on_chunk=lambda chunk: self.app.call_from_thread(self.on_stream_chunk, chunk),
-            on_error=lambda err: self.app.call_from_thread(self.app._set_status, "error", err),
+            on_chunk=lambda chunk: self.app.call_from_thread(self._handle_stream_chunk, chunk),
+            on_error=lambda err: self.app.call_from_thread(self._handle_stream_error, err),
+            model_name=self.app.config.transcription_model,
+            device=self.app.config.transcription_device,
+            compute_type=self.app.config.transcription_compute_type,
+            min_chunk_s=self.app.config.min_chunk_s,
+            max_chunk_s=self.app.config.max_chunk_s,
+            overlap_s=self.app.config.overlap_s,
+            silence_threshold_ms=self.app.config.silence_threshold_ms,
         )
         self.app._streamer.start()
+        self._session_logger.info("Streaming transcriber started")
 
     def stop_recording(self) -> None:
         """Stop recording audio."""
         if self.app._session is None:
             return
+
+        if self._session_logger:
+            self._session_logger.info("Stopping recording session")
 
         self.app._recording = False
         self.app._stop_timer()
@@ -75,7 +134,11 @@ class RecordingHandler:
 
         try:
             audio = self.app._session.stop()
-        except AudioRecorderError as e:
+            if self._session_logger:
+                self._session_logger.info(f"Recording stopped, audio length: {len(audio)} samples")
+        except Exception as e:
+            if self._session_logger:
+                self._session_logger.error(f"Failed to stop recording: {e}")
             self.app._set_status("error", f"stop error: {e}")
             if self.app._streamer:
                 self.app._streamer._stop_event.set()
@@ -88,9 +151,40 @@ class RecordingHandler:
 
     def finalize_worker(self, audio: np.ndarray) -> None:
         """Stop the streamer (transcribes tail) then save the full recording."""
+        if self._session_logger:
+            self._session_logger.info("Finalizing transcription...")
+
         if self.app._streamer:
             self.app._streamer.stop()  # blocks until final chunk callback fires
+            if self._session_logger:
+                self._session_logger.info("Streamer stopped")
+
+        if self._final_chunk_event is not None:
+            self._final_chunk_event.wait(timeout=5.0)
+
         self.app.call_from_thread(self.save_recording, audio)
+
+        # Clear the session logger
+        set_streaming_session_logger(None)
+        set_session_logger(None)
+
+        if self._session_logger and self._log_file:
+            self._session_logger.info("=" * 80)
+            self._session_logger.info(f"Session complete. Log saved to: {self._log_file}")
+            self._session_logger.info("=" * 80)
+
+    def _handle_stream_chunk(self, chunk: ChunkResult) -> None:
+        """Handle streamed chunks on the main thread and signal completion for the final chunk."""
+        self.on_stream_chunk(chunk)
+        if chunk.is_final and self._final_chunk_event is not None:
+            self._final_chunk_event.set()
+
+    def _handle_stream_error(self, error: str) -> None:
+        """Handle a chunk transcription error and release the recording state."""
+        self.app._transcribing = False
+        self.app._set_status("error", error)
+        if self._final_chunk_event is not None:
+            self._final_chunk_event.set()
 
     def on_stream_chunk(self, chunk: ChunkResult) -> None:
         """Called from the streaming thread for each transcribed chunk."""
@@ -121,40 +215,42 @@ class RecordingHandler:
                     self.app._overlay_set("copied")
                 else:
                     self.app._overlay_set("hidden")
+            else:
+                self.app._overlay_set("hidden")
 
     def save_recording(self, audio: np.ndarray) -> None:
         """Save WAV + markdown and add history entry after streaming completes."""
         from voicepad.tui.models import SessionEntry
 
         full_text = " ".join(c.text for c in self.app._stream_chunks).strip()
-        if not full_text:
-            return
-
         self.app._current_text = full_text
-        self.app.query_one("#tx-copy-btn", VoiceButton).disabled = False
+        copy_button = self.app.query_one("#tx-copy-btn", VoiceButton)
+        copy_button.disabled = not bool(full_text)
 
         # Save WAV
         wav_path: Path | None = None
         md_path: Path | None = None
-        recorder_ref: AudioRecorder | None = self.app._session._recorder if self.app._session else None
+        recorder_ref: MicrophoneStream | None = self.app._session._recorder if self.app._session else None
         if recorder_ref is not None:
-            wav_path = recorder_ref.make_wav_path()
+            ts = time.strftime("%Y%m%d_%H%M%S")
+            wav_path = self.app.config.recordings_path / f"{self.app.config.recording_prefix}_{ts}.wav"
             try:
-                recorder_ref.save_wav(audio, wav_path)
-                # Build a synthetic TranscriptionResult-like object for _format_markdown
-                md_path = self.app.config.markdown_path / f"{wav_path.stem}.md"
-                self.app.config.markdown_path.mkdir(parents=True, exist_ok=True)
-                duration_s = len(audio) / 16000
-                md_path.write_text(
-                    _format_markdown_streaming(
-                        wav_path,
-                        full_text,
-                        duration_s,
-                        self.app._stream_chunks,
-                        self.app.config.transcription_model,
-                    ),
-                    encoding="utf-8",
-                )
+                recorder_ref.save_wav(audio, wav_path, sample_rate=16000)
+                if full_text:
+                    # Build a synthetic TranscriptionResult-like object for _format_markdown
+                    md_path = self.app.config.markdown_path / f"{wav_path.stem}.md"
+                    self.app.config.markdown_path.mkdir(parents=True, exist_ok=True)
+                    duration_s = len(audio) / 16000
+                    md_path.write_text(
+                        _format_markdown_streaming(
+                            wav_path,
+                            full_text,
+                            duration_s,
+                            self.app._stream_chunks,
+                            self.app.config.transcription_model,
+                        ),
+                        encoding="utf-8",
+                    )
             except Exception:
                 wav_path = None
                 md_path = None

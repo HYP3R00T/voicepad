@@ -1,4 +1,4 @@
-from voicepad_core.config.settings import Config, get_config, get_config_with_metadata
+from .settings import Config, get_config, get_config_with_metadata
 
 __all__ = [
     "Config",

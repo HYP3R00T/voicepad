@@ -3,7 +3,7 @@
   "editor.formatOnSave": true,
   "editor.insertSpaces": true,
   "[markdown]": {
-    "editor.defaultFormatter": "DavidAnson.vscode-markdownlint"
+    "editor.defaultFormatter": "rvben.rumdl"
   },
   "[python]": {
     "editor.codeActionsOnSave": {
@@ -24,7 +24,6 @@
     }
   },
   "chat.useAgentsMdFile": true,
-  "markdownlint.configFile": ".markdownlint.yaml",
   "python.languageServer": "None",
   "ruff.lint.enable": true,
   "ruff.nativeServer": true,

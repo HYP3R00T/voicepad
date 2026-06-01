@@ -23,12 +23,20 @@ This file is created automatically when you save settings from the interface.
 ```yaml
 recordings_path: ~/.config/voicepad/data/recordings
 markdown_path: ~/.config/voicepad/data/markdown
+vad_model_path: ~/.config/voicepad/data/models
 input_device_index: null
 recording_prefix: recording
 transcription_model: turbo
 transcription_device: auto
 transcription_compute_type: auto
+global_hotkey: <ctrl>+<alt>+v
+language: null
+log_level: INFO
+logs_path: ~/.config/voicepad/logs
 ```
+
+!!! note "Settings visibility"
+    Not all settings are shown in the Settings tab interface. Advanced settings like `transcription_device`, `transcription_compute_type`, `language`, `log_level`, and `logs_path` can only be changed by editing the YAML file directly.
 
 For details on individual settings, see:
 

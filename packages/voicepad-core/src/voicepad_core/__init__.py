@@ -1,37 +1,11 @@
-"""voicepad-core — audio capture and transcription engine.
+"""Audio capture and transcription engine.
 
-GPU support:
-    CUDA DLLs (cublas, cudnn, nvrtc) are provided by nvidia-cublas-cu12 and
-    nvidia-cudnn-cu12.  On Windows, ctranslate2 cannot discover them from
-    site-packages on its own, so we pre-load them via ctypes.WinDLL before
-    any ctranslate2 import.  A DLL already loaded in memory is found by
-    name without any path search — this is the most reliable approach.
-    If CUDA is unavailable, transcription falls back to CPU transparently.
-
-Public API:
-
-    Recording:
-        AudioRecorder       — open mic → collect samples → return np.ndarray
-        AudioRecorderError  — raised on device errors
-        SAMPLE_RATE         — 16000 Hz (fixed for Whisper)
-
-    Transcription:
-        transcribe_buffer   — np.ndarray → TranscriptionResult  (primary)
-        transcribe_file     — Path → TranscriptionResult         (convenience)
-        get_or_load_model   — pre-warm the model cache
-        TranscriptionResult — text, segments, latency, device info
-        Segment             — (start, end, text)
-        TranscriptionError  — base exception
-        AudioTooShortError  — audio below MIN_AUDIO_DURATION_S
-        AudioTooLongWarning — audio above MAX_AUDIO_DURATION_S
-
-    Configuration:
-        Config              — 5-field Pydantic model
-        get_config          — load from YAML / env / defaults
-        get_config_with_metadata — load + per-field source info
+On Windows, ctranslate2 cannot discover CUDA DLLs from site-packages.
+We pre-load them via ctypes.WinDLL so they're found by name in memory.
 """
 
 import sys
+from pathlib import Path
 
 # Pre-load CUDA DLLs on Windows so ctranslate2 can find them.
 if sys.platform == "win32":
@@ -41,7 +15,7 @@ if sys.platform == "win32":
 
     _cuda_dll_dirs: set[str] = set()
 
-    # Find nvidia DLL directories from sys.path (works with any installer)
+    # Find nvidia DLL directories from sys.path
     for _path_entry in sys.path:
         _nvidia_dir = pathlib.Path(_path_entry) / "nvidia"
         if _nvidia_dir.is_dir():
@@ -49,11 +23,7 @@ if sys.platform == "win32":
                 _cuda_dll_dirs.add(str(_dll_file.parent))
             break
 
-    # Register directories AND pre-load each DLL into the process.
-    # Three mechanisms for maximum compatibility:
-    #  1. os.add_dll_directory  — Python extension module loading
-    #  2. PATH prepend          — C++ LoadLibrary calls
-    #  3. ctypes.WinDLL         — pre-load into memory (most reliable)
+    # Register directories and pre-load DLLs for ctranslate2 discovery
     _loaded = 0
     for _d in sorted(_cuda_dll_dirs):
         os.add_dll_directory(_d)
@@ -76,45 +46,204 @@ if sys.platform == "win32":
         if not _remaining:
             break
 
-from voicepad_core.audio import SAMPLE_RATE, AudioRecorder, AudioRecorderError
-from voicepad_core.config import Config, get_config, get_config_with_metadata
-from voicepad_core.config.settings import VALID_TRANSCRIPTION_MODELS
-from voicepad_core.streaming import ChunkResult, StreamingTranscriber
-from voicepad_core.transcription import (
+# ---------------------------------------------------------------------------
+# Public API — audio
+# ---------------------------------------------------------------------------
+from .audio import TARGET_SAMPLE_RATE, AudioPreProcessor, FileSource, MicrophoneStream
+
+# ---------------------------------------------------------------------------
+# Public API — config
+# ---------------------------------------------------------------------------
+from .config import Config, get_config, get_config_with_metadata
+from .config.settings import VALID_TRANSCRIPTION_MODELS
+
+# ---------------------------------------------------------------------------
+# Public API — inference
+# ---------------------------------------------------------------------------
+from .inference import transcribe
+from .inference.constants import COMPUTE_TYPE, DEFAULT_MODEL, DEVICE, LANGUAGE, SAMPLE_RATE
+from .inference.download import ensure_model_downloaded, model_downloaded
+from .inference.exceptions import (
     AudioTooLongWarning,
     AudioTooShortError,
-    Segment,
+    ModelNotFoundError,
     TranscriptionError,
-    TranscriptionResult,
-    ensure_model_downloaded,
-    get_or_load_model,
-    model_downloaded,
-    transcribe_buffer,
-    transcribe_file,
+)
+from .inference.model_manager import _model_cache
+from .inference.model_manager import get as get_model
+from .inference.model_manager import is_loaded as is_model_loaded
+from .inference.model_manager import load as load_model
+from .inference.model_manager import unload as unload_model
+from .inference.model_manager import unload_all as unload_all_models
+from .inference.types import Segment, TranscriptionResult, WordTimestamp
+
+# ---------------------------------------------------------------------------
+# Public API — logging
+# ---------------------------------------------------------------------------
+from .logging_utils import (
+    configure_global_logging,
+    log_audio_info,
+    log_chunk_processing,
+    log_config_info,
+    log_model_cache_info,
+    log_model_load,
+    log_postprocessing_step,
+    log_segments_info,
+    log_system_info,
+    log_transcription_end,
+    log_transcription_start,
+    log_vad_info,
+    setup_transcription_logger,
 )
 
+# ---------------------------------------------------------------------------
+# Public API — postprocessing
+# ---------------------------------------------------------------------------
+from .postprocessing import (
+    deduplicate_overlap,
+    filter_segments,
+    normalize,
+    remove_hallucinations,
+)
+
+# ---------------------------------------------------------------------------
+# Public API — streaming
+# ---------------------------------------------------------------------------
+from .streaming import ChunkResult, StreamingTranscriber
+
+# ---------------------------------------------------------------------------
+# Public API — VAD
+# ---------------------------------------------------------------------------
+from .vad import SileroVAD, SpeechSegment
+from .vad import ensure_model_exists as ensure_vad_model
+
+# ---------------------------------------------------------------------------
+# High-level transcription functions
+# ---------------------------------------------------------------------------
+
+
+def transcribe_file(
+    wav_path: str | Path,
+    model_name: str = DEFAULT_MODEL,
+    device: str = DEVICE,
+    compute_type: str = COMPUTE_TYPE,
+    language: str = LANGUAGE,
+    local_agreement: bool = False,
+) -> TranscriptionResult:
+    """Transcribe a WAV file using the new architecture.
+
+    Blueprint Part 8 implementation. Loads audio via FileSource,
+    preprocesses to 16kHz mono, and transcribes using the inference engine.
+
+    Args:
+        wav_path: Path to WAV file to transcribe
+        model_name: Whisper model to use (default: 'turbo')
+        device: Inference device ('cuda' or 'cpu')
+        compute_type: CTranslate2 precision string
+        language: BCP-47 language code (default: 'en')
+        local_agreement: Enable two-pass verification for higher accuracy
+
+    Returns:
+        TranscriptionResult with full transcription, segments, and metadata
+
+    Raises:
+        FileNotFoundError: If WAV file doesn't exist
+        AudioTooShortError: If audio is below minimum duration
+        TranscriptionError: If transcription fails
+    """
+    from pathlib import Path
+
+    wav_path = Path(wav_path)
+    if not wav_path.exists():
+        raise FileNotFoundError(f"WAV file not found: {wav_path}")
+
+    # 1. Load audio via FileSource
+    source = FileSource(wav_path)
+    audio, sample_rate = source.read()
+
+    # 2. Preprocess to 16kHz mono using process_array (standalone method)
+    preprocessor = AudioPreProcessor(source)
+    audio = preprocessor.process()
+
+    # 3. Transcribe
+    result = transcribe(
+        audio,
+        model_name=model_name,
+        device=device,
+        compute_type=compute_type,
+        language=language,
+    )
+
+    # 4. Apply LocalAgreement if enabled
+    if local_agreement:
+        from .postprocessing.agreement import apply_local_agreement
+
+        result = apply_local_agreement(audio, result, model_name, device, compute_type, language)
+
+    return result
+
+
 __all__ = [
-    # Streaming
-    "StreamingTranscriber",
-    "ChunkResult",
-    # Recording
-    "AudioRecorder",
-    "AudioRecorderError",
+    # Audio
+    "MicrophoneStream",
+    "FileSource",
+    "AudioPreProcessor",
+    "TARGET_SAMPLE_RATE",
     "SAMPLE_RATE",
-    # Transcription
-    "transcribe_buffer",
-    "transcribe_file",
-    "get_or_load_model",
-    "model_downloaded",
-    "ensure_model_downloaded",
-    "TranscriptionResult",
-    "Segment",
-    "TranscriptionError",
-    "AudioTooShortError",
-    "AudioTooLongWarning",
     # Config
     "Config",
     "get_config",
     "get_config_with_metadata",
     "VALID_TRANSCRIPTION_MODELS",
+    # Inference
+    "transcribe",
+    "transcribe_file",
+    "DEVICE",
+    "COMPUTE_TYPE",
+    "DEFAULT_MODEL",
+    "LANGUAGE",
+    "load_model",
+    "unload_model",
+    "unload_all_models",
+    "is_model_loaded",
+    "get_model",
+    "model_downloaded",
+    "ensure_model_downloaded",
+    "_model_cache",
+    # Types
+    "TranscriptionResult",
+    "Segment",
+    "WordTimestamp",
+    # Exceptions
+    "TranscriptionError",
+    "AudioTooShortError",
+    "AudioTooLongWarning",
+    "ModelNotFoundError",
+    # Postprocessing
+    "filter_segments",
+    "deduplicate_overlap",
+    "remove_hallucinations",
+    "normalize",
+    # Streaming
+    "ChunkResult",
+    "StreamingTranscriber",
+    # VAD
+    "SileroVAD",
+    "SpeechSegment",
+    "ensure_vad_model",
+    # Logging
+    "configure_global_logging",
+    "setup_transcription_logger",
+    "log_transcription_start",
+    "log_transcription_end",
+    "log_chunk_processing",
+    "log_model_load",
+    "log_system_info",
+    "log_config_info",
+    "log_audio_info",
+    "log_vad_info",
+    "log_model_cache_info",
+    "log_segments_info",
+    "log_postprocessing_step",
+    "configure_global_logging",
 ]

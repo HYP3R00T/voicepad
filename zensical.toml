@@ -8,50 +8,54 @@ copyright = "Copyright &copy; 2026 Rajesh Das"
 dev_addr = "localhost:3000"
 
 nav = [
-    { Home = "index.md" },
-    { "Getting Started" = "getting-started.md" },
-    { "User Interface" = "interface.md" },
-    { Configuration = [
-        { "Overview" = "configuration/index.md" },
-        { "Whisper Models" = "configuration/models.md" },
-        { "Input Device" = "configuration/input-device.md" },
-        { "Output Paths" = "configuration/output-paths.md" },
-        { "GPU Acceleration" = "configuration/gpu.md" },
-    ] },
+  { Home = "index.md" },
+  { "Getting Started" = "getting-started.md" },
+  { "User Interface" = "interface.md" },
+  { Configuration = [
+    { "Overview" = "configuration/index.md" },
+    { "Whisper Models" = "configuration/models.md" },
+    { "Input Device" = "configuration/input-device.md" },
+    { "Output Paths" = "configuration/output-paths.md" },
+    { "GPU Acceleration" = "configuration/gpu.md" },
+  ] },
 ]
 
 [project.theme]
 language = "en"
 favicon = "assets/favicon.svg"
 features = [
-    "announce.dismiss",
-    "content.action.edit",
-    "content.action.view",
-    "content.code.annotate",
-    "content.code.copy",
-    "content.code.select",
-    "content.footnote.tooltips",
-    "content.tabs.link",
-    "content.tooltips",
-    "navigation.footer",
-    "navigation.indexes",
-    "navigation.instant",
-    "navigation.instant.prefetch",
-    "navigation.instant.progress",
-    "navigation.path",
-    "navigation.top",
-    "navigation.tracking",
-    "search.highlight",
-    "search.suggest",
+  "announce.dismiss",
+  "content.action.edit",
+  "content.action.view",
+  "content.code.annotate",
+  "content.code.copy",
+  "content.code.select",
+  "content.footnote.tooltips",
+  "content.tabs.link",
+  "content.tooltips",
+  "navigation.footer",
+  "navigation.indexes",
+  "navigation.instant",
+  "navigation.instant.prefetch",
+  "navigation.instant.progress",
+  "navigation.path",
+  "navigation.top",
+  "navigation.tracking",
+  "search.highlight",
+  "search.suggest",
 ]
 
 [[project.theme.palette]]
 scheme = "default"
+palette.accent = "teal"
+palette.primary = "teal"
 toggle.icon = "lucide/sun"
 toggle.name = "Switch to dark mode"
 
 [[project.theme.palette]]
 scheme = "slate"
+palette.accent = "teal"
+palette.primary = "teal"
 toggle.icon = "lucide/moon"
 toggle.name = "Switch to light mode"
 
@@ -66,7 +70,7 @@ next = "lucide/arrow-right"
 [project.markdown_extensions.pymdownx.details]
 [project.markdown_extensions.pymdownx.superfences]
 custom_fences = [
-    { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" },
+  { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" },
 ]
 
 [project.markdown_extensions.pymdownx.tabbed]

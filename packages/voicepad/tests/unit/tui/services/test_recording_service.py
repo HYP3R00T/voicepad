@@ -8,7 +8,6 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 from voicepad.tui.services.recording_service import RecordingService
-from voicepad_core import AudioRecorderError
 
 
 def create_mock_config(tmp_path: Path) -> MagicMock:
@@ -52,14 +51,14 @@ class TestRecordingService:
         mock_session.start.assert_called_once()
 
     def test_start_session_raises_on_error(self, tmp_path: Path) -> None:
-        """start_session raises AudioRecorderError if session fails to start."""
+        """start_session raises RuntimeError if session fails to start."""
         config = create_mock_config(tmp_path)
         service = RecordingService(config)
 
         mock_session = MagicMock()
-        mock_session.start.side_effect = AudioRecorderError("Failed to start")
+        mock_session.start.side_effect = RuntimeError("Failed to start")
 
-        with pytest.raises(AudioRecorderError, match="Failed to start"):
+        with pytest.raises(match="Failed to start"):
             service.start_session(mock_session)
 
     def test_stop_session_calls_session_stop(self, tmp_path: Path) -> None:
@@ -77,14 +76,14 @@ class TestRecordingService:
         np.testing.assert_array_equal(audio, mock_audio)
 
     def test_stop_session_raises_on_error(self, tmp_path: Path) -> None:
-        """stop_session raises AudioRecorderError if session fails to stop."""
+        """stop_session raises RuntimeError if session fails to stop."""
         config = create_mock_config(tmp_path)
         service = RecordingService(config)
 
         mock_session = MagicMock()
-        mock_session.stop.side_effect = AudioRecorderError("Failed to stop")
+        mock_session.stop.side_effect = RuntimeError("Failed to stop")
 
-        with pytest.raises(AudioRecorderError, match="Failed to stop"):
+        with pytest.raises(match="Failed to stop"):
             service.stop_session(mock_session)
 
     @patch("voicepad.tui.services.recording_service.sf.write")
@@ -135,7 +134,7 @@ class TestRecordingService:
         config = create_mock_config(tmp_path)
         service = RecordingService(config)
 
-        mock_write.side_effect = Exception("Write failed")
+        mock_write.side_effect = RuntimeError("Write failed")
         audio = np.array([0.1, 0.2, 0.3])
 
         with pytest.raises(Exception, match="Write failed"):

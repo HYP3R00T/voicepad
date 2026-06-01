@@ -17,7 +17,7 @@ from voicepad.tui.utils.markdown import (
 if TYPE_CHECKING:
     from voicepad_core import ChunkResult
     from voicepad_core.config import Config
-    from voicepad_core.transcription import TranscriptionResult
+    from voicepad_core.inference import TranscriptionResult
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +43,7 @@ class HistoryService:
         self.entries.clear()
 
         if not self.config.markdown_path.exists():
-            logger.info("Markdown directory does not exist, no history to load")
+            logger.info("Markdown directory does not exist, no history to load_model")
             return self.entries
 
         try:
@@ -58,7 +58,7 @@ class HistoryService:
 
             logger.info(f"Loaded {len(self.entries)} history entries")
         except Exception as e:
-            logger.error(f"Failed to load history: {e}")
+            logger.error(f"Failed to load_model history: {e}")
 
         return self.entries
 

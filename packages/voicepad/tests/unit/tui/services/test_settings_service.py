@@ -116,7 +116,7 @@ class TestSettingsService:
 
         config_file = tmp_path / "config.yaml"
         mock_get_path.return_value = config_file
-        mock_write.side_effect = Exception("Write failed")
+        mock_write.side_effect = RuntimeError("Write failed")
 
         with pytest.raises(Exception, match="Write failed"):
             service.save_config(config)

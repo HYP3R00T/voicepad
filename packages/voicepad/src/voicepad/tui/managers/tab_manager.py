@@ -47,6 +47,7 @@ class TabManager:
             "open_markdown": "tab-history",
             "toggle_sort_order": "tab-history",
             "save_settings": "tab-settings",
+            "open_config_dir": "tab-settings",
         }
         if action in tab_specific:
             if active != tab_specific[action]:

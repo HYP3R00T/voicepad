@@ -202,7 +202,7 @@ class TestReloadModel:
         mock_app._recording = True
         manager = ModelManager(mock_app)
 
-        with patch("voicepad_core.transcription._model_cache") as mock_cache:
+        with patch("voicepad_core._model_cache") as mock_cache:
             manager.reload_model()
 
             mock_cache.clear.assert_not_called()
@@ -214,7 +214,7 @@ class TestReloadModel:
         mock_app._transcribing = True
         manager = ModelManager(mock_app)
 
-        with patch("voicepad_core.transcription._model_cache") as mock_cache:
+        with patch("voicepad_core._model_cache") as mock_cache:
             manager.reload_model()
 
             mock_cache.clear.assert_not_called()
@@ -225,7 +225,7 @@ class TestReloadModel:
 
         manager = ModelManager(mock_app)
 
-        with patch("voicepad_core.transcription._model_cache") as mock_cache:
+        with patch("voicepad_core._model_cache") as mock_cache:
             manager.reload_model()
 
             mock_cache.clear.assert_called_once()
@@ -236,7 +236,7 @@ class TestReloadModel:
 
         manager = ModelManager(mock_app)
 
-        with patch("voicepad_core.transcription._model_cache"):
+        with patch("voicepad_core._model_cache"):
             manager.reload_model()
 
             assert mock_app._model_ready is False
@@ -248,7 +248,7 @@ class TestReloadModel:
         manager = ModelManager(mock_app)
 
         with (
-            patch("voicepad_core.transcription._model_cache"),
+            patch("voicepad_core._model_cache"),
             patch.object(manager, "set_status") as mock_set_status,
         ):
             manager.reload_model()
@@ -262,7 +262,7 @@ class TestReloadModel:
 
         manager = ModelManager(mock_app)
 
-        with patch("voicepad_core.transcription._model_cache"):
+        with patch("voicepad_core._model_cache"):
             manager.reload_model()
 
             mock_model_label = mock_app.query_one("#header-model", Label)
@@ -274,7 +274,7 @@ class TestReloadModel:
 
         manager = ModelManager(mock_app)
 
-        with patch("voicepad_core.transcription._model_cache"):
+        with patch("voicepad_core._model_cache"):
             manager.reload_model()
 
             mock_app._warm_model_worker.assert_called_once()

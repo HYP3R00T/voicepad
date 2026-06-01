@@ -45,7 +45,7 @@ class ModelManager:
         """Re-download (if needed) and reload the current model."""
         if self.app._recording or self.app._transcribing:
             return
-        from voicepad_core.transcription import _model_cache
+        from voicepad_core import _model_cache
 
         _model_cache.clear()
         self.app._model_ready = False

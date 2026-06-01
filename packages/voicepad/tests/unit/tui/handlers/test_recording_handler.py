@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from unittest.mock import Mock, patch
 
 import numpy as np
 from voicepad.tui.handlers.recording_handler import RecordingHandler
-from voicepad_core import AudioRecorderError, ChunkResult
+from voicepad_core import ChunkResult
 
 
 class TestRecordingHandlerInit:
@@ -147,11 +148,11 @@ class TestStartRecording:
 
     @patch("voicepad.tui.handlers.recording_handler.RecordingSession")
     def test_handles_audio_recorder_error(self, mock_session_class):
-        """Test that start_recording handles AudioRecorderError."""
+        """Test that start_recording handles RuntimeError."""
         mock_app = Mock()
         mock_app.config = Mock()
         mock_session = Mock()
-        mock_session.start.side_effect = AudioRecorderError("Test error")
+        mock_session.start.side_effect = RuntimeError("Test error")
         mock_session_class.return_value = mock_session
 
         handler = RecordingHandler(mock_app)
@@ -203,6 +204,13 @@ class TestStartRecording:
         """Test that start_recording starts StreamingTranscriber."""
         mock_app = Mock()
         mock_app.config = Mock()
+        mock_app.config.transcription_model = "turbo"
+        mock_app.config.transcription_device = "cuda"
+        mock_app.config.transcription_compute_type = "int8_float16"
+        mock_app.config.min_chunk_s = 1.0
+        mock_app.config.max_chunk_s = 30.0
+        mock_app.config.overlap_s = 2.0
+        mock_app.config.silence_threshold_ms = 500
         mock_session = Mock()
         mock_recorder = Mock()
         mock_session._recorder = mock_recorder
@@ -217,7 +225,13 @@ class TestStartRecording:
         mock_transcriber_class.assert_called_once()
         call_kwargs = mock_transcriber_class.call_args[1]
         assert call_kwargs["recorder"] is mock_recorder
-        assert call_kwargs["config"] is mock_app.config
+        assert call_kwargs["model_name"] == "turbo"
+        assert call_kwargs["device"] == "cuda"
+        assert call_kwargs["compute_type"] == "int8_float16"
+        assert call_kwargs["min_chunk_s"] == 1.0
+        assert call_kwargs["max_chunk_s"] == 30.0
+        assert call_kwargs["overlap_s"] == 2.0
+        assert call_kwargs["silence_threshold_ms"] == 500
         assert callable(call_kwargs["on_chunk"])
         assert callable(call_kwargs["on_error"])
         mock_transcriber.start.assert_called_once()
@@ -253,10 +267,10 @@ class TestStopRecording:
 
     @patch.object(RecordingHandler, "finalize_worker")
     def test_handles_audio_recorder_error_on_stop(self, mock_finalize):
-        """Test that stop_recording handles AudioRecorderError."""
+        """Test that stop_recording handles RuntimeError."""
         mock_app = Mock()
         mock_session = Mock()
-        mock_session.stop.side_effect = AudioRecorderError("Stop error")
+        mock_session.stop.side_effect = RuntimeError("Stop error")
         mock_app._session = mock_session
         mock_app._streamer = Mock()
 
@@ -342,6 +356,7 @@ class TestOnStreamChunk:
         assert mock_app._transcribing is False
         mock_meta_label.update.assert_called_once_with("[dim]5.5s  ·  streaming[/]")
         mock_app._set_status.assert_called_with("ready", "ready")
+        mock_app._overlay_set.assert_called_once_with("hidden")
 
     @patch("voicepad.tui.handlers.recording_handler.time")
     @patch("voicepad.tui.handlers.recording_handler._copy_to_clipboard")
@@ -366,20 +381,112 @@ class TestOnStreamChunk:
         mock_app._set_status.assert_called_with("ready", "ready — copied to clipboard")
         mock_app._overlay_set.assert_called_with("copied")
 
+    def test_final_chunk_signals_completion_event(self):
+        """Test that the final streamed chunk signals stop completion."""
+        mock_app = Mock()
+        mock_app._stream_chunks = []
+        mock_app._record_start = 0.0
+        mock_app._hotkey_pending_copy = False
+        mock_label = Mock()
+        mock_static = Mock()
+        mock_meta_label = Mock()
+        mock_app.query_one.side_effect = [mock_label, mock_static, mock_meta_label]
+
+        handler = RecordingHandler(mock_app)
+        handler._final_chunk_event = threading.Event()
+
+        chunk = ChunkResult(text="done", is_final=True, device="cuda", latency_ms=100.0, segments=[], index=0)
+        handler._handle_stream_chunk(chunk)
+
+        assert handler._final_chunk_event.is_set()
+
+    def test_stream_error_clears_transcribing_and_signals_completion(self):
+        """Test that a streaming error clears transcribing state and unblocks stop."""
+        mock_app = Mock()
+        mock_app._transcribing = True
+
+        handler = RecordingHandler(mock_app)
+        handler._final_chunk_event = threading.Event()
+
+        handler._handle_stream_error("chunk failed")
+
+        assert mock_app._transcribing is False
+        mock_app._set_status.assert_called_once_with("error", "chunk failed")
+        assert handler._final_chunk_event.is_set()
+
 
 class TestSaveRecording:
     """Tests for save_recording method."""
 
     def test_returns_early_when_no_text(self):
-        """Test that save_recording returns early when no text."""
+        """Test that save_recording still handles empty text without crashing."""
         mock_app = Mock()
         mock_app._stream_chunks = []
+        mock_app._entries = []
+        mock_app.config.recordings_path = Path("/tmp/recordings")
+        mock_app.config.markdown_path = Path("/tmp/markdown")
+        mock_app.config.recording_prefix = "recording"
+
+        mock_recorder = Mock()
+        mock_session = Mock()
+        mock_session._recorder = mock_recorder
+        mock_app._session = mock_session
+
+        mock_button = Mock()
+        mock_app.query_one.return_value = mock_button
+
         audio = np.array([1.0, 2.0], dtype=np.float32)
 
         handler = RecordingHandler(mock_app)
-        handler.save_recording(audio)
+        with (
+            patch("voicepad.tui.handlers.recording_handler.time.strftime", return_value="20220101_120000"),
+            patch.object(Path, "write_text"),
+            patch.object(Path, "mkdir"),
+        ):
+            handler.save_recording(audio)
 
-        # Should not crash and should not save anything
+        mock_recorder.save_wav.assert_called_once()
+        assert mock_app._current_text == ""
+        assert mock_button.disabled is True
+        assert len(mock_app._entries) == 1
+
+    @patch("voicepad.tui.handlers.recording_handler._format_markdown_streaming")
+    def test_saves_wav_even_when_transcript_is_empty(self, mock_format_md):
+        """Test that save_recording still saves WAV output when transcript text is empty."""
+        mock_app = Mock()
+        mock_app._stream_chunks = []
+        mock_app._entries = []
+        mock_app.config.recordings_path = Path("/tmp/recordings")
+        mock_app.config.markdown_path = Path("/tmp/markdown")
+        mock_app.config.recording_prefix = "recording"
+
+        mock_recorder = Mock()
+        mock_session = Mock()
+        mock_session._recorder = mock_recorder
+        mock_app._session = mock_session
+
+        mock_button = Mock()
+        mock_app.query_one.return_value = mock_button
+
+        audio = np.array([1.0, 2.0], dtype=np.float32)
+
+        handler = RecordingHandler(mock_app)
+        with (
+            patch("voicepad.tui.handlers.recording_handler.time.strftime", return_value="20220101_120000"),
+            patch.object(Path, "write_text"),
+            patch.object(Path, "mkdir"),
+        ):
+            handler.save_recording(audio)
+
+        mock_recorder.save_wav.assert_called_once()
+        mock_format_md.assert_not_called()
+        assert mock_app._current_text == ""
+        assert mock_button.disabled is True
+        assert len(mock_app._entries) == 1
+        entry = mock_app._entries[0]
+        assert entry.text == ""
+        assert entry.wav_path is not None
+        assert entry.md_path is None
 
     @patch("voicepad.tui.handlers.recording_handler._format_markdown_streaming")
     def test_saves_wav_and_markdown(self, mock_format_md):
@@ -388,11 +495,11 @@ class TestSaveRecording:
         chunk = ChunkResult(text="Test text", is_final=True, device="cuda", latency_ms=100.0, segments=[], index=0)
         mock_app._stream_chunks = [chunk]
         mock_app._entries = []
+        mock_app.config.recordings_path = Path("/tmp/recordings")
         mock_app.config.markdown_path = Path("/tmp/markdown")
+        mock_app.config.recording_prefix = "recording"
 
         mock_recorder = Mock()
-        mock_wav_path = Path("/tmp/test.wav")
-        mock_recorder.make_wav_path.return_value = mock_wav_path
         mock_session = Mock()
         mock_session._recorder = mock_recorder
         mock_app._session = mock_session
@@ -405,7 +512,11 @@ class TestSaveRecording:
         audio = np.array([1.0, 2.0], dtype=np.float32)
 
         handler = RecordingHandler(mock_app)
-        with patch.object(Path, "write_text"):
+        with (
+            patch("voicepad.tui.handlers.recording_handler.time.strftime", return_value="20220101_120000"),
+            patch.object(Path, "write_text"),
+            patch.object(Path, "mkdir"),
+        ):
             handler.save_recording(audio)
 
         mock_recorder.save_wav.assert_called_once()
@@ -418,11 +529,11 @@ class TestSaveRecording:
         chunk = ChunkResult(text="Test", is_final=True, device="cuda", latency_ms=100.0, segments=[], index=0)
         mock_app._stream_chunks = [chunk]
         mock_app._entries = []
+        mock_app.config.recordings_path = Path("/tmp/recordings")
         mock_app.config.markdown_path = Path("/tmp/markdown")
+        mock_app.config.recording_prefix = "recording"
 
         mock_recorder = Mock()
-        mock_wav_path = Path("/tmp/test.wav")
-        mock_recorder.make_wav_path.return_value = mock_wav_path
         mock_session = Mock()
         mock_session._recorder = mock_recorder
         mock_app._session = mock_session
@@ -435,6 +546,7 @@ class TestSaveRecording:
         handler = RecordingHandler(mock_app)
         with (
             patch("voicepad.tui.handlers.recording_handler._format_markdown_streaming"),
+            patch("voicepad.tui.handlers.recording_handler.time.strftime", return_value="20220101_120000"),
             patch.object(Path, "write_text"),
             patch.object(Path, "mkdir"),
         ):

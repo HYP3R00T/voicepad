@@ -212,10 +212,23 @@ def aggregate_results(results: dict) -> dict:
     else:
         primary = run_summary.get(configs[0], {}) if configs else {}
         baseline = {}
+    # Ensure primary/baseline are dicts for static analysis
+    from typing import cast
 
-    delta_pass_rate = primary.get("pass_rate", {}).get("mean", 0) - baseline.get("pass_rate", {}).get("mean", 0)
-    delta_time = primary.get("time_seconds", {}).get("mean", 0) - baseline.get("time_seconds", {}).get("mean", 0)
-    delta_tokens = primary.get("tokens", {}).get("mean", 0) - baseline.get("tokens", {}).get("mean", 0)
+    if not isinstance(primary, dict):
+        primary = {}
+    if not isinstance(baseline, dict):
+        baseline = {}
+
+    delta_pass_rate = cast(dict, primary).get("pass_rate", {}).get("mean", 0) - cast(dict, baseline).get(
+        "pass_rate", {}
+    ).get("mean", 0)
+    delta_time = cast(dict, primary).get("time_seconds", {}).get("mean", 0) - cast(dict, baseline).get(
+        "time_seconds", {}
+    ).get("mean", 0)
+    delta_tokens = cast(dict, primary).get("tokens", {}).get("mean", 0) - cast(dict, baseline).get("tokens", {}).get(
+        "mean", 0
+    )
 
     run_summary["delta"] = {
         "pass_rate": f"{delta_pass_rate:+.2f}",

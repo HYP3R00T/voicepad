@@ -3,25 +3,29 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
-import soundfile as sf
 from voicepad_core import (
     TranscriptionError,
     ensure_model_downloaded,
-    get_or_load_model,
+    load_model,
+    log_transcription_end,
+    log_transcription_start,
     model_downloaded,
-    transcribe_buffer,
+    setup_transcription_logger,
+    transcribe,
 )
-from voicepad_core.transcription import AudioTooShortError
+from voicepad_core.inference import AudioTooShortError
+from voicepad_core.inference.engine import set_session_logger
 
 from voicepad.tui.workers import ModelWarmResult
 
 if TYPE_CHECKING:
     from voicepad_core.config import Config
-    from voicepad_core.transcription import TranscriptionResult
+    from voicepad_core.inference import TranscriptionResult
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +42,7 @@ class TranscriptionService:
         self.config = config
 
     def warm_model(self) -> ModelWarmResult:
-        """Download (if needed) and load the model into VRAM.
+        """Download (if needed) and load_model the model into VRAM.
 
         This operation blocks until complete.
 
@@ -47,12 +51,30 @@ class TranscriptionService:
         """
         try:
             # Check if model needs to be downloaded
-            if not model_downloaded(self.config.transcription_model, self.config):
+            if not model_downloaded(self.config.transcription_model):
                 logger.info(f"Model '{self.config.transcription_model}' not cached — downloading")
-                ensure_model_downloaded(self.config.transcription_model, self.config)
+                ensure_model_downloaded(self.config.transcription_model)
 
             # Load the model
-            _, device, compute, fallback = get_or_load_model(self.config)
+            model = load_model(
+                self.config.transcription_model,
+                self.config.transcription_device,
+                self.config.transcription_compute_type,
+            )
+            device = self.config.transcription_device
+            compute = self.config.transcription_compute_type
+            fallback = False
+
+            # Check if we fell back to CPU
+            from voicepad_core.inference.model_manager import _model_cache
+
+            for (m, d, c), cached_model in _model_cache.items():
+                if m == self.config.transcription_model and cached_model is model:
+                    device = d
+                    compute = c
+                    fallback = device == "cpu" and self.config.transcription_device != "cpu"
+                    break
+
             logger.info(f"Model loaded: device={device}, compute={compute}, fallback={fallback}")
             return ModelWarmResult(device=device, compute_type=compute, fallback=fallback)
 
@@ -76,22 +98,68 @@ class TranscriptionService:
             AudioTooShortError: If the audio is too short to transcribe
             TranscriptionError: If transcription fails
         """
+        # Set up per-transcription logging
+        session_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        session_logger, log_file = setup_transcription_logger(
+            self.config.logs_path,
+            self.config.log_level,
+            session_id,
+        )
+
+        # Set the session logger for the inference engine
+        set_session_logger(session_logger)
+
         try:
-            result = transcribe_buffer(audio, self.config)
+            # Calculate audio duration
+            duration_s = len(audio) / 16000  # Assuming 16kHz sample rate
+
+            # Log transcription start
+            log_transcription_start(
+                session_logger,
+                duration_s,
+                self.config.transcription_model,
+                self.config.transcription_device,
+                self.config.transcription_compute_type,
+            )
+
+            # We call transcribe safely with expanded args
+            result = transcribe(
+                audio,
+                model_name=self.config.transcription_model,
+                device=self.config.transcription_device,
+                compute_type=self.config.transcription_compute_type,
+            )
+
+            # Log transcription end
+            log_transcription_end(
+                session_logger,
+                success=True,
+                latency_ms=result.latency_ms,
+                text_length=len(result.text),
+            )
+
             logger.info(f"Transcription complete: {len(result.text)} chars, {result.latency_ms:.0f}ms")
+            logger.info(f"Log file: {log_file}")
             return result
+
         except AudioTooShortError as e:
+            log_transcription_end(session_logger, success=False, error=str(e))
             logger.warning(f"Audio too short: {e}")
             raise
         except TranscriptionError as e:
+            log_transcription_end(session_logger, success=False, error=str(e))
             logger.error(f"Transcription failed: {e}")
             raise
         except Exception as e:
+            log_transcription_end(session_logger, success=False, error=str(e))
             logger.error(f"Unexpected transcription error: {e}")
             raise
+        finally:
+            # Clear the session logger
+            set_session_logger(None)
 
     def transcribe_file(self, wav_path: Path) -> TranscriptionResult | None:
-        """Transcribe an audio file.
+        """Transcribe an audio file using the new transcribe_file function.
 
         Args:
             wav_path: Path to the WAV file to transcribe
@@ -104,31 +172,51 @@ class TranscriptionService:
             AudioTooShortError: If the audio is too short to transcribe
             TranscriptionError: If transcription fails
         """
-        if not wav_path.exists():
-            raise FileNotFoundError(f"Audio file not found: {wav_path}")
+        from voicepad_core import transcribe_file as core_transcribe_file
+
+        # Set up per-transcription logging
+        session_id = f"{wav_path.stem}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        session_logger, log_file = setup_transcription_logger(
+            self.config.logs_path,
+            self.config.log_level,
+            session_id,
+        )
+
+        # Set the session logger for the inference engine
+        set_session_logger(session_logger)
 
         try:
-            # Load the audio file
-            audio, sample_rate = sf.read(wav_path, dtype="float32")
-            logger.info(f"Loaded audio file: {wav_path} ({len(audio)} samples, {sample_rate}Hz)")
+            session_logger.info(f"Transcribing file: {wav_path}")
 
-            # Resample if needed (Whisper expects 16kHz)
-            if sample_rate != 16000:
-                logger.warning(f"Resampling from {sample_rate}Hz to 16000Hz")
-                # Simple resampling - for production, use a proper resampler
-                import numpy as np
+            # Use the new transcribe_file function from voicepad-core
+            result = core_transcribe_file(
+                wav_path,
+                model_name=self.config.transcription_model,
+                device=self.config.transcription_device,
+                compute_type=self.config.transcription_compute_type,
+                language=self.config.language,
+                local_agreement=self.config.local_agreement_file,
+            )
 
-                audio = np.interp(
-                    np.linspace(0, len(audio), int(len(audio) * 16000 / sample_rate)),
-                    np.arange(len(audio)),
-                    audio,
-                )
+            # Log transcription end
+            log_transcription_end(
+                session_logger,
+                success=True,
+                latency_ms=result.latency_ms,
+                text_length=len(result.text),
+            )
 
-            # Transcribe the audio
-            return self.transcribe_audio(audio)
+            logger.info(f"File transcription complete: {len(result.text)} chars, {result.latency_ms:.0f}ms")
+            logger.info(f"Log file: {log_file}")
+            return result
 
-        except (AudioTooShortError, TranscriptionError):
+        except (AudioTooShortError, TranscriptionError) as e:
+            log_transcription_end(session_logger, success=False, error=str(e))
             raise
         except Exception as e:
+            log_transcription_end(session_logger, success=False, error=str(e))
             logger.error(f"Failed to transcribe file {wav_path}: {e}")
             raise
+        finally:
+            # Clear the session logger
+            set_session_logger(None)

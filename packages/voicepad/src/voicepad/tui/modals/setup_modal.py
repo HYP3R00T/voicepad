@@ -219,12 +219,11 @@ class SetupModal(ModalScreen[tuple[str, int | None]]):
     def _download_model_worker(self, model: str) -> None:
         import time
 
-        from voicepad_core import ensure_model_downloaded, model_downloaded
-        from voicepad_core.transcription import TranscriptionError
+        from voicepad_core import TranscriptionError, ensure_model_downloaded, model_downloaded
 
         self.app.call_from_thread(self._set_download_status, f"Checking {model}")
 
-        if model_downloaded(model, self._config):
+        if model_downloaded(model):
             self.app.call_from_thread(self._on_download_done, model, None, 0.0)
             return
 
@@ -235,7 +234,7 @@ class SetupModal(ModalScreen[tuple[str, int | None]]):
         self.app.call_from_thread(self.set_timer, 1.0, self._start_elapsed_timer)
 
         try:
-            ensure_model_downloaded(model, self._config, on_progress=None)
+            ensure_model_downloaded(model, on_progress=None)
             elapsed = time.monotonic() - self._download_start_time
             self.app.call_from_thread(self._on_download_done, model, None, elapsed)
         except TranscriptionError as e:

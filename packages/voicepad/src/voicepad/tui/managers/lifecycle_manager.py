@@ -53,7 +53,7 @@ class LifecycleManager:
 
         config_path = get_config_path("voicepad", format="yaml")
         config_missing = not config_path.exists()
-        model_ready = model_downloaded(self.app.config.transcription_model, self.app.config)
+        model_ready = model_downloaded(self.app.config.transcription_model)
 
         if config_missing or not model_ready:
 
@@ -63,6 +63,8 @@ class LifecycleManager:
 
             self.app.push_screen(SetupModal(self.app.config), callback=_setup_callback)
         else:
+            # Update status before starting model warm-up
+            self.app._set_status("transcribing", "loading model…")
             self.app._warm_model_worker()
 
     def on_setup_done(self, result: tuple[str, int | None]) -> None:
@@ -87,4 +89,6 @@ class LifecycleManager:
 
         self.app._refresh_config_path_label()
         self.app._refresh_settings_values()
+        # Update status before starting model warm-up
+        self.app._set_status("transcribing", "loading model…")
         self.app._warm_model_worker()

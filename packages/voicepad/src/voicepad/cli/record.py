@@ -7,21 +7,22 @@ import sys
 import threading
 import time
 from pathlib import Path
+from typing import Annotated
 
 import typer
 from voicepad_core import (
-    AudioRecorder,
-    AudioRecorderError,
+    AudioPreProcessor,
     AudioTooShortError,
+    MicrophoneStream,
     TranscriptionError,
+    _model_cache,
     ensure_model_downloaded,
     get_config,
-    get_or_load_model,
+    load_model,
     model_downloaded,
-    transcribe_buffer,
-    transcribe_file,
+    transcribe,
 )
-from voicepad_core.transcription import BEAM_SIZE, COMPUTE_TYPE, DEVICE, LANGUAGE
+from voicepad_core.inference.constants import BEAM_SIZE, COMPUTE_TYPE, DEVICE, LANGUAGE
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +81,7 @@ def start_recording(
     # On subsequent runs the cache check is instant.
     if not no_transcribe:
         model_name = config.transcription_model
-        if not model_downloaded(model_name, config):
+        if not model_downloaded(model_name):
             typer.echo()
             typer.secho(
                 f"[↓] Model '{model_name}' not found locally — downloading now.",
@@ -89,17 +90,31 @@ def start_recording(
             typer.echo("    This only happens once. Subsequent runs start immediately.")
             typer.echo()
             try:
-                ensure_model_downloaded(model_name, config)
+                ensure_model_downloaded(model_name)
                 typer.secho(f"    [OK] '{model_name}' downloaded.", fg=typer.colors.GREEN)
             except TranscriptionError as e:
                 typer.secho(f"[ERROR] Download failed: {e}", fg=typer.colors.RED, err=True)
                 raise typer.Exit(1) from e
 
         # --- Step 2: Load model into VRAM ---
-        # Model is local — load it now so transcription is instant after recording.
+        # Model is local — load_model it now so transcription is instant after recording.
         typer.echo(f"[~] Loading '{model_name}' into memory...")
         try:
-            _, actual_device, actual_compute, fallback = get_or_load_model(config)
+            model = load_model(
+                config.transcription_model,
+                config.transcription_device,
+                config.transcription_compute_type,
+            )
+            actual_device = config.transcription_device
+            actual_compute = config.transcription_compute_type
+            fallback = False
+            for (m, d, c), cached_model in _model_cache.items():
+                if m == config.transcription_model and cached_model is model:
+                    actual_device = d
+                    actual_compute = c
+                    fallback = actual_device == "cpu" and config.transcription_device != "cpu"
+                    break
+
             if fallback:
                 typer.secho(
                     f"    [!] CUDA not available — using CPU ({actual_compute})",
@@ -111,14 +126,14 @@ def start_recording(
                     fg=typer.colors.GREEN,
                 )
         except TranscriptionError as e:
-            typer.secho(f"[ERROR] Could not load model: {e}", fg=typer.colors.RED, err=True)
+            typer.secho(f"[ERROR] Could not load_model model: {e}", fg=typer.colors.RED, err=True)
             raise typer.Exit(1) from e
 
     # --- Start recording ---
-    recorder = AudioRecorder(config)
+    recorder = MicrophoneStream(config.input_device_index)
     try:
         recorder.start()
-    except AudioRecorderError as e:
+    except Exception as e:
         typer.secho(f"[ERROR] {e}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from e
 
@@ -148,8 +163,10 @@ def start_recording(
     # --- Stop and collect audio ---
     typer.echo()
     try:
-        audio = recorder.stop()
-    except AudioRecorderError as e:
+        raw_audio = recorder.stop()
+        processor = AudioPreProcessor(recorder)  # type: ignore
+        audio = processor.process_array(raw_audio, recorder.sample_rate)
+    except Exception as e:
         typer.secho(f"[ERROR] {e}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from e
 
@@ -163,9 +180,11 @@ def start_recording(
     # --- Save WAV ---
     wav_path: Path | None = None
     if not no_save:
-        wav_path = recorder.make_wav_path(prefix)
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        p = prefix or config.recording_prefix
+        wav_path = config.recordings_path / f"{p}_{ts}.wav"
         try:
-            recorder.save_wav(audio, wav_path)
+            recorder.save_wav(audio, wav_path, sample_rate=16000)
             typer.echo(f"      saved  : {wav_path}")
         except Exception as e:
             typer.secho(f"[WARN] Could not save WAV: {e}", fg=typer.colors.YELLOW)
@@ -181,9 +200,28 @@ def start_recording(
     try:
         # Model is already in cache — this call returns immediately from cache
         if wav_path and wav_path.exists():
-            result = transcribe_file(wav_path, config)
+            import soundfile as sf
+
+            file_audio, _ = sf.read(str(wav_path), dtype="float32", always_2d=False)
+            if file_audio.ndim > 1:
+                file_audio = file_audio.mean(axis=1)
+            result = transcribe(
+                file_audio,
+                model_name=config.transcription_model,
+                device=config.transcription_device,
+                compute_type=config.transcription_compute_type,
+                language=config.language,
+                word_timestamps=False,
+            )
         else:
-            result = transcribe_buffer(audio, config)
+            result = transcribe(
+                audio,
+                model_name=config.transcription_model,
+                device=config.transcription_device,
+                compute_type=config.transcription_compute_type,
+                language=config.language,
+                word_timestamps=False,
+            )
     except AudioTooShortError as e:
         typer.secho(f"[SKIP] {e}", fg=typer.colors.YELLOW)
         return
@@ -303,3 +341,167 @@ def _format_markdown(wav_path: Path, result, model_name: str = "") -> str:
             lines.append(f"**[{seg.start:.2f}s - {seg.end:.2f}s]** {seg.text}")
         lines.append("")
     return "\n".join(lines) + "\n"
+
+
+@record_app.command("benchmark")
+def benchmark(
+    wav_path: Annotated[
+        Path,
+        typer.Option(
+            "--wav",
+            "-w",
+            help="Path to the WAV file to benchmark stream chunking against",
+            exists=True,
+            dir_okay=False,
+        ),
+    ],
+) -> None:
+    """Run a chunking benchmark over a WAV file.
+
+    Tests multiple combinations of silence_threshold_ms and min_chunk_s
+    to empirically determine the best streaming latency and quality.
+    """
+    import numpy as np
+    import soundfile as sf
+    from rich.console import Console
+    from rich.table import Table
+    from voicepad_core import ensure_model_downloaded, load_model
+    from voicepad_core.streaming import StreamingTranscriber
+
+    config = get_config()
+
+    if not model_downloaded(config.transcription_model):
+        typer.secho(f"Downloading model '{config.transcription_model}'...", fg=typer.colors.CYAN)
+        ensure_model_downloaded(config.transcription_model)
+
+    typer.echo("Loading model...")
+    load_model(config.transcription_model, config.transcription_device, config.transcription_compute_type)
+
+    typer.echo(f"Loading {wav_path}...")
+    audio, sr = sf.read(str(wav_path), dtype="float32")
+    if audio.ndim > 1:
+        audio = audio.mean(axis=1)
+
+    if sr != 16000:
+        audio = np.interp(
+            np.linspace(0, len(audio), int(len(audio) * 16000 / sr)),
+            np.arange(len(audio)),
+            audio,
+        ).astype(np.float32)
+        sr = 16000
+
+    thresholds = [500, 800, 1000, 1500]
+    mins = [10.0, 15.0, 20.0, 29.0]
+
+    console = Console()
+    table = Table(title=f"Benchmark results for {wav_path.name}")
+    table.add_column("Silence Threshold (ms)", justify="right")
+    table.add_column("Min Chunk (s)", justify="right")
+    table.add_column("Chunks", justify="right")
+    table.add_column("Total Latency (ms)", justify="right")
+
+    class MockRecorder:
+        def __init__(self, audio_data):
+            self.audio_data = audio_data
+            self.sample_rate = 16000
+            self.cursor = 0
+
+        def get_snapshot(self):
+            return self.audio_data[: self.cursor]
+
+    typer.echo("Running permutations...")
+
+    for thresh in thresholds:
+        for m in mins:
+            recorder = MockRecorder(audio)
+
+            chunks = []
+
+            def on_chunk(c, chunks=chunks):
+                chunks.append(c)
+
+            transcriber = StreamingTranscriber(
+                recorder=recorder,
+                on_chunk=on_chunk,
+                on_error=lambda err: None,
+                model_name=config.transcription_model,
+                device=config.transcription_device,
+                compute_type=config.transcription_compute_type,
+                min_chunk_s=m,
+                max_chunk_s=29.0,
+                overlap_s=0.5,
+                silence_threshold_ms=thresh,
+            )
+
+            # Setup offline run without threads
+            transcriber._stop_event.clear()
+            transcriber._consumed_samples = 0
+            transcriber._chunk_index = 0
+            transcriber._prev_context = ""
+            transcriber._prev_chunk_text = ""
+            from voicepad_core.vad import SileroVAD
+
+            transcriber._vad = SileroVAD(
+                threshold=0.5,
+                min_speech_duration_ms=250,
+                min_silence_duration_ms=thresh,
+                speech_pad_ms=30,
+            )
+            transcriber._vad.reset()
+
+            # Iterate over the audio in small polling intervals
+            # Real streaming polls every 0.3s
+            poll_s = 0.3
+            step_samples = int(poll_s * 16000)
+
+            while recorder.cursor < len(audio):
+                recorder.cursor += step_samples
+                if recorder.cursor > len(audio):
+                    recorder.cursor = len(audio)
+
+                # Mock time inside _monitor_loop one iteration
+                # We can't really call _monitor_loop() directly because it has a while loop over stop_event with sleep
+                # We will just extract the core dispatch logic
+
+                accumulated_s = (recorder.cursor - transcriber._consumed_samples) / 16000
+                if accumulated_s < m:
+                    if accumulated_s >= 29.0:
+                        transcriber._dispatch_chunk(
+                            recorder.audio_data[: recorder.cursor], is_final=False, capture_rate=16000
+                        )
+                        transcriber._vad.reset()
+                    continue
+
+                tail_duration_s = thresh / 1000.0
+                tail_samples = int(tail_duration_s * 16000)
+                tail_audio = recorder.audio_data[: recorder.cursor]
+                tail = tail_audio[-tail_samples:] if len(tail_audio) >= tail_samples else tail_audio
+
+                speech_segments = transcriber._vad.detect(tail, sample_rate=16000)
+
+                if not speech_segments or accumulated_s >= 29.0:
+                    transcriber._dispatch_chunk(tail_audio, is_final=False, capture_rate=16000)
+                    transcriber._vad.reset()
+
+            # End
+            if transcriber._consumed_samples < len(audio):
+                transcriber._dispatch_chunk(audio, is_final=True, capture_rate=16000)
+            else:
+                from voicepad_core.streaming import ChunkResult
+
+                chunks.append(
+                    ChunkResult(
+                        index=transcriber._chunk_index + 1,
+                        text="",
+                        start_s=transcriber._consumed_samples / 16000,
+                        end_s=len(audio) / 16000,
+                        is_final=True,
+                    )
+                )
+
+            total_latency = sum(c.latency_ms for c in chunks if c.latency_ms is not None)
+            total_chunks = len([c for c in chunks if c.text])
+
+            table.add_row(str(thresh), f"{m:.1f}", str(total_chunks), f"{total_latency:.0f}")
+
+    console.print(table)

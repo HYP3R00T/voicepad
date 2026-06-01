@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import atexit
+import contextlib
 import logging
+import signal
+import sys
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
 from typing import Any
@@ -15,6 +19,7 @@ from textual.reactive import reactive
 from textual.widgets import (
     Button,
     Checkbox,
+    Label,
     Markdown,
     OptionList,
     Select,
@@ -26,6 +31,7 @@ from voicepad_core import (
     get_config,
 )
 from voicepad_core.config import Config
+from voicepad_core.logging_utils import configure_global_logging
 
 from voicepad.tui.components import VoiceButton
 from voicepad.tui.config import TUIConfig, load_tui_config, save_tui_config
@@ -53,6 +59,39 @@ except Exception:
     _APP_VERSION = "dev"
 
 # ---------------------------------------------------------------------------
+# Graceful shutdown handling
+# ---------------------------------------------------------------------------
+
+_app_instance: VoicePadApp | None = None
+
+
+def _cleanup_on_exit() -> None:
+    """Clean up resources on program exit."""
+    if _app_instance is not None:
+        logger.info("Cleaning up resources on exit...")
+        # Flush all logging handlers
+        for handler in logging.root.handlers:
+            handler.flush()
+
+
+def _signal_handler(signum: int, frame: Any) -> None:
+    """Handle interrupt signals (Ctrl+C, SIGTERM).
+
+    Args:
+        signum: Signal number
+        frame: Current stack frame
+    """
+    logger.info(f"Received signal {signum}, initiating graceful shutdown...")
+    _cleanup_on_exit()
+    sys.exit(0)
+
+
+# Register cleanup handlers
+atexit.register(_cleanup_on_exit)
+signal.signal(signal.SIGINT, _signal_handler)
+signal.signal(signal.SIGTERM, _signal_handler)
+
+# ---------------------------------------------------------------------------
 # App
 # ---------------------------------------------------------------------------
 
@@ -78,6 +117,7 @@ class VoicePadApp(App[None]):
         Binding("o", "toggle_sort_order", "Sort", show=True),
         # Settings tab
         Binding("s", "save_settings", "Save", show=True),
+        Binding("p", "open_config_dir", "Open config dir", show=True),
         # Hidden utility
         Binding("r", "reload_model", "Reload model", show=False),
     ]
@@ -89,6 +129,9 @@ class VoicePadApp(App[None]):
 
     def __init__(self, config: Config) -> None:
         super().__init__()
+        global _app_instance
+        _app_instance = self
+
         self.config = config
         self.tui_config: TUIConfig = load_tui_config()
         self._session: RecordingSession | None = None
@@ -121,6 +164,14 @@ class VoicePadApp(App[None]):
         self._recording_handler = RecordingHandler(self)
         self._history_handler = HistoryHandler(self)
         self._hotkey_handler = HotkeyHandler(self)
+
+        # Ensure logs directory exists
+        config.logs_path.mkdir(parents=True, exist_ok=True)
+        # Configure global logging for the app and core packages
+        # Do not write logs to the console (Textual renders the UI to the terminal);
+        # keep logs in files only to avoid polluting the TUI display.
+        configure_global_logging(config.log_level, config.logs_path, console=False)
+        logger.info(f"Logs directory: {config.logs_path}")
 
     # ------------------------------------------------------------------
     # Layout
@@ -380,14 +431,21 @@ class VoicePadApp(App[None]):
     def _retranscribe_file(self, wav_path: Path, md_path: Path | None) -> None:
         """Retranscribe a WAV file and prepend the result to the markdown."""
         import soundfile as sf
-        from voicepad_core.transcription import transcribe_buffer
+        from voicepad_core import transcribe
 
         self.call_from_thread(self._set_status, "transcribing", f"retranscribing {wav_path.name}…")
         try:
             audio, _sr = sf.read(str(wav_path), dtype="float32", always_2d=False)
             if audio.ndim > 1:
                 audio = audio.mean(axis=1)
-            result = transcribe_buffer(audio, self.config)
+            result = transcribe(
+                audio,
+                model_name=self.config.transcription_model,
+                device=self.config.transcription_device,
+                compute_type=self.config.transcription_compute_type,
+                language=self.config.language,
+                word_timestamps=False,
+            )
             error: str | None = None
         except Exception as e:
             result = None
@@ -436,6 +494,35 @@ class VoicePadApp(App[None]):
     def action_save_settings(self) -> None:
         """Save settings via keyboard shortcut."""
         self.query_one("#settings-save-btn", VoiceButton).press()
+
+    def action_open_config_dir(self) -> None:
+        """Open the config directory in the system file explorer."""
+        import platform
+        import subprocess
+
+        from utilityhub_config import get_config_path
+
+        try:
+            config_path = get_config_path("voicepad", format="yaml")
+            config_dir = config_path.parent
+
+            # Ensure directory exists
+            config_dir.mkdir(parents=True, exist_ok=True)
+
+            # Open in file explorer based on OS
+            system = platform.system()
+            if system == "Windows":
+                subprocess.run(["explorer", str(config_dir)], check=False)
+            elif system == "Darwin":  # macOS
+                subprocess.run(["open", str(config_dir)], check=False)
+            else:  # Linux and others
+                subprocess.run(["xdg-open", str(config_dir)], check=False)
+
+        except Exception as e:
+            # Show error in status if available
+            with contextlib.suppress(Exception):
+                status = self.query_one("#settings-status", Label)
+                status.update(f"[red]\U000f0156  Failed to open directory: {e}[/]")
 
     def action_copy_transcription(self) -> None:
         self._history_handler.action_copy_transcription()

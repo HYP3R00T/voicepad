@@ -14,7 +14,7 @@ from voicepad.cli.record import (
     _wait_for_quit,
     record_app,
 )
-from voicepad_core import AudioRecorderError, AudioTooShortError, TranscriptionError
+from voicepad_core import AudioTooShortError, TranscriptionError
 from voicepad_core.config import Config
 
 runner = CliRunner()
@@ -205,44 +205,48 @@ class TestStartRecording:
                 "voicepad.cli.record.ensure_model_downloaded",
                 side_effect=TranscriptionError("Download failed"),
             ),
-            patch("voicepad.cli.record.AudioRecorder", return_value=mock_recorder),
+            patch("voicepad.cli.record.MicrophoneStream", return_value=mock_recorder),
             patch("voicepad.cli.record.time.sleep"),
         ):
-            result = runner.invoke(record_app, ["start", "--no-transcribe", "--duration", "0.5"])
-        # When --no-transcribe is used, model download is skipped
-        assert result.exit_code == 0
+            result = runner.invoke(record_app, ["start", "--duration", "0.5"])
+        # Should exit with error when model download fails
+        assert result.exit_code == 1
 
     def test_exits_on_model_load_failure(self, tmp_path: Path) -> None:
         mock_config = Config(recordings_path=tmp_path, markdown_path=tmp_path)
         with (
             patch("voicepad.cli.record.get_config", return_value=mock_config),
             patch("voicepad.cli.record.model_downloaded", return_value=True),
-            patch("voicepad.cli.record.get_or_load_model", side_effect=TranscriptionError("Load failed")),
+            patch("voicepad.cli.record.load_model", side_effect=TranscriptionError("Load failed")),
         ):
-            result = runner.invoke(record_app, ["start"])
+            result = runner.invoke(record_app, ["start", "--duration", "0.5"])
         assert result.exit_code == 1
 
     def test_exits_on_recorder_start_failure(self, tmp_path: Path) -> None:
         mock_config = Config(recordings_path=tmp_path, markdown_path=tmp_path)
         mock_recorder = MagicMock()
-        mock_recorder.start.side_effect = AudioRecorderError("Device not found")
+        mock_recorder.start.side_effect = RuntimeError("Device not found")
         with (
             patch("voicepad.cli.record.get_config", return_value=mock_config),
             patch("voicepad.cli.record.model_downloaded", return_value=True),
-            patch("voicepad.cli.record.get_or_load_model", return_value=(MagicMock(), "cuda", "float16", False)),
-            patch("voicepad.cli.record.AudioRecorder", return_value=mock_recorder),
+            patch("voicepad.cli.record.load_model", return_value=MagicMock()),
+            patch("voicepad.cli.record._model_cache", {}),
+            patch("voicepad.cli.record.MicrophoneStream", return_value=mock_recorder),
         ):
-            result = runner.invoke(record_app, ["start"])
+            result = runner.invoke(record_app, ["start", "--duration", "0.5"])
         assert result.exit_code == 1
 
     def test_skips_transcription_with_no_transcribe_flag(self, tmp_path: Path) -> None:
         mock_config = Config(recordings_path=tmp_path, markdown_path=tmp_path)
         mock_recorder = MagicMock()
         mock_recorder.stop.return_value = np.zeros(16000, dtype=np.float32)  # 1s of audio
-        mock_recorder.make_wav_path.return_value = tmp_path / "test.wav"
+        mock_recorder.sample_rate = 16000
+        mock_processor = MagicMock()
+        mock_processor.process_array.return_value = np.zeros(16000, dtype=np.float32)
         with (
             patch("voicepad.cli.record.get_config", return_value=mock_config),
-            patch("voicepad.cli.record.AudioRecorder", return_value=mock_recorder),
+            patch("voicepad.cli.record.MicrophoneStream", return_value=mock_recorder),
+            patch("voicepad.cli.record.AudioPreProcessor", return_value=mock_processor),
             patch("voicepad.cli.record.time.sleep"),
         ):
             result = runner.invoke(record_app, ["start", "--no-transcribe", "--duration", "0.5"])
@@ -253,6 +257,9 @@ class TestStartRecording:
         mock_config = Config(recordings_path=tmp_path, markdown_path=tmp_path)
         mock_recorder = MagicMock()
         mock_recorder.stop.return_value = np.zeros(16000, dtype=np.float32)
+        mock_recorder.sample_rate = 16000
+        mock_processor = MagicMock()
+        mock_processor.process_array.return_value = np.zeros(16000, dtype=np.float32)
         mock_result = MagicMock()
         mock_result.text = "Test"
         mock_result.device = "cuda"
@@ -265,9 +272,11 @@ class TestStartRecording:
         with (
             patch("voicepad.cli.record.get_config", return_value=mock_config),
             patch("voicepad.cli.record.model_downloaded", return_value=True),
-            patch("voicepad.cli.record.get_or_load_model", return_value=(MagicMock(), "cuda", "float16", False)),
-            patch("voicepad.cli.record.AudioRecorder", return_value=mock_recorder),
-            patch("voicepad.cli.record.transcribe_buffer", return_value=mock_result),
+            patch("voicepad.cli.record.load_model", return_value=MagicMock()),
+            patch("voicepad.cli.record._model_cache", {}),
+            patch("voicepad.cli.record.MicrophoneStream", return_value=mock_recorder),
+            patch("voicepad.cli.record.AudioPreProcessor", return_value=mock_processor),
+            patch("voicepad.cli.record.transcribe", return_value=mock_result),
             patch("voicepad.cli.record.time.sleep"),
         ):
             result = runner.invoke(record_app, ["start", "--no-save", "--duration", "0.5"])
@@ -278,13 +287,17 @@ class TestStartRecording:
         mock_config = Config(recordings_path=tmp_path, markdown_path=tmp_path)
         mock_recorder = MagicMock()
         mock_recorder.stop.return_value = np.zeros(16000, dtype=np.float32)
-        mock_recorder.make_wav_path.return_value = tmp_path / "test.wav"
+        mock_recorder.sample_rate = 16000
+        mock_processor = MagicMock()
+        mock_processor.process_array.return_value = np.zeros(16000, dtype=np.float32)
         with (
             patch("voicepad.cli.record.get_config", return_value=mock_config),
             patch("voicepad.cli.record.model_downloaded", return_value=True),
-            patch("voicepad.cli.record.get_or_load_model", return_value=(MagicMock(), "cuda", "float16", False)),
-            patch("voicepad.cli.record.AudioRecorder", return_value=mock_recorder),
-            patch("voicepad.cli.record.transcribe_file", side_effect=AudioTooShortError("Too short")),
+            patch("voicepad.cli.record.load_model", return_value=MagicMock()),
+            patch("voicepad.cli.record._model_cache", {}),
+            patch("voicepad.cli.record.MicrophoneStream", return_value=mock_recorder),
+            patch("voicepad.cli.record.AudioPreProcessor", return_value=mock_processor),
+            patch("voicepad.cli.record.transcribe", side_effect=AudioTooShortError("Too short")),
             patch("voicepad.cli.record.time.sleep"),
         ):
             result = runner.invoke(record_app, ["start", "--duration", "0.5"])
@@ -295,31 +308,42 @@ class TestStartRecording:
         mock_config = Config(recordings_path=tmp_path, markdown_path=tmp_path)
         mock_recorder = MagicMock()
         mock_recorder.stop.return_value = np.zeros(16000, dtype=np.float32)
-        mock_recorder.make_wav_path.return_value = tmp_path / "test.wav"
-        (tmp_path / "test.wav").write_bytes(b"fake wav")
+        mock_recorder.sample_rate = 16000
+        mock_processor = MagicMock()
+        mock_processor.process_array.return_value = np.zeros(16000, dtype=np.float32)
         with (
             patch("voicepad.cli.record.get_config", return_value=mock_config),
             patch("voicepad.cli.record.model_downloaded", return_value=True),
-            patch("voicepad.cli.record.get_or_load_model", return_value=(MagicMock(), "cuda", "float16", False)),
-            patch("voicepad.cli.record.AudioRecorder", return_value=mock_recorder),
-            patch("voicepad.cli.record.transcribe_file", side_effect=TranscriptionError("Failed")),
+            patch("voicepad.cli.record.load_model", return_value=MagicMock()),
+            patch("voicepad.cli.record._model_cache", {}),
+            patch("voicepad.cli.record.MicrophoneStream", return_value=mock_recorder),
+            patch("voicepad.cli.record.AudioPreProcessor", return_value=mock_processor),
+            patch("voicepad.cli.record.transcribe", side_effect=TranscriptionError("Failed")),
             patch("voicepad.cli.record.time.sleep"),
         ):
             result = runner.invoke(record_app, ["start", "--duration", "0.5"])
         assert result.exit_code == 1
 
     def test_shows_fallback_warning_on_model_load(self, tmp_path: Path) -> None:
-        mock_config = Config(recordings_path=tmp_path, markdown_path=tmp_path)
+        mock_config = Config(
+            recordings_path=tmp_path,
+            markdown_path=tmp_path,
+            transcription_device="cuda",  # Request CUDA
+        )
+        mock_model = MagicMock()
+        # Simulate fallback: model cache shows it loaded on CPU despite requesting CUDA
+        mock_cache = {(mock_config.transcription_model, "cpu", "int8"): mock_model}
         with (
             patch("voicepad.cli.record.get_config", return_value=mock_config),
             patch("voicepad.cli.record.model_downloaded", return_value=True),
-            patch("voicepad.cli.record.get_or_load_model", return_value=(MagicMock(), "cpu", "int8", True)),
-            patch("voicepad.cli.record.AudioRecorder") as mock_recorder_cls,
+            patch("voicepad.cli.record.load_model", return_value=mock_model),
+            patch("voicepad.cli.record._model_cache", mock_cache),
+            patch("voicepad.cli.record.MicrophoneStream") as mock_recorder_cls,
         ):
             mock_recorder = MagicMock()
-            mock_recorder.start.side_effect = AudioRecorderError("Stop early")
+            mock_recorder.start.side_effect = RuntimeError("Stop early")
             mock_recorder_cls.return_value = mock_recorder
-            result = runner.invoke(record_app, ["start"])
+            result = runner.invoke(record_app, ["start", "--duration", "0.5"])
         assert "CUDA not available" in result.stdout
 
 

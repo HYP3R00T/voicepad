@@ -37,6 +37,7 @@ def populate_settings_form(
     user_fields = {
         "recordings_path": "Where your WAV recordings are saved",
         "markdown_path": "Where your transcription files are saved",
+        "vad_model_path": "Where VAD (Voice Activity Detection) model is stored",
         "transcription_model": "Whisper model to use for transcription",
         "input_device_index": "Microphone to record from",
         "theme": "UI color theme",
