@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import atexit
+import contextlib
 import logging
 import signal
 import sys
@@ -18,6 +19,7 @@ from textual.reactive import reactive
 from textual.widgets import (
     Button,
     Checkbox,
+    Label,
     Markdown,
     OptionList,
     Select,
@@ -115,6 +117,7 @@ class VoicePadApp(App[None]):
         Binding("o", "toggle_sort_order", "Sort", show=True),
         # Settings tab
         Binding("s", "save_settings", "Save", show=True),
+        Binding("p", "open_config_dir", "Open config dir", show=True),
         # Hidden utility
         Binding("r", "reload_model", "Reload model", show=False),
     ]
@@ -491,6 +494,35 @@ class VoicePadApp(App[None]):
     def action_save_settings(self) -> None:
         """Save settings via keyboard shortcut."""
         self.query_one("#settings-save-btn", VoiceButton).press()
+
+    def action_open_config_dir(self) -> None:
+        """Open the config directory in the system file explorer."""
+        import platform
+        import subprocess
+
+        from utilityhub_config import get_config_path
+
+        try:
+            config_path = get_config_path("voicepad", format="yaml")
+            config_dir = config_path.parent
+
+            # Ensure directory exists
+            config_dir.mkdir(parents=True, exist_ok=True)
+
+            # Open in file explorer based on OS
+            system = platform.system()
+            if system == "Windows":
+                subprocess.run(["explorer", str(config_dir)], check=False)
+            elif system == "Darwin":  # macOS
+                subprocess.run(["open", str(config_dir)], check=False)
+            else:  # Linux and others
+                subprocess.run(["xdg-open", str(config_dir)], check=False)
+
+        except Exception as e:
+            # Show error in status if available
+            with contextlib.suppress(Exception):
+                status = self.query_one("#settings-status", Label)
+                status.update(f"[red]\U000f0156  Failed to open directory: {e}[/]")
 
     def action_copy_transcription(self) -> None:
         self._history_handler.action_copy_transcription()

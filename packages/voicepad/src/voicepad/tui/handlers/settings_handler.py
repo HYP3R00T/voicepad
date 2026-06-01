@@ -56,6 +56,7 @@ class SettingsHandler:
 
             self.app.query_one("#setting-recordings_path", _Input).value = str(self.app.config.recordings_path)
             self.app.query_one("#setting-markdown_path", _Input).value = str(self.app.config.markdown_path)
+            self.app.query_one("#setting-vad_model_path", _Input).value = str(self.app.config.vad_model_path)
 
         with contextlib.suppress(Exception):
             # Sync hotkey picker from config
@@ -88,6 +89,7 @@ class SettingsHandler:
         user_fields = {
             "recordings_path": "Where your WAV recordings are saved",
             "markdown_path": "Where your transcription files are saved",
+            "vad_model_path": "Where VAD (Voice Activity Detection) model is stored",
             "transcription_model": "Whisper model to use for transcription",
             "input_device_index": "Microphone to record from",
         }
@@ -252,7 +254,13 @@ class SettingsHandler:
         """Read user-facing inputs, merge with existing config, write to voicepad.yaml."""
         from utilityhub_config import get_config_path, write_config
 
-        user_fields = ["recordings_path", "markdown_path", "transcription_model", "input_device_index"]
+        user_fields = [
+            "recordings_path",
+            "markdown_path",
+            "vad_model_path",
+            "transcription_model",
+            "input_device_index",
+        ]
 
         status = self.app.query_one("#settings-status", Label)
         errors: list[str] = []
@@ -297,7 +305,7 @@ class SettingsHandler:
         try:
             new_config = _Config(**raw)
 
-            for path_field in (new_config.recordings_path, new_config.markdown_path):
+            for path_field in (new_config.recordings_path, new_config.markdown_path, new_config.vad_model_path):
                 path_field.mkdir(parents=True, exist_ok=True)
 
             # Always write to the global config — never a project-local file
