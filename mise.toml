@@ -1,6 +1,5 @@
 [tools]
 git-cliff = "latest"
-markdownlint-cli2 = "latest"
 prek = "latest"
 python = "3.13"
 rumdl = "latest"
