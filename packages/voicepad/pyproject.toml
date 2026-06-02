@@ -33,7 +33,7 @@ classifiers = [
   "Typing :: Typed",
 ]
 dependencies = [
-  "voicepad-core>=0.1.8",
+  "voicepad-core>=0.2.0",
   "typer>=0.23.1",
   "rich>=13.0.0",
   "textual>=8.2.4",
