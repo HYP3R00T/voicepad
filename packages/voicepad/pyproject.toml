@@ -1,6 +1,6 @@
 [project]
 name = "voicepad"
-version = "0.1.10"
+version = "0.2.0"
 description = "Command-line interface for voice recording and GPU-accelerated transcription."
 readme = "README.md"
 authors = [{ name = "Rajesh Das", email = "rajesh@hyperoot.dev" }]

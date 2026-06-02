@@ -4086,7 +4086,7 @@ wheels = [
 
 [[package]]
 name = "voicepad"
-version = "0.1.10"
+version = "0.2.0"
 source = { editable = "packages/voicepad" }
 dependencies = [
     { name = "keyboard" },
