@@ -29,11 +29,15 @@ recording_prefix: recording
 transcription_model: turbo
 transcription_device: auto
 transcription_compute_type: auto
-global_hotkey: <ctrl>+<alt>+v
+global_hotkey: ctrl+shift+space
 language: null
 log_level: INFO
 logs_path: ~/.config/voicepad/logs
 ```
+
+!!! tip "Global Hotkey Format"
+    The `global_hotkey` setting uses natural hotkey strings like `ctrl+shift+space`, `alt+v`, or `f9`.
+    The hotkey works system-wide on Windows, allowing you to start/stop recording from any application.
 
 !!! note "Settings visibility"
     Not all settings are shown in the Settings tab interface. Advanced settings like `transcription_device`, `transcription_compute_type`, `language`, `log_level`, and `logs_path` can only be changed by editing the YAML file directly.
