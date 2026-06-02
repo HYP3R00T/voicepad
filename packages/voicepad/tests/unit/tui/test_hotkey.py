@@ -53,20 +53,21 @@ class TestGlobalHotkeyListener:
         assert listener._thread is not None
         assert listener._thread.daemon is True
 
-    def test_stop_calls_listener_stop(self) -> None:
-        listener = GlobalHotkeyListener(hotkey="<ctrl>+<alt>+v", on_start=MagicMock(), on_stop=MagicMock())
-        mock_pynput_listener = MagicMock()
-        listener._listener = mock_pynput_listener
-        listener.stop()
-        mock_pynput_listener.stop.assert_called_once()
+    def test_stop_calls_remove_hotkey(self) -> None:
+        listener = GlobalHotkeyListener(hotkey="ctrl+alt+v", on_start=MagicMock(), on_stop=MagicMock())
+        mock_keyboard = MagicMock()
+        with patch.dict("sys.modules", {"keyboard": mock_keyboard}):
+            listener.stop()
+            # Should attempt to remove the hotkey
+            mock_keyboard.remove_hotkey.assert_called_once_with("ctrl+alt+v")
 
     def test_stop_handles_exception_gracefully(self) -> None:
-        listener = GlobalHotkeyListener(hotkey="<ctrl>+<alt>+v", on_start=MagicMock(), on_stop=MagicMock())
-        mock_pynput_listener = MagicMock()
-        mock_pynput_listener.stop.side_effect = RuntimeError("Stop failed")
-        listener._listener = mock_pynput_listener
-        # Should not raise
-        listener.stop()
+        listener = GlobalHotkeyListener(hotkey="ctrl+alt+v", on_start=MagicMock(), on_stop=MagicMock())
+        mock_keyboard = MagicMock()
+        mock_keyboard.remove_hotkey.side_effect = RuntimeError("Remove failed")
+        with patch.dict("sys.modules", {"keyboard": mock_keyboard}):
+            # Should not raise
+            listener.stop()
 
     def test_run_returns_early_with_empty_hotkey(self) -> None:
         listener = GlobalHotkeyListener(hotkey="", on_start=MagicMock(), on_stop=MagicMock())
@@ -76,48 +77,34 @@ class TestGlobalHotkeyListener:
     def test_run_toggles_recording_state(self) -> None:
         on_start = MagicMock()
         on_stop = MagicMock()
-        listener = GlobalHotkeyListener(hotkey="<ctrl>+<alt>+v", on_start=on_start, on_stop=on_stop)
+        listener = GlobalHotkeyListener(hotkey="ctrl+alt+v", on_start=on_start, on_stop=on_stop)
 
-        mock_listener_instance = MagicMock()
-        on_press_callback = None
-        on_release_callback = None
-
-        def capture_callbacks(on_press=None, on_release=None):
-            nonlocal on_press_callback, on_release_callback
-            on_press_callback = on_press
-            on_release_callback = on_release
-            return mock_listener_instance
-
-        # Mock the keyboard module import
+        # Mock keyboard module
         mock_keyboard = MagicMock()
-        mock_keyboard.Listener = MagicMock(side_effect=capture_callbacks)
-        mock_keyboard.Key = MagicMock()
-        mock_keyboard.Key.ctrl_l = "ctrl_l"
-        mock_keyboard.Key.ctrl_r = "ctrl_r"
-        mock_keyboard.Key.alt_l = "alt_l"
-        mock_keyboard.Key.alt_r = "alt_r"
-        mock_keyboard.KeyCode = MagicMock()
-        mock_keyboard.KeyCode.from_char = MagicMock(return_value="v")
+        hotkey_callback = None
 
-        with patch.dict("sys.modules", {"pynput.keyboard": mock_keyboard}):
+        def capture_callback(hotkey, callback, suppress=False):
+            nonlocal hotkey_callback
+            hotkey_callback = callback
+
+        mock_keyboard.add_hotkey = MagicMock(side_effect=capture_callback)
+        mock_keyboard.wait = MagicMock()
+
+        with patch.dict("sys.modules", {"keyboard": mock_keyboard}):
             # Start the run in a thread
             thread = threading.Thread(target=listener._run, daemon=True)
             thread.start()
             time.sleep(0.1)  # Give thread time to set up
 
-            # Simulate pressing ctrl and alt
-            if on_press_callback:
-                on_press_callback("ctrl_l")
-                on_press_callback("alt_l")
-                # Simulate pressing v (should trigger start)
-                on_press_callback("v")
+            # Simulate hotkey press (should trigger start)
+            if hotkey_callback:
+                hotkey_callback()
                 time.sleep(0.05)
                 assert listener._recording is True
                 on_start.assert_called_once()
 
-                # Simulate releasing and pressing again (should trigger stop)
-                on_release_callback("v")
-                on_press_callback("v")
+                # Simulate second press (should trigger stop)
+                hotkey_callback()
                 time.sleep(0.05)
                 assert listener._recording is False
                 on_stop.assert_called_once()
@@ -125,174 +112,86 @@ class TestGlobalHotkeyListener:
     def test_run_handles_on_start_exception(self) -> None:
         on_start = MagicMock(side_effect=Exception("Start failed"))
         on_stop = MagicMock()
-        listener = GlobalHotkeyListener(hotkey="<ctrl>+<alt>+v", on_start=on_start, on_stop=on_stop)
-
-        mock_listener_instance = MagicMock()
-        on_press_callback = None
-
-        def capture_callbacks(on_press=None, on_release=None):
-            nonlocal on_press_callback
-            on_press_callback = on_press
-            return mock_listener_instance
+        listener = GlobalHotkeyListener(hotkey="ctrl+alt+v", on_start=on_start, on_stop=on_stop)
 
         mock_keyboard = MagicMock()
-        mock_keyboard.Listener = MagicMock(side_effect=capture_callbacks)
-        mock_keyboard.Key = MagicMock()
-        mock_keyboard.Key.ctrl_l = "ctrl_l"
-        mock_keyboard.Key.ctrl_r = "ctrl_r"
-        mock_keyboard.Key.alt_l = "alt_l"
-        mock_keyboard.Key.alt_r = "alt_r"
-        mock_keyboard.KeyCode = MagicMock()
-        mock_keyboard.KeyCode.from_char = MagicMock(return_value="v")
+        hotkey_callback = None
 
-        with patch.dict("sys.modules", {"pynput.keyboard": mock_keyboard}):
+        def capture_callback(hotkey, callback, suppress=False):
+            nonlocal hotkey_callback
+            hotkey_callback = callback
+
+        mock_keyboard.add_hotkey = MagicMock(side_effect=capture_callback)
+        mock_keyboard.wait = MagicMock()
+
+        with patch.dict("sys.modules", {"keyboard": mock_keyboard}):
             thread = threading.Thread(target=listener._run, daemon=True)
             thread.start()
             time.sleep(0.1)
 
             # Should not raise even though on_start raises
-            if on_press_callback:
-                on_press_callback("ctrl_l")
-                on_press_callback("alt_l")
-                on_press_callback("v")
+            if hotkey_callback:
+                hotkey_callback()
                 time.sleep(0.05)
                 assert listener._recording is True  # State still changes
 
     def test_run_handles_on_stop_exception(self) -> None:
         on_start = MagicMock()
         on_stop = MagicMock(side_effect=Exception("Stop failed"))
-        listener = GlobalHotkeyListener(hotkey="<ctrl>+<alt>+v", on_start=on_start, on_stop=on_stop)
-
-        mock_listener_instance = MagicMock()
-        on_press_callback = None
-        on_release_callback = None
-
-        def capture_callbacks(on_press=None, on_release=None):
-            nonlocal on_press_callback, on_release_callback
-            on_press_callback = on_press
-            on_release_callback = on_release
-            return mock_listener_instance
+        listener = GlobalHotkeyListener(hotkey="ctrl+alt+v", on_start=on_start, on_stop=on_stop)
 
         mock_keyboard = MagicMock()
-        mock_keyboard.Listener = MagicMock(side_effect=capture_callbacks)
-        mock_keyboard.Key = MagicMock()
-        mock_keyboard.Key.ctrl_l = "ctrl_l"
-        mock_keyboard.Key.ctrl_r = "ctrl_r"
-        mock_keyboard.Key.alt_l = "alt_l"
-        mock_keyboard.Key.alt_r = "alt_r"
-        mock_keyboard.KeyCode = MagicMock()
-        mock_keyboard.KeyCode.from_char = MagicMock(return_value="v")
+        hotkey_callback = None
 
-        with patch.dict("sys.modules", {"pynput.keyboard": mock_keyboard}):
+        def capture_callback(hotkey, callback, suppress=False):
+            nonlocal hotkey_callback
+            hotkey_callback = callback
+
+        mock_keyboard.add_hotkey = MagicMock(side_effect=capture_callback)
+        mock_keyboard.wait = MagicMock()
+
+        with patch.dict("sys.modules", {"keyboard": mock_keyboard}):
             thread = threading.Thread(target=listener._run, daemon=True)
             thread.start()
             time.sleep(0.1)
 
-            if on_press_callback:
+            if hotkey_callback:
                 # First press to start
-                on_press_callback("ctrl_l")
-                on_press_callback("alt_l")
-                on_press_callback("v")
+                hotkey_callback()
                 time.sleep(0.05)
                 # Second press to stop (should handle exception)
-                on_release_callback("v")
-                on_press_callback("v")
+                hotkey_callback()
                 time.sleep(0.05)
                 assert listener._recording is False
 
-    def test_run_handles_pynput_import_error(self) -> None:
+    def test_run_handles_keyboard_import_error(self) -> None:
         listener = GlobalHotkeyListener(hotkey="<ctrl>+<alt>+v", on_start=MagicMock(), on_stop=MagicMock())
         # Mock import to raise ImportError
-        with patch("builtins.__import__", side_effect=ImportError("pynput not installed")):
+        with patch("builtins.__import__", side_effect=ImportError("keyboard not installed")):
             # Should not raise
             listener._run()
 
     def test_run_handles_listener_exception(self) -> None:
         listener = GlobalHotkeyListener(hotkey="<ctrl>+<alt>+v", on_start=MagicMock(), on_stop=MagicMock())
         mock_keyboard = MagicMock()
-        mock_keyboard.Listener = MagicMock(side_effect=Exception("Listener registration failed"))
-        with patch.dict("sys.modules", {"pynput.keyboard": mock_keyboard}):
+        mock_keyboard.add_hotkey = MagicMock(side_effect=Exception("Hotkey registration failed"))
+        with patch.dict("sys.modules", {"keyboard": mock_keyboard}):
             # Should not raise
             listener._run()
 
-    def test_timeout_prevents_delayed_trigger(self) -> None:
-        """Test that hotkey doesn't trigger if key is pressed too long after modifier."""
+    def test_hotkey_callback_uses_lock(self) -> None:
+        """Test that the hotkey callback uses thread lock for safety."""
         on_start = MagicMock()
         on_stop = MagicMock()
-        listener = GlobalHotkeyListener(hotkey="<ctrl>+<alt>+v", on_start=on_start, on_stop=on_stop)
+        listener = GlobalHotkeyListener(hotkey="ctrl+alt+v", on_start=on_start, on_stop=on_stop)
 
-        mock_listener_instance = MagicMock()
-        on_press_callback = None
+        # Replace the lock with a mock to verify it's being used
+        mock_lock = MagicMock()
+        listener._lock = mock_lock
 
-        def capture_callbacks(on_press=None, on_release=None):
-            nonlocal on_press_callback
-            on_press_callback = on_press
-            return mock_listener_instance
+        # Call the hotkey callback
+        listener._on_hotkey()
 
-        mock_keyboard = MagicMock()
-        mock_keyboard.Listener = MagicMock(side_effect=capture_callbacks)
-        mock_keyboard.Key = MagicMock()
-        mock_keyboard.Key.ctrl_l = "ctrl_l"
-        mock_keyboard.Key.ctrl_r = "ctrl_r"
-        mock_keyboard.Key.alt_l = "alt_l"
-        mock_keyboard.Key.alt_r = "alt_r"
-        mock_keyboard.KeyCode = MagicMock()
-        mock_keyboard.KeyCode.from_char = MagicMock(return_value="v")
-
-        with patch.dict("sys.modules", {"pynput.keyboard": mock_keyboard}):
-            thread = threading.Thread(target=listener._run, daemon=True)
-            thread.start()
-            time.sleep(0.1)
-
-            if on_press_callback:
-                # Press modifiers
-                on_press_callback("ctrl_l")
-                on_press_callback("alt_l")
-                # Wait longer than timeout (0.5s)
-                time.sleep(0.6)
-                # Press key - should NOT trigger because of timeout
-                on_press_callback("v")
-                time.sleep(0.05)
-                # Recording should not have started
-                assert listener._recording is False
-                on_start.assert_not_called()
-
-    def test_simultaneous_press_triggers_hotkey(self) -> None:
-        """Test that hotkey triggers when modifiers and key are pressed together."""
-        on_start = MagicMock()
-        on_stop = MagicMock()
-        listener = GlobalHotkeyListener(hotkey="<ctrl>+<alt>+v", on_start=on_start, on_stop=on_stop)
-
-        mock_listener_instance = MagicMock()
-        on_press_callback = None
-
-        def capture_callbacks(on_press=None, on_release=None):
-            nonlocal on_press_callback
-            on_press_callback = on_press
-            return mock_listener_instance
-
-        mock_keyboard = MagicMock()
-        mock_keyboard.Listener = MagicMock(side_effect=capture_callbacks)
-        mock_keyboard.Key = MagicMock()
-        mock_keyboard.Key.ctrl_l = "ctrl_l"
-        mock_keyboard.Key.ctrl_r = "ctrl_r"
-        mock_keyboard.Key.alt_l = "alt_l"
-        mock_keyboard.Key.alt_r = "alt_r"
-        mock_keyboard.KeyCode = MagicMock()
-        mock_keyboard.KeyCode.from_char = MagicMock(return_value="v")
-
-        with patch.dict("sys.modules", {"pynput.keyboard": mock_keyboard}):
-            thread = threading.Thread(target=listener._run, daemon=True)
-            thread.start()
-            time.sleep(0.1)
-
-            if on_press_callback:
-                # Press modifiers and key quickly (within timeout)
-                on_press_callback("ctrl_l")
-                on_press_callback("alt_l")
-                time.sleep(0.05)  # Small delay, well within 0.5s timeout
-                on_press_callback("v")
-                time.sleep(0.05)
-                # Recording should have started
-                assert listener._recording is True
-                on_start.assert_called_once()
+        # Verify the lock's __enter__ and __exit__ were called (context manager usage)
+        mock_lock.__enter__.assert_called_once()
+        mock_lock.__exit__.assert_called_once()
