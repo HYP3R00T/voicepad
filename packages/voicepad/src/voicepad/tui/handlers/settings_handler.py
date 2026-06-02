@@ -12,6 +12,7 @@ from voicepad_core.config import Config as _Config
 
 from voicepad.tui.components.checkbox import VoiceCheckbox
 from voicepad.tui.utils.hotkey_utils import HOTKEY_KEYS as _HOTKEY_KEYS
+from voicepad.tui.utils.hotkey_utils import build_hotkey_display_str as _build_hotkey_display_str
 from voicepad.tui.utils.hotkey_utils import build_hotkey_str as _build_hotkey_str
 from voicepad.tui.utils.hotkey_utils import parse_hotkey_str as _parse_hotkey_str
 
@@ -212,7 +213,7 @@ class SettingsHandler:
         )
         hotkey_row.mount(key_select)
 
-        preview = _build_hotkey_str(mods, current_key)
+        preview = _build_hotkey_display_str(mods, current_key)
         hotkey_row.mount(
             Label(
                 f"[dim]{preview or 'disabled'}[/]",
@@ -238,7 +239,16 @@ class SettingsHandler:
     def _update_hotkey_preview(self) -> None:
         """Refresh the preview label from current picker state."""
         with contextlib.suppress(Exception):
-            preview = self.get_hotkey_from_picker()
+            mods = [
+                mod_id
+                for mod_id in ("ctrl", "alt", "shift", "cmd")
+                if self.app.query_one(f"#hotkey-mod-{mod_id}", VoiceCheckbox).value
+            ]
+            key = "v"
+            sel = self.app.query_one("#hotkey-key-select", Select)
+            if sel.value is not Select.BLANK:
+                key = str(sel.value)
+            preview = _build_hotkey_display_str(mods, key)
             self.app.query_one("#hotkey-preview", Label).update(f"[dim]{preview or 'disabled'}[/]")
 
     @on(VoiceCheckbox.Changed, ".hotkey-checkbox")

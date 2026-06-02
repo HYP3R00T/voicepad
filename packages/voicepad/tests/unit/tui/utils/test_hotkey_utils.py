@@ -17,5 +17,5 @@ class TestHotkeyUtils:
         assert build_hotkey_str([], "") == ""
 
     def test_build_wraps_multi_char_key(self) -> None:
-        """Multi-character keys are wrapped in angle brackets when built."""
-        assert build_hotkey_str(["ctrl"], "space") == "<ctrl>+<space>"
+        """Multi-character keys are built in keyboard module format (no angle brackets)."""
+        assert build_hotkey_str(["ctrl"], "space") == "ctrl+space"

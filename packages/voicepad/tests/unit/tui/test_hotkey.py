@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
+from typing import cast
 from unittest.mock import MagicMock, patch
 
 from voicepad.tui.hotkey import GlobalHotkeyListener, _parse_hotkey
@@ -187,7 +188,7 @@ class TestGlobalHotkeyListener:
 
         # Replace the lock with a mock to verify it's being used
         mock_lock = MagicMock()
-        listener._lock = mock_lock
+        listener._lock = cast(threading.Lock, mock_lock)
 
         # Call the hotkey callback
         listener._on_hotkey()

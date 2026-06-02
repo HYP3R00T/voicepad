@@ -34,21 +34,33 @@ HOTKEY_KEYS: list[str] = [
     "right",
 ]
 
-MOD_TO_PYNPUT: dict[str, str] = {
-    "ctrl": "<ctrl>",
-    "alt": "<alt>",
-    "shift": "<shift>",
-    "cmd": "<cmd>",  # Windows key on Windows, Command key on macOS
+# Mapping for keyboard module format (no angle brackets)
+MOD_TO_KEYBOARD: dict[str, str] = {
+    "ctrl": "ctrl",
+    "alt": "alt",
+    "shift": "shift",
+    "cmd": "win",  # Windows key on Windows, Command key on macOS
+}
+
+# Mapping for display purposes
+MOD_TO_DISPLAY: dict[str, str] = {
+    "ctrl": "ctrl",
+    "alt": "alt",
+    "shift": "shift",
+    "cmd": "win",  # Display as "win" for Windows key
 }
 
 
 def parse_hotkey_str(hotkey: str) -> tuple[list[str], str]:
-    """Parse '<ctrl>+<alt>+v' → (['ctrl', 'alt'], 'v')."""
+    """Parse 'ctrl+alt+v' → (['ctrl', 'alt'], 'v').
+
+    Handles both old format with angle brackets and new format without.
+    """
     mods: list[str] = []
     key = "v"
     for part in hotkey.lower().split("+"):
-        part = part.strip().strip("<>")
-        if part in MOD_TO_PYNPUT:
+        part = part.strip().strip("<>")  # Strip angle brackets for backward compatibility
+        if part in MOD_TO_KEYBOARD:
             mods.append(part)
         elif part:
             key = part
@@ -56,10 +68,27 @@ def parse_hotkey_str(hotkey: str) -> tuple[list[str], str]:
 
 
 def build_hotkey_str(mods: list[str], key: str) -> str:
-    """Build '<ctrl>+<alt>+v' from (['ctrl', 'alt'], 'v')."""
+    """Build 'ctrl+alt+v' from (['ctrl', 'alt'], 'v') for keyboard module.
+
+    The keyboard module expects lowercase format without angle brackets:
+    - "ctrl+shift+space" (correct)
+    - "<ctrl>+<shift>+<space>" (incorrect)
+    """
     if not key:
         return ""
-    parts = [MOD_TO_PYNPUT[m] for m in mods if m in MOD_TO_PYNPUT]
-    key_part = key if len(key) == 1 else f"<{key}>"
-    parts.append(key_part)
+    parts = [MOD_TO_KEYBOARD[m] for m in mods if m in MOD_TO_KEYBOARD]
+    parts.append(key)
+    return "+".join(parts)
+
+
+def build_hotkey_display_str(mods: list[str], key: str) -> str:
+    """Build 'ctrl+alt+v' from (['ctrl', 'alt'], 'v') for display purposes.
+
+    Uses 'win' instead of 'cmd' for better clarity on Windows systems.
+    Same format as build_hotkey_str since keyboard module uses simple format.
+    """
+    if not key:
+        return ""
+    parts = [MOD_TO_DISPLAY[m] for m in mods if m in MOD_TO_DISPLAY]
+    parts.append(key)
     return "+".join(parts)
