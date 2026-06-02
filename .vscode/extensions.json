@@ -1,0 +1,18 @@
+{
+  "recommendations": [
+    "astral-sh.ty",
+    "charliermarsh.ruff",
+    "christian-kohler.path-intellisense",
+    "editorconfig.editorconfig",
+    "github.vscode-github-actions",
+    "github.vscode-pull-request-github",
+    "hverlin.mise-vscode",
+    "hyperoot.settings-organizer",
+    "ms-python.debugpy",
+    "ms-python.python",
+    "ms-python.vscode-pylance",
+    "redhat.vscode-yaml",
+    "rvben.rumdl",
+    "tamasfe.even-better-toml",
+  ]
+}
