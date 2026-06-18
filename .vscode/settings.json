@@ -3,6 +3,9 @@
   "editor.formatOnSave": true,
   "editor.insertSpaces": true,
   "[markdown]": {
+    "editor.codeActionsOnSave": {
+      "source.fixAll.rumdl": "always"
+    },
     "editor.defaultFormatter": "rvben.rumdl"
   },
   "[python]": {
@@ -23,10 +26,7 @@
       "strings": true
     }
   },
-  "chat.useAgentsMdFile": true,
   "python.languageServer": "None",
-  "ruff.lint.enable": true,
-  "ruff.nativeServer": true,
   "search.exclude": {
     "**/.venv": true
   }
