@@ -41,6 +41,12 @@ def _get_available_models() -> tuple[str, ...]:
 
 VALID_TRANSCRIPTION_MODELS: tuple[str, ...] = _get_available_models()
 
+DEFAULT_INITIAL_PROMPT = "Hello. This is a transcription with proper punctuation, capitalization, and grammar."
+DEFAULT_VAD_MODEL_FILENAME = "silero_vad_v6.onnx"
+DEFAULT_VAD_MODEL_URL = (
+    "https://raw.githubusercontent.com/SYSTRAN/faster-whisper/master/faster_whisper/assets/silero_vad_v6.onnx"
+)
+
 
 class Config(BaseModel):
     """Voicepad configuration with hierarchical loading.
@@ -146,6 +152,24 @@ class Config(BaseModel):
         ),
     )
 
+    beam_size: int = Field(
+        default=1,
+        description=(
+            "Beam search width for Whisper decoder. "
+            "1 = greedy decoding (fastest, minimal accuracy loss for clean speech). "
+            "5 = full beam search (slower, marginally better for noisy/ambiguous audio)."
+        ),
+    )
+
+    transcription_vad_filter: bool = Field(
+        default=False,
+        description=(
+            "Enable Whisper's built-in VAD filter during inference. "
+            "Redundant when using streaming mode (which already runs VAD for chunk splitting). "
+            "Useful for single-shot file transcription with no prior VAD."
+        ),
+    )
+
     silence_threshold_ms: int = Field(
         default=1000,
         description=(
@@ -189,6 +213,106 @@ class Config(BaseModel):
             "Enable two-pass LocalAgreement verification for file retranscription. "
             "No latency impact — user is already waiting for full-file processing."
         ),
+    )
+
+    initial_prompt: str = Field(
+        default=DEFAULT_INITIAL_PROMPT,
+        description="Default Whisper initial prompt for non-distil models.",
+    )
+    no_speech_threshold: float = Field(
+        default=0.6,
+        description="Segments above this no-speech probability are discarded.",
+    )
+    hallucination_silence_threshold: float = Field(
+        default=2.0,
+        description="Silence threshold passed to faster-whisper hallucination suppression.",
+    )
+    hallucination_max_repetitions: int = Field(
+        default=3,
+        description="Maximum consecutive repeated tokens allowed before text cleanup trims extras.",
+    )
+    min_audio_duration_s: float = Field(
+        default=0.5,
+        description="Minimum audio duration required before transcription runs.",
+    )
+    trim_trailing_silence_rms_threshold: float = Field(
+        default=0.01,
+        description="RMS threshold used when trimming trailing silence before inference.",
+    )
+    trim_trailing_silence_frame_ms: int = Field(
+        default=20,
+        description="Frame size in milliseconds for trailing-silence trimming.",
+    )
+
+    stream_poll_interval_s: float = Field(
+        default=0.3,
+        description="How often the streaming monitor thread polls the recorder buffer.",
+    )
+    stream_context_chars: int = Field(
+        default=200,
+        description="How many trailing characters from the previous chunk are carried into the next prompt.",
+    )
+    dedup_prev_tail_words: int = Field(
+        default=50,
+        description="How many words from the previous chunk are used for overlap deduplication.",
+    )
+    dedup_full_duplicate_threshold: float = Field(
+        default=0.8,
+        description="Similarity threshold above which overlap is treated as a full duplicate.",
+    )
+    dedup_min_overlap_words_for_partial: int = Field(
+        default=3,
+        description="Minimum overlap words required before partial deduplication runs.",
+    )
+    dedup_partial_lead_words: int = Field(
+        default=5,
+        description="How many leading overlap words are checked for partial deduplication.",
+    )
+
+    vad_threshold: float = Field(
+        default=0.5,
+        description="Speech probability threshold for Silero VAD.",
+    )
+    vad_min_speech_duration_ms: int = Field(
+        default=250,
+        description="Minimum duration for a VAD speech region to be kept.",
+    )
+    vad_speech_pad_ms: int = Field(
+        default=30,
+        description="Padding added to both sides of each VAD speech region.",
+    )
+    vad_model_filename: str = Field(
+        default=DEFAULT_VAD_MODEL_FILENAME,
+        description="Filename used for the downloaded Silero VAD model.",
+    )
+    vad_model_url: str = Field(
+        default=DEFAULT_VAD_MODEL_URL,
+        description="Download URL for the Silero VAD ONNX model.",
+    )
+    vad_download_chunk_size: int = Field(
+        default=8192,
+        description="Chunk size in bytes used while downloading the VAD model.",
+    )
+
+    model_warmup_enabled: bool = Field(
+        default=True,
+        description="Run a short warm-up inference after loading a model.",
+    )
+    model_warmup_duration_s: float = Field(
+        default=0.5,
+        description="Duration of the silent warm-up inference buffer.",
+    )
+    model_warmup_language: str = Field(
+        default="en",
+        description="Language used for model warm-up inference.",
+    )
+    model_warmup_beam_size: int = Field(
+        default=1,
+        description="Beam size used during model warm-up inference.",
+    )
+    model_warmup_vad_filter: bool = Field(
+        default=False,
+        description="Whether model warm-up should enable Whisper VAD filtering.",
     )
 
     @field_validator(

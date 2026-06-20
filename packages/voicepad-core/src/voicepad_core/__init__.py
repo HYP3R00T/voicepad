@@ -124,11 +124,12 @@ from .vad import ensure_model_exists as ensure_vad_model
 
 def transcribe_file(
     wav_path: str | Path,
-    model_name: str = DEFAULT_MODEL,
-    device: str = DEVICE,
-    compute_type: str = COMPUTE_TYPE,
-    language: str = LANGUAGE,
-    local_agreement: bool = False,
+    model_name: str | None = None,
+    device: str | None = None,
+    compute_type: str | None = None,
+    language: str | None = None,
+    local_agreement: bool | None = None,
+    config: Config | None = None,
 ) -> TranscriptionResult:
     """Transcribe a WAV file using the new architecture.
 
@@ -153,6 +154,13 @@ def transcribe_file(
     """
     from pathlib import Path
 
+    resolved_config = config or get_config()
+    model_name = model_name if model_name is not None else resolved_config.transcription_model
+    device = device if device is not None else resolved_config.transcription_device
+    compute_type = compute_type if compute_type is not None else resolved_config.transcription_compute_type
+    language = language if language is not None else resolved_config.language
+    local_agreement = local_agreement if local_agreement is not None else resolved_config.local_agreement_file
+
     wav_path = Path(wav_path)
     if not wav_path.exists():
         raise FileNotFoundError(f"WAV file not found: {wav_path}")
@@ -172,6 +180,7 @@ def transcribe_file(
         device=device,
         compute_type=compute_type,
         language=language,
+        config=resolved_config,
     )
 
     # 4. Apply LocalAgreement if enabled

@@ -18,15 +18,7 @@ import time
 import numpy as np
 
 from .constants import (
-    BEAM_SIZE,
-    COMPUTE_TYPE,
-    DEFAULT_MODEL,
-    DEVICE,
     DISTIL_MODELS,
-    HALLUCINATION_SILENCE_THRESHOLD,
-    INITIAL_PROMPT,
-    LANGUAGE,
-    MIN_AUDIO_DURATION_S,
     NO_SPEECH_THRESHOLD,
     SAMPLE_RATE,
 )
@@ -39,6 +31,7 @@ from .model_manager import (
     set_model_manager_session_logger,
 )
 from .types import Segment, TranscriptionResult, WordTimestamp
+from ..config import Config, get_config
 
 # Post-processing is imported here so the engine applies the full pipeline.
 # _trim_trailing_silence lives in this module because it is a pre-inference
@@ -72,12 +65,15 @@ def set_session_logger(session_logger: logging.Logger | None) -> None:
 
 def transcribe(
     audio: np.ndarray,
-    model_name: str = DEFAULT_MODEL,
-    device: str = DEVICE,
-    compute_type: str = COMPUTE_TYPE,
+    model_name: str | None = None,
+    device: str | None = None,
+    compute_type: str | None = None,
     word_timestamps: bool = False,
-    language: str = LANGUAGE,
+    language: str | None = None,
     initial_prompt: str | None = None,
+    beam_size: int | None = None,
+    vad_filter: bool | None = None,
+    config: Config | None = None,
 ) -> TranscriptionResult:
     """Transcribe a pre-chunked audio buffer to text.
 
@@ -94,6 +90,9 @@ def transcribe(
         language:        BCP-47 language code. Defaults to 'en'.
                          NOTE: English is the primary supported language.
                          Non-English results may have reduced accuracy.
+        beam_size:       Beam search width. 1 = greedy (fastest).
+        vad_filter:      Enable Whisper's built-in VAD filter. Redundant in
+                         streaming mode where VAD already runs for chunk splitting.
 
     Returns:
         TranscriptionResult with text, segments, timing, and metadata.
@@ -102,6 +101,14 @@ def transcribe(
         AudioTooShortError: If audio is below MIN_AUDIO_DURATION_S.
         TranscriptionError: If transcription fails on all devices.
     """
+    resolved_config = config or get_config()
+    model_name = model_name if model_name is not None else resolved_config.transcription_model
+    device = device if device is not None else resolved_config.transcription_device
+    compute_type = compute_type if compute_type is not None else resolved_config.transcription_compute_type
+    language = language if language is not None else resolved_config.language
+    beam_size = beam_size if beam_size is not None else resolved_config.beam_size
+    vad_filter = vad_filter if vad_filter is not None else resolved_config.transcription_vad_filter
+
     call_start = time.perf_counter()
     slog = _session_logger  # Use session logger if available
 
@@ -128,18 +135,27 @@ def transcribe(
     if slog:
         slog.debug(f"Audio shape before trim: {audio.shape}")
 
-    audio = _trim_trailing_silence(audio)
+    audio = _trim_trailing_silence(
+        audio,
+        rms_threshold=resolved_config.trim_trailing_silence_rms_threshold,
+        frame_ms=resolved_config.trim_trailing_silence_frame_ms,
+    )
 
     if slog:
         slog.debug(f"Audio shape after trim: {audio.shape}")
 
     duration_s = len(audio) / SAMPLE_RATE
 
-    if slog:
-        slog.info(f"Audio duration: {duration_s:.2f}s (min={MIN_AUDIO_DURATION_S}s)")
+    min_audio_duration_s = resolved_config.min_audio_duration_s
 
-    if duration_s < MIN_AUDIO_DURATION_S:
-        msg = f"Audio is {duration_s:.2f}s — below minimum {MIN_AUDIO_DURATION_S}s. Speak for at least 0.5 seconds."
+    if slog:
+        slog.info(f"Audio duration: {duration_s:.2f}s (min={min_audio_duration_s}s)")
+
+    if duration_s < min_audio_duration_s:
+        msg = (
+            f"Audio is {duration_s:.2f}s — below minimum {min_audio_duration_s}s. "
+            f"Speak for at least {min_audio_duration_s:.1f} seconds."
+        )
         if slog:
             slog.error(msg)
         raise AudioTooShortError(msg)
@@ -159,7 +175,8 @@ def transcribe(
 
     # --- Build prompt (distil models don't support initial_prompt) ---
     is_distil = model_name in DISTIL_MODELS
-    prompt = None if is_distil else (initial_prompt if initial_prompt is not None else INITIAL_PROMPT)
+    default_prompt = resolved_config.initial_prompt if initial_prompt is None else initial_prompt
+    prompt = None if is_distil else default_prompt
 
     if slog:
         slog.debug(f"Using prompt: {prompt if prompt else '(none - distil model)'}")
@@ -178,11 +195,10 @@ def transcribe(
         segments_raw, info = model.transcribe(
             audio,
             language=language,
-            beam_size=BEAM_SIZE,
-            vad_filter=True,
-            vad_parameters=_vad_parameters(),
-            hallucination_silence_threshold=HALLUCINATION_SILENCE_THRESHOLD,
-            no_speech_threshold=NO_SPEECH_THRESHOLD,
+            beam_size=beam_size,
+            vad_filter=vad_filter,
+            hallucination_silence_threshold=resolved_config.hallucination_silence_threshold,
+            no_speech_threshold=resolved_config.no_speech_threshold,
             initial_prompt=prompt,
             condition_on_previous_text=False,
             word_timestamps=word_timestamps,
@@ -192,7 +208,12 @@ def transcribe(
         if slog:
             slog.info(f"Inference completed in {inference_time:.0f}ms")
 
-        segments = _build_segments(segments_raw, duration_s, word_timestamps)
+        segments = _build_segments(
+            segments_raw,
+            duration_s,
+            word_timestamps,
+            no_speech_threshold=resolved_config.no_speech_threshold,
+        )
 
         if slog:
             slog.info(f"Built {len(segments)} segments")
@@ -223,11 +244,10 @@ def transcribe(
             segments_raw, info = cpu_model.transcribe(
                 audio,
                 language=language,
-                beam_size=BEAM_SIZE,
-                vad_filter=True,
-                vad_parameters=_vad_parameters(),
-                hallucination_silence_threshold=HALLUCINATION_SILENCE_THRESHOLD,
-                no_speech_threshold=NO_SPEECH_THRESHOLD,
+                beam_size=beam_size,
+                vad_filter=vad_filter,
+                hallucination_silence_threshold=resolved_config.hallucination_silence_threshold,
+                no_speech_threshold=resolved_config.no_speech_threshold,
                 initial_prompt=prompt,
                 condition_on_previous_text=False,
                 word_timestamps=word_timestamps,
@@ -237,7 +257,12 @@ def transcribe(
             if slog:
                 slog.info(f"CPU inference completed in {inference_time:.0f}ms")
 
-            segments = _build_segments(segments_raw, duration_s, word_timestamps)
+            segments = _build_segments(
+                segments_raw,
+                duration_s,
+                word_timestamps,
+                no_speech_threshold=resolved_config.no_speech_threshold,
+            )
 
             if slog:
                 slog.info(f"Built {len(segments)} segments (CPU fallback)")
@@ -263,7 +288,7 @@ def transcribe(
     if slog:
         slog.debug(f"Raw text length: {len(text)} characters")
 
-    text = remove_hallucinations(text)
+    text = remove_hallucinations(text, max_repetitions=resolved_config.hallucination_max_repetitions)
     text = normalize(text)
 
     if slog:
@@ -310,6 +335,7 @@ def _build_segments(
     segments_iter,
     duration_s: float,
     word_timestamps: bool,
+    no_speech_threshold: float = NO_SPEECH_THRESHOLD,
 ) -> list[Segment]:
     """Materialise the lazy segments iterator and filter bad segments.
 
@@ -329,7 +355,7 @@ def _build_segments(
             continue
 
         # Drop segments where Whisper is almost certain there's no speech
-        if s.no_speech_prob > NO_SPEECH_THRESHOLD:
+        if s.no_speech_prob > no_speech_threshold:
             continue
 
         words: list[WordTimestamp] = []

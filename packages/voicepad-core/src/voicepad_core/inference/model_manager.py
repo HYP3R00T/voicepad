@@ -30,6 +30,7 @@ from .constants import (
 )
 from .download import ensure_model_downloaded
 from .exceptions import TranscriptionError
+from ..config import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -261,12 +262,20 @@ def _warmup_model(model: WhisperModel, slog: logging.Logger | None) -> None:
         model: The freshly loaded WhisperModel instance.
         slog:  Optional session logger.
     """
+    config = get_config()
+    if not config.model_warmup_enabled:
+        return
+
     try:
         warmup_start = time.perf_counter()
-        # 0.5s of silence at 16kHz — just long enough to pass MIN_AUDIO_DURATION_S
-        dummy_audio = np.zeros(8000, dtype=np.float32)
-        # Consume the lazy generator to actually run inference
-        segs, _ = model.transcribe(dummy_audio, language="en", beam_size=1, vad_filter=False)
+        warmup_samples = max(1, int(config.model_warmup_duration_s * 16_000))
+        dummy_audio = np.zeros(warmup_samples, dtype=np.float32)
+        segs, _ = model.transcribe(
+            dummy_audio,
+            language=config.model_warmup_language,
+            beam_size=config.model_warmup_beam_size,
+            vad_filter=config.model_warmup_vad_filter,
+        )
         list(segs)
         warmup_ms = (time.perf_counter() - warmup_start) * 1000
         msg = f"Model warm-up complete in {warmup_ms:.0f}ms"

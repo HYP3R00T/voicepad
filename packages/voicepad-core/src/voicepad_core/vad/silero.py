@@ -9,6 +9,7 @@ import onnxruntime as ort
 
 from .base import SpeechSegment, VADBase
 from .silero_download import ensure_model_exists
+from ..config import Config, get_config
 
 # Silero VAD requires audio at exactly 16kHz.
 _REQUIRED_SAMPLE_RATE = 16_000
@@ -53,11 +54,12 @@ class SileroVAD(VADBase):
 
     def __init__(
         self,
-        threshold: float = 0.5,
-        min_speech_duration_ms: int = 250,
-        min_silence_duration_ms: int = 100,
-        speech_pad_ms: int = 30,
+        threshold: float | None = None,
+        min_speech_duration_ms: int | None = None,
+        min_silence_duration_ms: int | None = None,
+        speech_pad_ms: int | None = None,
         vad_model_dir: Path | None = None,
+        config: Config | None = None,
     ) -> None:
         """
         Args:
@@ -82,6 +84,16 @@ class SileroVAD(VADBase):
                 Directory where VAD model is stored. If None, uses
                 config default (~/.config/voicepad/models/vad).
         """
+        self._config = config or get_config()
+        threshold = threshold if threshold is not None else self._config.vad_threshold
+        min_speech_duration_ms = (
+            min_speech_duration_ms if min_speech_duration_ms is not None else self._config.vad_min_speech_duration_ms
+        )
+        min_silence_duration_ms = (
+            min_silence_duration_ms if min_silence_duration_ms is not None else self._config.silence_threshold_ms
+        )
+        speech_pad_ms = speech_pad_ms if speech_pad_ms is not None else self._config.vad_speech_pad_ms
+
         self._threshold = threshold
         self._min_speech_samples = int(min_speech_duration_ms * _REQUIRED_SAMPLE_RATE / 1000)
         self._min_silence_samples = int(min_silence_duration_ms * _REQUIRED_SAMPLE_RATE / 1000)
@@ -280,7 +292,7 @@ class SileroVAD(VADBase):
         Raises:
             RuntimeError: If download fails or ONNX session cannot load.
         """
-        model_path = ensure_model_exists(vad_model_dir=self._vad_model_dir, verbose=True)
+        model_path = ensure_model_exists(vad_model_dir=self._vad_model_dir, verbose=True, config=self._config)
 
         session_options = ort.SessionOptions()
         session_options.log_severity_level = 3  # suppress onnxruntime INFO logs

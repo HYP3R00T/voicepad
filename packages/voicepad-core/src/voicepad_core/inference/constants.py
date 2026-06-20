@@ -7,7 +7,7 @@
 # ---------------------------------------------------------------------------
 
 DEVICE: str = "cuda"
-COMPUTE_TYPE: str = "int8_float16"  # GPU: weights int8, activations float16
+COMPUTE_TYPE: str = "float16"  # GPU: full float16 — faster than int8_float16 on modern GPUs
 CPU_COMPUTE_TYPE: str = "int8"  # CPU fallback: pure int8
 
 # ---------------------------------------------------------------------------
@@ -28,7 +28,7 @@ DISTIL_MODELS: frozenset[str] = frozenset({
 # Transcription quality
 # ---------------------------------------------------------------------------
 
-BEAM_SIZE: int = 5
+BEAM_SIZE: int = 1
 LANGUAGE: str = "en"
 NO_SPEECH_THRESHOLD: float = 0.6
 HALLUCINATION_SILENCE_THRESHOLD: float = 2.0

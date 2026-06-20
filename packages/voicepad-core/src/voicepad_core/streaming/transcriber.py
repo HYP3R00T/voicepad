@@ -34,12 +34,9 @@ from collections.abc import Callable
 import numpy as np
 
 from .chunk_result import ChunkResult
+from ..config import Config, get_config
 from ..inference.constants import (
-    COMPUTE_TYPE,
-    DEFAULT_MODEL,
-    DEVICE,
     DISTIL_MODELS,
-    INITIAL_PROMPT,
     SAMPLE_RATE,
 )
 from ..inference.exceptions import AudioTooShortError, TranscriptionError
@@ -124,26 +121,36 @@ class StreamingTranscriber:
         recorder,
         on_chunk: Callable[[ChunkResult], None],
         on_error: Callable[[str], None],
-        model_name: str = DEFAULT_MODEL,
-        device: str = DEVICE,
-        compute_type: str = COMPUTE_TYPE,
-        min_chunk_s: float = MIN_CHUNK_S,
-        max_chunk_s: float = MAX_CHUNK_S,
-        overlap_s: float = OVERLAP_S,
-        silence_threshold_ms: int = SILENCE_THRESHOLD_MS,
+        model_name: str | None = None,
+        device: str | None = None,
+        compute_type: str | None = None,
+        min_chunk_s: float | None = None,
+        max_chunk_s: float | None = None,
+        overlap_s: float | None = None,
+        silence_threshold_ms: int | None = None,
+        beam_size: int | None = None,
+        vad_filter: bool | None = None,
+        config: Config | None = None,
     ) -> None:
+        self._config = config or get_config()
         self._recorder = recorder
         self._on_chunk = on_chunk
         self._on_error = on_error
-        self._model_name = model_name
-        self._device = device
-        self._compute_type = compute_type
+        self._model_name = model_name if model_name is not None else self._config.transcription_model
+        self._device = device if device is not None else self._config.transcription_device
+        self._compute_type = compute_type if compute_type is not None else self._config.transcription_compute_type
 
         # Configurable thresholds
-        self._min_chunk_s = min_chunk_s
-        self._max_chunk_s = max_chunk_s
-        self._overlap_s = overlap_s
-        self._silence_threshold_ms = silence_threshold_ms
+        self._min_chunk_s = min_chunk_s if min_chunk_s is not None else self._config.min_chunk_s
+        self._max_chunk_s = max_chunk_s if max_chunk_s is not None else self._config.max_chunk_s
+        self._overlap_s = overlap_s if overlap_s is not None else self._config.overlap_s
+        self._silence_threshold_ms = (
+            silence_threshold_ms if silence_threshold_ms is not None else self._config.silence_threshold_ms
+        )
+        self._beam_size = beam_size if beam_size is not None else self._config.beam_size
+        self._vad_filter = vad_filter if vad_filter is not None else self._config.transcription_vad_filter
+        self._poll_interval_s = self._config.stream_poll_interval_s
+        self._stream_context_chars = self._config.stream_context_chars
 
         self._stop_event = threading.Event()
         self._monitor_thread: threading.Thread | None = None
@@ -182,10 +189,11 @@ class StreamingTranscriber:
         # Initialise VAD on first use (downloads ONNX model if needed)
         if self._vad is None:
             self._vad = SileroVAD(
-                threshold=0.5,
-                min_speech_duration_ms=250,
+                threshold=self._config.vad_threshold,
+                min_speech_duration_ms=self._config.vad_min_speech_duration_ms,
                 min_silence_duration_ms=self._silence_threshold_ms,
-                speech_pad_ms=30,
+                speech_pad_ms=self._config.vad_speech_pad_ms,
+                config=self._config,
             )
 
         self._vad.reset()
@@ -235,7 +243,7 @@ class StreamingTranscriber:
             capture_rate = self._recorder.sample_rate
 
         while not self._stop_event.is_set():
-            time.sleep(POLL_INTERVAL_S)
+            time.sleep(self._poll_interval_s)
 
             try:
                 audio: np.ndarray = self._recorder.get_snapshot()
@@ -355,7 +363,7 @@ class StreamingTranscriber:
         try:
             # --- Build initial prompt for cross-chunk coherence ---
             is_distil = self._model_name in DISTIL_MODELS
-            prompt = None if is_distil else _build_prompt(self._prev_context)
+            prompt = None if is_distil else _build_prompt(self._prev_context, self._config.initial_prompt)
 
             if slog:
                 slog.debug(
@@ -370,6 +378,8 @@ class StreamingTranscriber:
                 device=self._device,
                 compute_type=self._compute_type,
                 initial_prompt=prompt,
+                beam_size=self._beam_size,
+                vad_filter=self._vad_filter,
             )
 
             chunk_latency = (time.perf_counter() - chunk_start_time) * 1000
@@ -405,14 +415,22 @@ class StreamingTranscriber:
             if self._prev_chunk_text and segments:
                 if slog:
                     slog.debug("Deduplicating overlap with previous chunk")
-                segments = deduplicate_overlap(segments, chunk_start_s, self._prev_chunk_text)
+                segments = deduplicate_overlap(
+                    segments,
+                    chunk_start_s,
+                    self._prev_chunk_text,
+                    prev_tail_words=self._config.dedup_prev_tail_words,
+                    full_duplicate_threshold=self._config.dedup_full_duplicate_threshold,
+                    min_overlap_words_for_partial=self._config.dedup_min_overlap_words_for_partial,
+                    partial_lead_words=self._config.dedup_partial_lead_words,
+                )
 
             text = " ".join(s.text for s in segments if s.text).strip()
 
             if slog:
                 slog.debug(f"Raw text before post-processing: '{text[:100]}{'...' if len(text) > 100 else ''}'")
 
-            text = remove_hallucinations(text)
+            text = remove_hallucinations(text, max_repetitions=self._config.hallucination_max_repetitions)
             text = normalize(text)
 
             if slog:
@@ -422,7 +440,7 @@ class StreamingTranscriber:
 
             # Update rolling context for next chunk
             if text:
-                self._prev_context = text[-200:]
+                self._prev_context = text[-self._stream_context_chars :]
                 self._prev_chunk_text = text
 
             self._consumed_samples = len(full_audio)
@@ -474,7 +492,7 @@ class StreamingTranscriber:
 # ---------------------------------------------------------------------------
 
 
-def _build_prompt(prev_context: str) -> str:
+def _build_prompt(prev_context: str, initial_prompt: str) -> str:
     """Build the Whisper initial prompt from previous context.
 
     Args:
@@ -484,8 +502,8 @@ def _build_prompt(prev_context: str) -> str:
         Combined prompt string.
     """
     if prev_context:
-        return (INITIAL_PROMPT + " " + prev_context).strip()
-    return INITIAL_PROMPT
+        return (initial_prompt + " " + prev_context).strip()
+    return initial_prompt
 
 
 def _resample(

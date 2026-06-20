@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch
 
 import numpy as np
 import pytest
+from voicepad_core.config import Config
 from voicepad_core.inference.constants import MAX_AUDIO_DURATION_S, SAMPLE_RATE
 from voicepad_core.inference.engine import _build_segments, _trim_trailing_silence, _vad_parameters, transcribe
 from voicepad_core.inference.exceptions import AudioTooShortError, TranscriptionError
@@ -359,5 +360,54 @@ def test_transcribe_returns_transcription_result() -> None:
         assert result.text == "Hello world"
         assert len(result.segments) == 1
         assert result.language == "en"
-        assert result.device == "cuda"
+        assert result.device == "auto"
         assert result.fallback_to_cpu is False
+
+
+def test_transcribe_uses_config_defaults_when_args_omitted() -> None:
+    """transcribe resolves omitted parameters from Config."""
+    audio = np.random.randn(SAMPLE_RATE).astype(np.float32) * 0.5
+    config = Config(
+        transcription_model="base",
+        transcription_device="cpu",
+        transcription_compute_type="int8",
+        language="es",
+        beam_size=3,
+        transcription_vad_filter=True,
+        initial_prompt="Custom prompt",
+        hallucination_silence_threshold=1.5,
+        no_speech_threshold=0.4,
+        hallucination_max_repetitions=2,
+    )
+
+    with (
+        patch("voicepad_core.inference.engine.get_config", return_value=config),
+        patch("voicepad_core.inference.engine.load") as mock_load,
+        patch(
+            "voicepad_core.inference.engine.remove_hallucinations", side_effect=lambda text, max_repetitions: text
+        ) as mock_remove,
+    ):
+        mock_segment = Mock()
+        mock_segment.start = 0.0
+        mock_segment.end = 1.0
+        mock_segment.text = "Hola mundo"
+        mock_segment.avg_logprob = -0.5
+        mock_segment.no_speech_prob = 0.1
+        mock_segment.words = []
+
+        mock_model = Mock()
+        mock_model.transcribe.return_value = ([mock_segment], Mock(language="es", language_probability=0.99))
+        mock_load.return_value = mock_model
+
+        result = transcribe(audio)
+
+        mock_load.assert_called_once_with("base", "cpu", "int8")
+        call_kwargs = mock_model.transcribe.call_args.kwargs
+        assert call_kwargs["language"] == "es"
+        assert call_kwargs["beam_size"] == 3
+        assert call_kwargs["vad_filter"] is True
+        assert call_kwargs["initial_prompt"] == "Custom prompt"
+        assert call_kwargs["hallucination_silence_threshold"] == 1.5
+        assert call_kwargs["no_speech_threshold"] == 0.4
+        mock_remove.assert_called_once_with("Hola mundo", max_repetitions=2)
+        assert result.device == "cpu"

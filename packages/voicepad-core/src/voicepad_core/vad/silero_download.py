@@ -6,18 +6,12 @@ import logging
 import urllib.request
 from pathlib import Path
 
-# Model filename constant
-_MODEL_FILENAME = "silero_vad_v6.onnx"
-
-# Direct ONNX file URL for Silero VAD v6 from SYSTRAN/faster-whisper
-_DOWNLOAD_URL = (
-    "https://raw.githubusercontent.com/SYSTRAN/faster-whisper/master/faster_whisper/assets/silero_vad_v6.onnx"
-)
+from ..config import Config, get_config
 
 logger = logging.getLogger(__name__)
 
 
-def get_model_path(vad_model_dir: Path | None = None) -> Path:
+def get_model_path(vad_model_dir: Path | None = None, config: Config | None = None) -> Path:
     """
     Get the path where the VAD model should be stored.
 
@@ -27,15 +21,18 @@ def get_model_path(vad_model_dir: Path | None = None) -> Path:
     Returns:
         Full path to the VAD model file.
     """
+    resolved_config = config or get_config()
     if vad_model_dir is None:
-        from ..config import get_config
+        vad_model_dir = resolved_config.vad_model_path
 
-        vad_model_dir = get_config().vad_model_path
-
-    return vad_model_dir / _MODEL_FILENAME
+    return vad_model_dir / resolved_config.vad_model_filename
 
 
-def ensure_model_exists(vad_model_dir: Path | None = None, verbose: bool = True) -> Path:
+def ensure_model_exists(
+    vad_model_dir: Path | None = None,
+    verbose: bool = True,
+    config: Config | None = None,
+) -> Path:
     """
     Check whether the Silero ONNX model file is present.
     If it is missing, download it from the configured location.
@@ -55,7 +52,8 @@ def ensure_model_exists(vad_model_dir: Path | None = None, verbose: bool = True)
         RuntimeError: If the download fails for any reason
                       (no internet, network unreachable, etc.)
     """
-    model_path = get_model_path(vad_model_dir)
+    resolved_config = config or get_config()
+    model_path = get_model_path(vad_model_dir, config=resolved_config)
 
     if model_path.exists():
         if verbose:
@@ -64,10 +62,15 @@ def ensure_model_exists(vad_model_dir: Path | None = None, verbose: bool = True)
 
     if verbose:
         logger.info("[VAD] Silero ONNX model not found. Downloading...")
-        logger.info(f"      Source : {_DOWNLOAD_URL}")
+        logger.info(f"      Source : {resolved_config.vad_model_url}")
         logger.info(f"      Target : {model_path}")
 
-    _download(model_path, verbose=verbose)
+    _download(
+        model_path,
+        download_url=resolved_config.vad_model_url,
+        chunk_size=resolved_config.vad_download_chunk_size,
+        verbose=verbose,
+    )
 
     if verbose:
         size_kb = model_path.stat().st_size // 1024
@@ -76,7 +79,12 @@ def ensure_model_exists(vad_model_dir: Path | None = None, verbose: bool = True)
     return model_path
 
 
-def _download(model_path: Path, verbose: bool = True) -> None:
+def _download(
+    model_path: Path,
+    download_url: str,
+    chunk_size: int,
+    verbose: bool = True,
+) -> None:
     """
     Stream the ONNX file from HuggingFace to disk with a
     simple progress indicator.
@@ -90,11 +98,9 @@ def _download(model_path: Path, verbose: bool = True) -> None:
     try:
         model_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with urllib.request.urlopen(_DOWNLOAD_URL) as response:
+        with urllib.request.urlopen(download_url) as response:
             total = int(response.headers.get("Content-Length", 0))
             downloaded = 0
-            chunk_size = 8192  # 8 KB per read
-
             with open(model_path, "wb") as f:
                 while True:
                     chunk = response.read(chunk_size)
@@ -121,7 +127,7 @@ def _download(model_path: Path, verbose: bool = True) -> None:
         logger.exception("Failed to download Silero ONNX model")
         raise RuntimeError(
             f"[VAD] Failed to download Silero ONNX model.\n"
-            f"      URL   : {_DOWNLOAD_URL}\n"
+            f"      URL   : {download_url}\n"
             f"      Reason: {e}\n\n"
             "      Check your internet connection and try again."
         ) from e
