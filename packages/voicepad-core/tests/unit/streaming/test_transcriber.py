@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import Mock, patch
 
 import numpy as np
@@ -37,8 +39,8 @@ class _FakeRecorder:
 
 def make_config() -> Config:
     return Config(
-        recordings_path="data/recordings",
-        markdown_path="data/markdown",
+        recordings_path=Path("data/recordings"),
+        markdown_path=Path("data/markdown"),
         transcription_model="base",
         transcription_device="cpu",
         transcription_compute_type="int8",
@@ -133,7 +135,7 @@ def test_stop_is_noop_without_thread() -> None:
 def test_stop_joins_thread_and_clears_it() -> None:
     streamer = StreamingTranscriber(_FakeRecorder(), lambda chunk: None, lambda err: None, config=make_config())
     fake_thread = _FakeThread(target=lambda: None, name="stream-vad", daemon=True)
-    streamer._monitor_thread = fake_thread
+    streamer._monitor_thread = cast(Any, fake_thread)
 
     streamer.stop()
 
