@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import time
 
+import numpy as np
 from faster_whisper import WhisperModel
 
 from .constants import (
@@ -149,6 +150,12 @@ def load(
         if slog:
             slog.info(f"Model added to cache (total cached: {len(_model_cache)})")
 
+        # Run a short dummy inference to force CTranslate2 to allocate CUDA
+        # compute buffers and warm up GPU kernels. Without this, the first real
+        # transcription call pays the ~1-3s kernel initialization cost instead
+        # of it happening here during model warm-up.
+        _warmup_model(model, slog)
+
         return model
 
     except RuntimeError as e:
@@ -241,6 +248,36 @@ def get(
 def _is_cuda_error(e: Exception) -> bool:
     """Return True if the exception indicates a CUDA runtime failure."""
     return any(kw in str(e).lower() for kw in CUDA_ERROR_KEYWORDS)
+
+
+def _warmup_model(model: WhisperModel, slog: logging.Logger | None) -> None:
+    """Run a silent dummy inference to pre-allocate CUDA compute buffers.
+
+    CTranslate2 defers GPU kernel initialization until the first actual
+    inference call. Running a short silent pass here ensures that cost is
+    paid during warm-up, not on the user's first real transcription.
+
+    Args:
+        model: The freshly loaded WhisperModel instance.
+        slog:  Optional session logger.
+    """
+    try:
+        warmup_start = time.perf_counter()
+        # 0.5s of silence at 16kHz — just long enough to pass MIN_AUDIO_DURATION_S
+        dummy_audio = np.zeros(8000, dtype=np.float32)
+        # Consume the lazy generator to actually run inference
+        segs, _ = model.transcribe(dummy_audio, language="en", beam_size=1, vad_filter=False)
+        list(segs)
+        warmup_ms = (time.perf_counter() - warmup_start) * 1000
+        msg = f"Model warm-up complete in {warmup_ms:.0f}ms"
+        logger.info(msg)
+        if slog:
+            slog.info(msg)
+    except Exception as e:
+        # Warm-up failure is non-fatal — log and continue
+        logger.warning(f"Model warm-up failed (non-fatal): {e}")
+        if slog:
+            slog.warning(f"Model warm-up failed (non-fatal): {e}")
 
 
 def _load_cpu_fallback(model_name: str) -> WhisperModel:
