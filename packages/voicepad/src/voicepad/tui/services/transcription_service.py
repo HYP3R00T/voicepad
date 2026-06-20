@@ -10,16 +10,16 @@ from typing import TYPE_CHECKING
 import numpy as np
 from voicepad_core import (
     TranscriptionError,
+    begin_transcription_session,
+    end_transcription_session,
     ensure_model_downloaded,
     load_model,
     log_transcription_end,
     log_transcription_start,
     model_downloaded,
-    setup_transcription_logger,
     transcribe,
 )
 from voicepad_core.inference import AudioTooShortError
-from voicepad_core.inference.engine import set_session_logger
 
 from voicepad.tui.workers import ModelWarmResult
 
@@ -100,14 +100,11 @@ class TranscriptionService:
         """
         # Set up per-transcription logging
         session_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        session_logger, log_file = setup_transcription_logger(
-            self.config.logs_path,
-            self.config.log_level,
-            session_id,
+        session_logger, log_file = begin_transcription_session(
+            logs_path=self.config.logs_path,
+            log_level=self.config.log_level,
+            session_id=session_id,
         )
-
-        # Set the session logger for the inference engine
-        set_session_logger(session_logger)
 
         try:
             # Calculate audio duration
@@ -155,8 +152,7 @@ class TranscriptionService:
             logger.error(f"Unexpected transcription error: {e}")
             raise
         finally:
-            # Clear the session logger
-            set_session_logger(None)
+            end_transcription_session()
 
     def transcribe_file(self, wav_path: Path) -> TranscriptionResult | None:
         """Transcribe an audio file using the new transcribe_file function.
@@ -176,14 +172,11 @@ class TranscriptionService:
 
         # Set up per-transcription logging
         session_id = f"{wav_path.stem}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        session_logger, log_file = setup_transcription_logger(
-            self.config.logs_path,
-            self.config.log_level,
-            session_id,
+        session_logger, log_file = begin_transcription_session(
+            logs_path=self.config.logs_path,
+            log_level=self.config.log_level,
+            session_id=session_id,
         )
-
-        # Set the session logger for the inference engine
-        set_session_logger(session_logger)
 
         try:
             session_logger.info(f"Transcribing file: {wav_path}")
@@ -218,5 +211,4 @@ class TranscriptionService:
             logger.error(f"Failed to transcribe file {wav_path}: {e}")
             raise
         finally:
-            # Clear the session logger
-            set_session_logger(None)
+            end_transcription_session()

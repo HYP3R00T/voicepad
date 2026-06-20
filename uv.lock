@@ -4081,6 +4081,15 @@ wheels = [
 ]
 
 [[package]]
+name = "utilityhub-logging"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/24/66/26dcee32b5ac451ff9dab783cdc9656900668f0c3cfa2bceaf7d8238baa5/utilityhub_logging-0.1.0.tar.gz", hash = "sha256:3c3f29c7daaf556c64cb045260d47fe8f9bc51e3d17c647202404180e74e84f1", size = 4969, upload-time = "2026-06-20T20:09:10.621Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/32/57/6f1b607ad7316863c412fe35da57255346b275884228d7d4077ee3b4b0e2/utilityhub_logging-0.1.0-py3-none-any.whl", hash = "sha256:a1dfc236bb5c50dabf3a25c2860f9e3c79c461236aa38eb3d4eb59f15761516f", size = 8657, upload-time = "2026-06-20T20:09:09.306Z" },
+]
+
+[[package]]
 name = "voicepad"
 version = "0.2.0"
 source = { editable = "packages/voicepad" }
@@ -4117,6 +4126,7 @@ dependencies = [
     { name = "sounddevice" },
     { name = "soundfile" },
     { name = "utilityhub-config" },
+    { name = "utilityhub-logging" },
 ]
 
 [package.metadata]
@@ -4130,6 +4140,7 @@ requires-dist = [
     { name = "sounddevice", specifier = ">=0.5.5" },
     { name = "soundfile", specifier = ">=0.13.1" },
     { name = "utilityhub-config", specifier = ">=0.2.2" },
+    { name = "utilityhub-logging", specifier = ">=0.1.0" },
 ]
 
 [[package]]

@@ -10,9 +10,13 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 from textual.widgets import Label, Static, TabbedContent
-from voicepad_core import ChunkResult, MicrophoneStream, StreamingTranscriber, setup_transcription_logger
-from voicepad_core.inference.engine import set_session_logger
-from voicepad_core.streaming.transcriber import set_streaming_session_logger
+from voicepad_core import (
+    ChunkResult,
+    MicrophoneStream,
+    StreamingTranscriber,
+    begin_transcription_session,
+    end_transcription_session,
+)
 
 from voicepad.tui.components import VoiceButton
 from voicepad.tui.utils.clipboard import copy_to_clipboard as _copy_to_clipboard
@@ -46,34 +50,17 @@ class RecordingHandler:
 
     def start_recording(self) -> None:
         """Start recording audio."""
-        # Set up per-session logging (be defensive in tests where config may be a Mock)
         session_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        logs_path = getattr(self.app.config, "logs_path", None)
         log_level = getattr(self.app.config, "log_level", "INFO")
         if not isinstance(log_level, str):
             log_level = "INFO"
-        try:
-            # Prefer a real Path-like object; fall back to CWD for mocks
-            if logs_path is None or not hasattr(logs_path, "__fspath__"):
-                from pathlib import Path
 
-                logs_path = Path.cwd()
-        except Exception:
-            from pathlib import Path
-
-            logs_path = Path.cwd()
-
-        self._session_logger, self._log_file = setup_transcription_logger(
-            logs_path,
-            log_level,
-            f"streaming_{session_id}",
+        self._session_logger, self._log_file = begin_transcription_session(
+            logs_path=self.app.config.logs_path,
+            log_level=log_level,
+            session_id=f"streaming_{session_id}",
+            include_streaming=True,
         )
-
-        # Set the session logger for streaming transcription
-        set_streaming_session_logger(self._session_logger)
-        # Also set the session logger for the inference engine so engine logs
-        # (model loading, inference) are included in per-session logs.
-        set_session_logger(self._session_logger)
 
         self._session_logger.info("Starting recording session")
 
@@ -165,8 +152,7 @@ class RecordingHandler:
         self.app.call_from_thread(self.save_recording, audio)
 
         # Clear the session logger
-        set_streaming_session_logger(None)
-        set_session_logger(None)
+        end_transcription_session(include_streaming=True)
 
         if self._session_logger and self._log_file:
             self._session_logger.info("=" * 80)

@@ -81,18 +81,11 @@ from .inference.types import Segment, TranscriptionResult, WordTimestamp
 # Public API — logging
 # ---------------------------------------------------------------------------
 from .logging_utils import (
+    begin_transcription_session,
     configure_global_logging,
-    log_audio_info,
-    log_chunk_processing,
-    log_config_info,
-    log_model_cache_info,
-    log_model_load,
-    log_postprocessing_step,
-    log_segments_info,
-    log_system_info,
+    end_transcription_session,
     log_transcription_end,
     log_transcription_start,
-    log_vad_info,
     setup_transcription_logger,
 )
 
@@ -124,11 +117,12 @@ from .vad import ensure_model_exists as ensure_vad_model
 
 def transcribe_file(
     wav_path: str | Path,
-    model_name: str = DEFAULT_MODEL,
-    device: str = DEVICE,
-    compute_type: str = COMPUTE_TYPE,
-    language: str = LANGUAGE,
-    local_agreement: bool = False,
+    model_name: str | None = None,
+    device: str | None = None,
+    compute_type: str | None = None,
+    language: str | None = None,
+    local_agreement: bool | None = None,
+    config: Config | None = None,
 ) -> TranscriptionResult:
     """Transcribe a WAV file using the new architecture.
 
@@ -153,13 +147,20 @@ def transcribe_file(
     """
     from pathlib import Path
 
+    resolved_config = config or get_config()
+    model_name = model_name if model_name is not None else resolved_config.transcription_model
+    device = device if device is not None else resolved_config.transcription_device
+    compute_type = compute_type if compute_type is not None else resolved_config.transcription_compute_type
+    language = language if language is not None else resolved_config.language
+    local_agreement = local_agreement if local_agreement is not None else resolved_config.local_agreement_file
+
     wav_path = Path(wav_path)
     if not wav_path.exists():
         raise FileNotFoundError(f"WAV file not found: {wav_path}")
 
     # 1. Load audio via FileSource
     source = FileSource(wav_path)
-    audio, sample_rate = source.read()
+    source.read()
 
     # 2. Preprocess to 16kHz mono using process_array (standalone method)
     preprocessor = AudioPreProcessor(source)
@@ -172,6 +173,7 @@ def transcribe_file(
         device=device,
         compute_type=compute_type,
         language=language,
+        config=resolved_config,
     )
 
     # 4. Apply LocalAgreement if enabled
@@ -232,18 +234,10 @@ __all__ = [
     "SpeechSegment",
     "ensure_vad_model",
     # Logging
+    "begin_transcription_session",
     "configure_global_logging",
+    "end_transcription_session",
     "setup_transcription_logger",
     "log_transcription_start",
     "log_transcription_end",
-    "log_chunk_processing",
-    "log_model_load",
-    "log_system_info",
-    "log_config_info",
-    "log_audio_info",
-    "log_vad_info",
-    "log_model_cache_info",
-    "log_segments_info",
-    "log_postprocessing_step",
-    "configure_global_logging",
 ]

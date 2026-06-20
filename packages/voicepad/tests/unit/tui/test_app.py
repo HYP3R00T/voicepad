@@ -709,8 +709,11 @@ class TestRunFunction:
     """Test the run() entry point function."""
 
     @patch("voicepad.tui.app.get_config")
+    @patch("voicepad.tui.app.configure_global_logging")
     @patch("voicepad.tui.app.VoicePadApp")
-    def test_run_creates_app_and_runs(self, mock_app_class: Mock, mock_get_config: Mock) -> None:
+    def test_run_creates_app_and_runs(
+        self, mock_app_class: Mock, mock_configure_logging: Mock, mock_get_config: Mock
+    ) -> None:
         """Test that run() creates app with config and runs it."""
         from voicepad.tui.app import run
 
@@ -718,9 +721,11 @@ class TestRunFunction:
         mock_get_config.return_value = mock_config
         mock_app = Mock()
         mock_app_class.return_value = mock_app
+        mock_configure_logging.return_value = Path("/tmp/logs/session.log")
 
         run()
 
         mock_get_config.assert_called_once()
+        mock_configure_logging.assert_called_once_with(mock_config.log_level, mock_config.logs_path, console=False)
         mock_app_class.assert_called_once_with(mock_config)
         mock_app.run.assert_called_once()

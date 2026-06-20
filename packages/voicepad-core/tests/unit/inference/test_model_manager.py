@@ -324,3 +324,61 @@ def test_load_cpu_fallback_raises_on_failure(mock_whisper: Mock, mock_ensure: Mo
 
     with pytest.raises(TranscriptionError, match="CPU fallback also failed"):
         _load_cpu_fallback("turbo")
+
+
+# ============================================================================
+# _warmup_model tests
+# ============================================================================
+
+
+@patch("voicepad_core.inference.model_manager.get_config")
+def test_warmup_model_skips_when_disabled(mock_get_config: Mock) -> None:
+    config = Mock(model_warmup_enabled=False)
+    mock_get_config.return_value = config
+    model = Mock()
+
+    from voicepad_core.inference.model_manager import _warmup_model
+
+    _warmup_model(model, None)
+
+    model.transcribe.assert_not_called()
+
+
+@patch("voicepad_core.inference.model_manager.get_config")
+def test_warmup_model_uses_configured_settings(mock_get_config: Mock) -> None:
+    config = Mock(
+        model_warmup_enabled=True,
+        model_warmup_duration_s=0.25,
+        model_warmup_language="fr",
+        model_warmup_beam_size=2,
+        model_warmup_vad_filter=True,
+    )
+    mock_get_config.return_value = config
+    model = Mock()
+    model.transcribe.return_value = (iter([1]), None)
+
+    from voicepad_core.inference.model_manager import _warmup_model
+
+    _warmup_model(model, None)
+
+    args, kwargs = model.transcribe.call_args
+    assert len(args[0]) == 4000
+    assert kwargs == {"language": "fr", "beam_size": 2, "vad_filter": True}
+
+
+@patch("voicepad_core.inference.model_manager.get_config")
+def test_warmup_model_failure_is_non_fatal(mock_get_config: Mock) -> None:
+    config = Mock(
+        model_warmup_enabled=True,
+        model_warmup_duration_s=0.25,
+        model_warmup_language="fr",
+        model_warmup_beam_size=2,
+        model_warmup_vad_filter=True,
+    )
+    mock_get_config.return_value = config
+    model = Mock()
+    model.transcribe.side_effect = RuntimeError("boom")
+
+    from voicepad_core.inference.model_manager import _warmup_model
+
+    _warmup_model(model, None)

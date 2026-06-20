@@ -7,7 +7,7 @@
 # ---------------------------------------------------------------------------
 
 DEVICE: str = "cuda"
-COMPUTE_TYPE: str = "int8_float16"  # GPU: weights int8, activations float16
+COMPUTE_TYPE: str = "float16"  # GPU: full float16 — faster than int8_float16 on modern GPUs
 CPU_COMPUTE_TYPE: str = "int8"  # CPU fallback: pure int8
 
 # ---------------------------------------------------------------------------

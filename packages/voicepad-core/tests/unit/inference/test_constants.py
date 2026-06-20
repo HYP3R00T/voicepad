@@ -31,9 +31,9 @@ def test_device_is_cuda() -> None:
     assert isinstance(DEVICE, str)
 
 
-def test_compute_type_is_int8_float16() -> None:
-    """COMPUTE_TYPE is int8_float16 for GPU."""
-    assert COMPUTE_TYPE == "int8_float16"
+def test_compute_type_is_float16() -> None:
+    """COMPUTE_TYPE is float16 for GPU."""
+    assert COMPUTE_TYPE == "float16"
     assert isinstance(COMPUTE_TYPE, str)
 
 
@@ -84,7 +84,7 @@ def test_distil_models_is_immutable() -> None:
 
 
 def test_beam_size_is_5() -> None:
-    """BEAM_SIZE is 5."""
+    """BEAM_SIZE is 5 for quality-first decoding."""
     assert BEAM_SIZE == 5
     assert isinstance(BEAM_SIZE, int)
 

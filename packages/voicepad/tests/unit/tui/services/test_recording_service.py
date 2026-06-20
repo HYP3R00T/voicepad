@@ -126,7 +126,7 @@ class TestRecordingService:
 
         expected_path = config.recordings_path / "20240101_120000.wav"
         assert wav_path == expected_path
-        mock_strftime.assert_called_once_with("%Y%m%d_%H%M%S")
+        assert mock_strftime.call_args_list[0].args == ("%Y%m%d_%H%M%S",)
 
     @patch("voicepad.tui.services.recording_service.sf.write")
     def test_save_audio_raises_on_write_error(self, mock_write: MagicMock, tmp_path: Path) -> None:

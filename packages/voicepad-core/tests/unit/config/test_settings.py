@@ -875,3 +875,79 @@ class TestComputeTypeValidation:
             transcription_compute_type="int8_float16",
         )
         assert config.transcription_compute_type == "int8_float16"
+
+
+class TestAdvancedRuntimeParameters:
+    """Tests for newly configurable runtime tuning parameters."""
+
+    def test_default_runtime_tuning_fields(self) -> None:
+        config = Config(recordings_path="data/recordings", markdown_path="data/markdown")
+
+        assert config.initial_prompt
+        assert config.no_speech_threshold == 0.6
+        assert config.hallucination_silence_threshold == 2.0
+        assert config.hallucination_max_repetitions == 3
+        assert config.stream_poll_interval_s == 0.3
+        assert config.stream_context_chars == 200
+        assert config.vad_threshold == 0.5
+        assert config.vad_min_speech_duration_ms == 250
+        assert config.vad_speech_pad_ms == 30
+        assert config.vad_model_filename == "silero_vad_v6.onnx"
+        assert config.vad_download_chunk_size == 8192
+        assert config.model_warmup_enabled is True
+        assert config.model_warmup_duration_s == 0.5
+
+    def test_custom_runtime_tuning_fields(self) -> None:
+        config = Config(
+            recordings_path="data/recordings",
+            markdown_path="data/markdown",
+            initial_prompt="Test prompt",
+            no_speech_threshold=0.4,
+            hallucination_silence_threshold=1.2,
+            hallucination_max_repetitions=2,
+            min_audio_duration_s=0.75,
+            trim_trailing_silence_rms_threshold=0.02,
+            trim_trailing_silence_frame_ms=40,
+            stream_poll_interval_s=0.1,
+            stream_context_chars=120,
+            dedup_prev_tail_words=25,
+            dedup_full_duplicate_threshold=0.9,
+            dedup_min_overlap_words_for_partial=4,
+            dedup_partial_lead_words=6,
+            vad_threshold=0.6,
+            vad_min_speech_duration_ms=300,
+            vad_speech_pad_ms=45,
+            vad_model_filename="custom_vad.onnx",
+            vad_model_url="https://example.com/custom_vad.onnx",
+            vad_download_chunk_size=4096,
+            model_warmup_enabled=False,
+            model_warmup_duration_s=0.25,
+            model_warmup_language="fr",
+            model_warmup_beam_size=2,
+            model_warmup_vad_filter=True,
+        )
+
+        assert config.initial_prompt == "Test prompt"
+        assert config.no_speech_threshold == 0.4
+        assert config.hallucination_silence_threshold == 1.2
+        assert config.hallucination_max_repetitions == 2
+        assert config.min_audio_duration_s == 0.75
+        assert config.trim_trailing_silence_rms_threshold == 0.02
+        assert config.trim_trailing_silence_frame_ms == 40
+        assert config.stream_poll_interval_s == 0.1
+        assert config.stream_context_chars == 120
+        assert config.dedup_prev_tail_words == 25
+        assert config.dedup_full_duplicate_threshold == 0.9
+        assert config.dedup_min_overlap_words_for_partial == 4
+        assert config.dedup_partial_lead_words == 6
+        assert config.vad_threshold == 0.6
+        assert config.vad_min_speech_duration_ms == 300
+        assert config.vad_speech_pad_ms == 45
+        assert config.vad_model_filename == "custom_vad.onnx"
+        assert config.vad_model_url == "https://example.com/custom_vad.onnx"
+        assert config.vad_download_chunk_size == 4096
+        assert config.model_warmup_enabled is False
+        assert config.model_warmup_duration_s == 0.25
+        assert config.model_warmup_language == "fr"
+        assert config.model_warmup_beam_size == 2
+        assert config.model_warmup_vad_filter is True
