@@ -124,18 +124,18 @@ class TestTranscriptionService:
         assert result.fallback is True
         assert result.error == "Unexpected error"
 
-    @patch("voicepad.tui.services.transcription_service.set_session_logger")
-    @patch("voicepad.tui.services.transcription_service.setup_transcription_logger")
+    @patch("voicepad.tui.services.transcription_service.end_transcription_session")
+    @patch("voicepad.tui.services.transcription_service.begin_transcription_session")
     @patch("voicepad.tui.services.transcription_service.transcribe")
     def test_transcribe_audio_returns_result(
-        self, mock_transcribe: MagicMock, mock_setup_logger: MagicMock, mock_set_logger: MagicMock
+        self, mock_transcribe: MagicMock, mock_begin_session: MagicMock, mock_end_session: MagicMock
     ) -> None:
         """transcribe_audio returns transcription result."""
         config = create_mock_config()
         service = TranscriptionService(config)
 
         mock_logger = MagicMock()
-        mock_setup_logger.return_value = (mock_logger, MagicMock())
+        mock_begin_session.return_value = (mock_logger, MagicMock())
 
         audio = np.array([0.1, 0.2, 0.3])
         expected_result = create_mock_transcription_result()
@@ -145,18 +145,18 @@ class TestTranscriptionService:
 
         assert result == expected_result
 
-    @patch("voicepad.tui.services.transcription_service.set_session_logger")
-    @patch("voicepad.tui.services.transcription_service.setup_transcription_logger")
+    @patch("voicepad.tui.services.transcription_service.end_transcription_session")
+    @patch("voicepad.tui.services.transcription_service.begin_transcription_session")
     @patch("voicepad.tui.services.transcription_service.transcribe")
     def test_transcribe_audio_raises_on_audio_too_short(
-        self, mock_transcribe: MagicMock, mock_setup_logger: MagicMock, mock_set_logger: MagicMock
+        self, mock_transcribe: MagicMock, mock_begin_session: MagicMock, mock_end_session: MagicMock
     ) -> None:
         """transcribe_audio raises AudioTooShortError for short audio."""
         config = create_mock_config()
         service = TranscriptionService(config)
 
         mock_logger = MagicMock()
-        mock_setup_logger.return_value = (mock_logger, MagicMock())
+        mock_begin_session.return_value = (mock_logger, MagicMock())
 
         audio = np.array([0.1, 0.2])
         mock_transcribe.side_effect = AudioTooShortError("Audio too short")
@@ -164,18 +164,18 @@ class TestTranscriptionService:
         with pytest.raises(AudioTooShortError, match="Audio too short"):
             service.transcribe_audio(audio)
 
-    @patch("voicepad.tui.services.transcription_service.set_session_logger")
-    @patch("voicepad.tui.services.transcription_service.setup_transcription_logger")
+    @patch("voicepad.tui.services.transcription_service.end_transcription_session")
+    @patch("voicepad.tui.services.transcription_service.begin_transcription_session")
     @patch("voicepad.tui.services.transcription_service.transcribe")
     def test_transcribe_audio_raises_on_transcription_error(
-        self, mock_transcribe: MagicMock, mock_setup_logger: MagicMock, mock_set_logger: MagicMock
+        self, mock_transcribe: MagicMock, mock_begin_session: MagicMock, mock_end_session: MagicMock
     ) -> None:
         """transcribe_audio raises TranscriptionError on failure."""
         config = create_mock_config()
         service = TranscriptionService(config)
 
         mock_logger = MagicMock()
-        mock_setup_logger.return_value = (mock_logger, MagicMock())
+        mock_begin_session.return_value = (mock_logger, MagicMock())
 
         audio = np.array([0.1, 0.2, 0.3])
         mock_transcribe.side_effect = TranscriptionError("Transcription failed")
@@ -183,18 +183,18 @@ class TestTranscriptionService:
         with pytest.raises(TranscriptionError, match="Transcription failed"):
             service.transcribe_audio(audio)
 
-    @patch("voicepad.tui.services.transcription_service.set_session_logger")
-    @patch("voicepad.tui.services.transcription_service.setup_transcription_logger")
+    @patch("voicepad.tui.services.transcription_service.end_transcription_session")
+    @patch("voicepad.tui.services.transcription_service.begin_transcription_session")
     @patch("voicepad.tui.services.transcription_service.transcribe")
     def test_transcribe_audio_raises_on_unexpected_error(
-        self, mock_transcribe: MagicMock, mock_setup_logger: MagicMock, mock_set_logger: MagicMock
+        self, mock_transcribe: MagicMock, mock_begin_session: MagicMock, mock_end_session: MagicMock
     ) -> None:
         """transcribe_audio raises exception on unexpected error."""
         config = create_mock_config()
         service = TranscriptionService(config)
 
         mock_logger = MagicMock()
-        mock_setup_logger.return_value = (mock_logger, MagicMock())
+        mock_begin_session.return_value = (mock_logger, MagicMock())
 
         audio = np.array([0.1, 0.2, 0.3])
         mock_transcribe.side_effect = RuntimeError("Unexpected error")
@@ -202,18 +202,22 @@ class TestTranscriptionService:
         with pytest.raises(RuntimeError, match="Unexpected error"):
             service.transcribe_audio(audio)
 
-    @patch("voicepad.tui.services.transcription_service.set_session_logger")
-    @patch("voicepad.tui.services.transcription_service.setup_transcription_logger")
+    @patch("voicepad.tui.services.transcription_service.end_transcription_session")
+    @patch("voicepad.tui.services.transcription_service.begin_transcription_session")
     @patch("voicepad_core.transcribe_file")
     def test_transcribe_file_loads_and_transcribes(
-        self, mock_transcribe_file: MagicMock, mock_setup_logger: MagicMock, mock_set_logger: MagicMock, tmp_path: Path
+        self,
+        mock_transcribe_file: MagicMock,
+        mock_begin_session: MagicMock,
+        mock_end_session: MagicMock,
+        tmp_path: Path,
     ) -> None:
         """transcribe_file loads audio file and transcribes it."""
         config = create_mock_config()
         service = TranscriptionService(config)
 
         mock_logger = MagicMock()
-        mock_setup_logger.return_value = (mock_logger, MagicMock())
+        mock_begin_session.return_value = (mock_logger, MagicMock())
 
         wav_path = tmp_path / "test.wav"
         wav_path.write_text("fake wav")
@@ -226,18 +230,22 @@ class TestTranscriptionService:
         assert result == expected_result
         mock_transcribe_file.assert_called_once()
 
-    @patch("voicepad.tui.services.transcription_service.set_session_logger")
-    @patch("voicepad.tui.services.transcription_service.setup_transcription_logger")
+    @patch("voicepad.tui.services.transcription_service.end_transcription_session")
+    @patch("voicepad.tui.services.transcription_service.begin_transcription_session")
     @patch("voicepad_core.transcribe_file")
     def test_transcribe_file_raises_on_missing_file(
-        self, mock_transcribe_file: MagicMock, mock_setup_logger: MagicMock, mock_set_logger: MagicMock, tmp_path: Path
+        self,
+        mock_transcribe_file: MagicMock,
+        mock_begin_session: MagicMock,
+        mock_end_session: MagicMock,
+        tmp_path: Path,
     ) -> None:
         """transcribe_file raises FileNotFoundError for missing file."""
         config = create_mock_config()
         service = TranscriptionService(config)
 
         mock_logger = MagicMock()
-        mock_setup_logger.return_value = (mock_logger, MagicMock())
+        mock_begin_session.return_value = (mock_logger, MagicMock())
 
         wav_path = tmp_path / "nonexistent.wav"
         mock_transcribe_file.side_effect = FileNotFoundError("Audio file not found")
@@ -245,14 +253,14 @@ class TestTranscriptionService:
         with pytest.raises(FileNotFoundError, match="Audio file not found"):
             service.transcribe_file(wav_path)
 
-    @patch("voicepad.tui.services.transcription_service.set_session_logger")
-    @patch("voicepad.tui.services.transcription_service.setup_transcription_logger")
+    @patch("voicepad.tui.services.transcription_service.end_transcription_session")
+    @patch("voicepad.tui.services.transcription_service.begin_transcription_session")
     @patch("voicepad_core.transcribe_file")
     def test_transcribe_file_resamples_non_16khz_audio(
         self,
         mock_transcribe_file: MagicMock,
-        mock_setup_logger: MagicMock,
-        mock_set_logger: MagicMock,
+        mock_begin_session: MagicMock,
+        mock_end_session: MagicMock,
         tmp_path: Path,
     ) -> None:
         """transcribe_file handles resampling via core_transcribe_file."""
@@ -260,7 +268,7 @@ class TestTranscriptionService:
         service = TranscriptionService(config)
 
         mock_logger = MagicMock()
-        mock_setup_logger.return_value = (mock_logger, MagicMock())
+        mock_begin_session.return_value = (mock_logger, MagicMock())
 
         wav_path = tmp_path / "test.wav"
         wav_path.write_text("fake wav")
@@ -273,18 +281,22 @@ class TestTranscriptionService:
         assert result == expected_result
         mock_transcribe_file.assert_called_once()
 
-    @patch("voicepad.tui.services.transcription_service.set_session_logger")
-    @patch("voicepad.tui.services.transcription_service.setup_transcription_logger")
+    @patch("voicepad.tui.services.transcription_service.end_transcription_session")
+    @patch("voicepad.tui.services.transcription_service.begin_transcription_session")
     @patch("voicepad_core.transcribe_file")
     def test_transcribe_file_raises_on_audio_too_short(
-        self, mock_transcribe_file: MagicMock, mock_setup_logger: MagicMock, mock_set_logger: MagicMock, tmp_path: Path
+        self,
+        mock_transcribe_file: MagicMock,
+        mock_begin_session: MagicMock,
+        mock_end_session: MagicMock,
+        tmp_path: Path,
     ) -> None:
         """transcribe_file raises AudioTooShortError for short audio."""
         config = create_mock_config()
         service = TranscriptionService(config)
 
         mock_logger = MagicMock()
-        mock_setup_logger.return_value = (mock_logger, MagicMock())
+        mock_begin_session.return_value = (mock_logger, MagicMock())
 
         wav_path = tmp_path / "test.wav"
         wav_path.write_text("fake wav")
@@ -294,18 +306,22 @@ class TestTranscriptionService:
         with pytest.raises(AudioTooShortError, match="Audio too short"):
             service.transcribe_file(wav_path)
 
-    @patch("voicepad.tui.services.transcription_service.set_session_logger")
-    @patch("voicepad.tui.services.transcription_service.setup_transcription_logger")
+    @patch("voicepad.tui.services.transcription_service.end_transcription_session")
+    @patch("voicepad.tui.services.transcription_service.begin_transcription_session")
     @patch("voicepad_core.transcribe_file")
     def test_transcribe_file_raises_on_transcription_error(
-        self, mock_transcribe_file: MagicMock, mock_setup_logger: MagicMock, mock_set_logger: MagicMock, tmp_path: Path
+        self,
+        mock_transcribe_file: MagicMock,
+        mock_begin_session: MagicMock,
+        mock_end_session: MagicMock,
+        tmp_path: Path,
     ) -> None:
         """transcribe_file raises TranscriptionError on failure."""
         config = create_mock_config()
         service = TranscriptionService(config)
 
         mock_logger = MagicMock()
-        mock_setup_logger.return_value = (mock_logger, MagicMock())
+        mock_begin_session.return_value = (mock_logger, MagicMock())
 
         wav_path = tmp_path / "test.wav"
         wav_path.write_text("fake wav")
@@ -315,18 +331,22 @@ class TestTranscriptionService:
         with pytest.raises(TranscriptionError, match="Transcription failed"):
             service.transcribe_file(wav_path)
 
-    @patch("voicepad.tui.services.transcription_service.set_session_logger")
-    @patch("voicepad.tui.services.transcription_service.setup_transcription_logger")
+    @patch("voicepad.tui.services.transcription_service.end_transcription_session")
+    @patch("voicepad.tui.services.transcription_service.begin_transcription_session")
     @patch("voicepad_core.transcribe_file")
     def test_transcribe_file_raises_on_read_error(
-        self, mock_transcribe_file: MagicMock, mock_setup_logger: MagicMock, mock_set_logger: MagicMock, tmp_path: Path
+        self,
+        mock_transcribe_file: MagicMock,
+        mock_begin_session: MagicMock,
+        mock_end_session: MagicMock,
+        tmp_path: Path,
     ) -> None:
         """transcribe_file raises exception on file read error."""
         config = create_mock_config()
         service = TranscriptionService(config)
 
         mock_logger = MagicMock()
-        mock_setup_logger.return_value = (mock_logger, MagicMock())
+        mock_begin_session.return_value = (mock_logger, MagicMock())
 
         wav_path = tmp_path / "test.wav"
         wav_path.write_text("fake wav")

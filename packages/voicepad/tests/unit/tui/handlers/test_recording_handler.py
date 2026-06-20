@@ -128,17 +128,20 @@ class TestActionToggleRecording:
 class TestStartRecording:
     """Tests for start_recording method."""
 
+    @patch("voicepad.tui.handlers.recording_handler.begin_transcription_session")
     @patch("voicepad.tui.handlers.recording_handler.RecordingSession")
     @patch("voicepad.tui.handlers.recording_handler.StreamingTranscriber")
     @patch("voicepad.tui.handlers.recording_handler.time")
-    def test_creates_recording_session(self, mock_time, mock_transcriber, mock_session_class):
+    def test_creates_recording_session(self, mock_time, mock_transcriber, mock_session_class, mock_begin_session):
         """Test that start_recording creates a RecordingSession."""
         mock_app = Mock()
         mock_app.config = Mock()
+        mock_app.config.logs_path = Path("/tmp/logs")
         mock_session = Mock()
         mock_session._recorder = Mock()
         mock_session_class.return_value = mock_session
         mock_time.monotonic.return_value = 100.0
+        mock_begin_session.return_value = (Mock(), Path("/tmp/test.log"))
 
         handler = RecordingHandler(mock_app)
         handler.start_recording()
@@ -146,31 +149,37 @@ class TestStartRecording:
         mock_session_class.assert_called_once_with(config=mock_app.config)
         mock_session.start.assert_called_once()
 
+    @patch("voicepad.tui.handlers.recording_handler.begin_transcription_session")
     @patch("voicepad.tui.handlers.recording_handler.RecordingSession")
-    def test_handles_audio_recorder_error(self, mock_session_class):
+    def test_handles_audio_recorder_error(self, mock_session_class, mock_begin_session):
         """Test that start_recording handles RuntimeError."""
         mock_app = Mock()
         mock_app.config = Mock()
+        mock_app.config.logs_path = Path("/tmp/logs")
         mock_session = Mock()
         mock_session.start.side_effect = RuntimeError("Test error")
         mock_session_class.return_value = mock_session
+        mock_begin_session.return_value = (Mock(), Path("/tmp/test.log"))
 
         handler = RecordingHandler(mock_app)
         handler.start_recording()
 
         mock_app._set_status.assert_called_once_with("error", "mic error: Test error")
 
+    @patch("voicepad.tui.handlers.recording_handler.begin_transcription_session")
     @patch("voicepad.tui.handlers.recording_handler.RecordingSession")
     @patch("voicepad.tui.handlers.recording_handler.StreamingTranscriber")
     @patch("voicepad.tui.handlers.recording_handler.time")
-    def test_sets_recording_state(self, mock_time, mock_transcriber, mock_session_class):
+    def test_sets_recording_state(self, mock_time, mock_transcriber, mock_session_class, mock_begin_session):
         """Test that start_recording sets recording state."""
         mock_app = Mock()
         mock_app.config = Mock()
+        mock_app.config.logs_path = Path("/tmp/logs")
         mock_session = Mock()
         mock_session._recorder = Mock()
         mock_session_class.return_value = mock_session
         mock_time.monotonic.return_value = 100.0
+        mock_begin_session.return_value = (Mock(), Path("/tmp/test.log"))
 
         handler = RecordingHandler(mock_app)
         handler.start_recording()
@@ -179,17 +188,20 @@ class TestStartRecording:
         assert mock_app._record_start == 100.0
         assert mock_app._stream_chunks == []
 
+    @patch("voicepad.tui.handlers.recording_handler.begin_transcription_session")
     @patch("voicepad.tui.handlers.recording_handler.RecordingSession")
     @patch("voicepad.tui.handlers.recording_handler.StreamingTranscriber")
     @patch("voicepad.tui.handlers.recording_handler.time")
-    def test_starts_timer_and_updates_status(self, mock_time, mock_transcriber, mock_session_class):
+    def test_starts_timer_and_updates_status(self, mock_time, mock_transcriber, mock_session_class, mock_begin_session):
         """Test that start_recording starts timer and updates status."""
         mock_app = Mock()
         mock_app.config = Mock()
+        mock_app.config.logs_path = Path("/tmp/logs")
         mock_session = Mock()
         mock_session._recorder = Mock()
         mock_session_class.return_value = mock_session
         mock_time.monotonic.return_value = 100.0
+        mock_begin_session.return_value = (Mock(), Path("/tmp/test.log"))
 
         handler = RecordingHandler(mock_app)
         handler.start_recording()
@@ -197,13 +209,17 @@ class TestStartRecording:
         mock_app._set_status.assert_called_once_with("recording", "recording…")
         mock_app._start_timer.assert_called_once()
 
+    @patch("voicepad.tui.handlers.recording_handler.begin_transcription_session")
     @patch("voicepad.tui.handlers.recording_handler.RecordingSession")
     @patch("voicepad.tui.handlers.recording_handler.StreamingTranscriber")
     @patch("voicepad.tui.handlers.recording_handler.time")
-    def test_starts_streaming_transcriber(self, mock_time, mock_transcriber_class, mock_session_class):
+    def test_starts_streaming_transcriber(
+        self, mock_time, mock_transcriber_class, mock_session_class, mock_begin_session
+    ):
         """Test that start_recording starts StreamingTranscriber."""
         mock_app = Mock()
         mock_app.config = Mock()
+        mock_app.config.logs_path = Path("/tmp/logs")
         mock_app.config.transcription_model = "turbo"
         mock_app.config.transcription_device = "cuda"
         mock_app.config.transcription_compute_type = "int8_float16"
@@ -218,6 +234,7 @@ class TestStartRecording:
         mock_time.monotonic.return_value = 100.0
         mock_transcriber = Mock()
         mock_transcriber_class.return_value = mock_transcriber
+        mock_begin_session.return_value = (Mock(), Path("/tmp/test.log"))
 
         handler = RecordingHandler(mock_app)
         handler.start_recording()
@@ -235,6 +252,32 @@ class TestStartRecording:
         assert callable(call_kwargs["on_chunk"])
         assert callable(call_kwargs["on_error"])
         mock_transcriber.start.assert_called_once()
+
+    @patch("voicepad.tui.handlers.recording_handler.begin_transcription_session")
+    @patch("voicepad.tui.handlers.recording_handler.RecordingSession")
+    @patch("voicepad.tui.handlers.recording_handler.StreamingTranscriber")
+    @patch("voicepad.tui.handlers.recording_handler.time")
+    def test_uses_core_transcription_session_logging(
+        self, mock_time, mock_transcriber_class, mock_session_class, mock_begin_session
+    ):
+        """start_recording should delegate transcription-session logging setup to voicepad_core."""
+        mock_app = Mock()
+        mock_app.config = Mock()
+        mock_app.config.logs_path = Path("/tmp/logs")
+        mock_session = Mock()
+        mock_session._recorder = Mock()
+        mock_session_class.return_value = mock_session
+        mock_time.monotonic.return_value = 100.0
+        mock_begin_session.return_value = (Mock(), Path("/tmp/test.log"))
+        mock_transcriber_class.return_value = Mock()
+
+        handler = RecordingHandler(mock_app)
+        handler.start_recording()
+
+        call_kwargs = mock_begin_session.call_args.kwargs
+        assert call_kwargs["logs_path"] == Path("/tmp/logs")
+        assert call_kwargs["log_level"] == "INFO"
+        assert call_kwargs["include_streaming"] is True
 
 
 class TestStopRecording:

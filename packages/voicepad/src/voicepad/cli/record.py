@@ -16,9 +16,14 @@ from voicepad_core import (
     MicrophoneStream,
     TranscriptionError,
     _model_cache,
+    begin_transcription_session,
+    configure_global_logging,
+    end_transcription_session,
     ensure_model_downloaded,
     get_config,
     load_model,
+    log_transcription_end,
+    log_transcription_start,
     model_downloaded,
     transcribe,
 )
@@ -27,6 +32,13 @@ from voicepad_core.inference.constants import BEAM_SIZE, COMPUTE_TYPE, DEVICE, L
 logger = logging.getLogger(__name__)
 
 record_app = typer.Typer(help="Audio recording commands")
+
+
+def _configure_command_logging(config) -> Path:
+    """Configure one app-session log for the current CLI command."""
+    log_file = configure_global_logging(config.log_level, config.logs_path, console=False)
+    logger.info("CLI command logging configured: %s", log_file)
+    return log_file
 
 
 # ---------------------------------------------------------------------------
@@ -74,6 +86,7 @@ def start_recording(
       voicepad record start --no-save
     """
     config = get_config()
+    _configure_command_logging(config)
 
     # --- Step 1: Ensure model is downloaded ---
     # Check before opening the mic so the user knows what's happening.
@@ -197,37 +210,53 @@ def start_recording(
     typer.echo()
     typer.secho("[*] Transcribing...", fg=typer.colors.CYAN)
 
-    try:
-        # Model is already in cache — this call returns immediately from cache
-        if wav_path and wav_path.exists():
-            import soundfile as sf
+    transcription_audio = audio
+    if wav_path and wav_path.exists():
+        import soundfile as sf
 
-            file_audio, _ = sf.read(str(wav_path), dtype="float32", always_2d=False)
-            if file_audio.ndim > 1:
-                file_audio = file_audio.mean(axis=1)
-            result = transcribe(
-                file_audio,
-                model_name=config.transcription_model,
-                device=config.transcription_device,
-                compute_type=config.transcription_compute_type,
-                language=config.language,
-                word_timestamps=False,
-            )
-        else:
-            result = transcribe(
-                audio,
-                model_name=config.transcription_model,
-                device=config.transcription_device,
-                compute_type=config.transcription_compute_type,
-                language=config.language,
-                word_timestamps=False,
-            )
+        transcription_audio, _ = sf.read(str(wav_path), dtype="float32", always_2d=False)
+        if transcription_audio.ndim > 1:
+            transcription_audio = transcription_audio.mean(axis=1)
+
+    session_id = wav_path.stem if wav_path is not None else f"cli_{time.strftime('%Y%m%d_%H%M%S')}"
+    session_logger, _log_file = begin_transcription_session(
+        logs_path=config.logs_path,
+        log_level=config.log_level,
+        session_id=session_id,
+    )
+
+    try:
+        log_transcription_start(
+            session_logger,
+            len(transcription_audio) / 16000,
+            config.transcription_model,
+            config.transcription_device,
+            config.transcription_compute_type,
+        )
+        result = transcribe(
+            transcription_audio,
+            model_name=config.transcription_model,
+            device=config.transcription_device,
+            compute_type=config.transcription_compute_type,
+            language=config.language,
+            word_timestamps=False,
+        )
+        log_transcription_end(
+            session_logger,
+            success=True,
+            latency_ms=result.latency_ms,
+            text_length=len(result.text or ""),
+        )
     except AudioTooShortError as e:
+        log_transcription_end(session_logger, success=False, error=str(e))
         typer.secho(f"[SKIP] {e}", fg=typer.colors.YELLOW)
         return
     except TranscriptionError as e:
+        log_transcription_end(session_logger, success=False, error=str(e))
         typer.secho(f"[ERROR] {e}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from e
+    finally:
+        end_transcription_session()
 
     _print_result(result)
 
@@ -251,6 +280,7 @@ def start_recording(
 def show_info() -> None:
     """Show current recording and transcription configuration."""
     config = get_config()
+    _configure_command_logging(config)
     typer.echo()
     typer.echo("  Recording")
     typer.echo("  " + "─" * 40)
@@ -369,6 +399,7 @@ def benchmark(
     from voicepad_core.streaming import StreamingTranscriber
 
     config = get_config()
+    _configure_command_logging(config)
 
     if not model_downloaded(config.transcription_model):
         typer.secho(f"Downloading model '{config.transcription_model}'...", fg=typer.colors.CYAN)

@@ -7,6 +7,7 @@ import contextlib
 import logging
 import signal
 import sys
+import time
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
 from typing import Any
@@ -28,10 +29,14 @@ from textual.widgets import (
 from voicepad_core import (
     ChunkResult,
     StreamingTranscriber,
+    begin_transcription_session,
+    configure_global_logging,
+    end_transcription_session,
     get_config,
+    log_transcription_end,
+    log_transcription_start,
 )
 from voicepad_core.config import Config
-from voicepad_core.logging_utils import configure_global_logging
 
 from voicepad.tui.components import VoiceButton
 from voicepad.tui.config import TUIConfig, load_tui_config, save_tui_config
@@ -164,14 +169,6 @@ class VoicePadApp(App[None]):
         self._recording_handler = RecordingHandler(self)
         self._history_handler = HistoryHandler(self)
         self._hotkey_handler = HotkeyHandler(self)
-
-        # Ensure logs directory exists
-        config.logs_path.mkdir(parents=True, exist_ok=True)
-        # Configure global logging for the app and core packages
-        # Do not write logs to the console (Textual renders the UI to the terminal);
-        # keep logs in files only to avoid polluting the TUI display.
-        configure_global_logging(config.log_level, config.logs_path, console=False)
-        logger.info(f"Logs directory: {config.logs_path}")
 
     # ------------------------------------------------------------------
     # Layout
@@ -434,10 +431,24 @@ class VoicePadApp(App[None]):
         from voicepad_core import transcribe
 
         self.call_from_thread(self._set_status, "transcribing", f"retranscribing {wav_path.name}…")
+        session_id = f"retranscribe_{wav_path.stem}_{time.strftime('%Y%m%d_%H%M%S')}"
+        session_logger, _log_file = begin_transcription_session(
+            logs_path=self.config.logs_path,
+            log_level=self.config.log_level,
+            session_id=session_id,
+        )
         try:
             audio, _sr = sf.read(str(wav_path), dtype="float32", always_2d=False)
             if audio.ndim > 1:
                 audio = audio.mean(axis=1)
+
+            log_transcription_start(
+                session_logger,
+                len(audio) / 16000,
+                self.config.transcription_model,
+                self.config.transcription_device,
+                self.config.transcription_compute_type,
+            )
             result = transcribe(
                 audio,
                 model_name=self.config.transcription_model,
@@ -446,10 +457,19 @@ class VoicePadApp(App[None]):
                 language=self.config.language,
                 word_timestamps=False,
             )
+            log_transcription_end(
+                session_logger,
+                success=True,
+                latency_ms=result.latency_ms,
+                text_length=len(result.text or ""),
+            )
             error: str | None = None
         except Exception as e:
+            log_transcription_end(session_logger, success=False, error=str(e))
             result = None
             error = str(e)
+        finally:
+            end_transcription_session()
 
         self.call_from_thread(self._history_handler.on_retranscribe_done, wav_path, md_path, result, error)
 
@@ -544,5 +564,8 @@ class VoicePadApp(App[None]):
 def run() -> None:
     """Launch the VoicePad TUI."""
     config = get_config()
+    log_file = configure_global_logging(config.log_level, config.logs_path, console=False)
+    logger.info("Logs directory: %s", config.logs_path)
+    logger.info("Application session log: %s", log_file)
     app = VoicePadApp(config)
     app.run()

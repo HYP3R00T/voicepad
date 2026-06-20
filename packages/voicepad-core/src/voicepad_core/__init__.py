@@ -81,18 +81,11 @@ from .inference.types import Segment, TranscriptionResult, WordTimestamp
 # Public API — logging
 # ---------------------------------------------------------------------------
 from .logging_utils import (
+    begin_transcription_session,
     configure_global_logging,
-    log_audio_info,
-    log_chunk_processing,
-    log_config_info,
-    log_model_cache_info,
-    log_model_load,
-    log_postprocessing_step,
-    log_segments_info,
-    log_system_info,
+    end_transcription_session,
     log_transcription_end,
     log_transcription_start,
-    log_vad_info,
     setup_transcription_logger,
 )
 
@@ -241,18 +234,10 @@ __all__ = [
     "SpeechSegment",
     "ensure_vad_model",
     # Logging
+    "begin_transcription_session",
     "configure_global_logging",
+    "end_transcription_session",
     "setup_transcription_logger",
     "log_transcription_start",
     "log_transcription_end",
-    "log_chunk_processing",
-    "log_model_load",
-    "log_system_info",
-    "log_config_info",
-    "log_audio_info",
-    "log_vad_info",
-    "log_model_cache_info",
-    "log_segments_info",
-    "log_postprocessing_step",
-    "configure_global_logging",
 ]

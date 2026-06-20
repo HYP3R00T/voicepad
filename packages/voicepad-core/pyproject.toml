@@ -44,6 +44,7 @@ dependencies = [
   "sounddevice>=0.5.5",
   "soundfile>=0.13.1",
   "utilityhub-config>=0.2.2",
+  "utilityhub-logging>=0.1.0",
 ]
 
 [project.urls]

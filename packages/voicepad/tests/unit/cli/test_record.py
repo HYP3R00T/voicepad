@@ -193,6 +193,26 @@ class TestFormatMarkdown:
 
 
 class TestStartRecording:
+    def test_configures_app_session_logging(self, tmp_path: Path) -> None:
+        mock_config = Config(recordings_path=tmp_path, markdown_path=tmp_path, logs_path=tmp_path / "logs")
+        mock_recorder = MagicMock()
+        mock_recorder.stop.return_value = np.zeros(16000, dtype=np.float32)
+
+        with (
+            patch("voicepad.cli.record.get_config", return_value=mock_config),
+            patch("voicepad.cli.record.configure_global_logging") as mock_configure_logging,
+            patch("voicepad.cli.record.MicrophoneStream", return_value=mock_recorder),
+            patch("voicepad.cli.record.AudioPreProcessor") as mock_preprocessor_class,
+            patch("voicepad.cli.record.time.sleep"),
+        ):
+            mock_processor = MagicMock()
+            mock_processor.process_array.return_value = np.zeros(16000, dtype=np.float32)
+            mock_preprocessor_class.return_value = mock_processor
+            result = runner.invoke(record_app, ["start", "--duration", "0.1", "--no-transcribe", "--no-save"])
+
+        assert result.exit_code == 0
+        mock_configure_logging.assert_called_once_with(mock_config.log_level, mock_config.logs_path, console=False)
+
     def test_exits_on_model_download_failure(self, tmp_path: Path) -> None:
         mock_config = Config(recordings_path=tmp_path, markdown_path=tmp_path)
         mock_recorder = MagicMock()

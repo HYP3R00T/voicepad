@@ -2355,6 +2355,10 @@ utilityhub-config==0.2.7 \
     --hash=sha256:044dbd2d413668cc265263991d1f9a654114ffdcab4330f1b7a1cd9548352bd7 \
     --hash=sha256:a128f36aea6b5ce2fff8025af0e439001491b48a1ee0f98c16b3231e75620574
     # via voicepad-core
+utilityhub-logging==0.1.0 \
+    --hash=sha256:3c3f29c7daaf556c64cb045260d47fe8f9bc51e3d17c647202404180e74e84f1 \
+    --hash=sha256:a1dfc236bb5c50dabf3a25c2860f9e3c79c461236aa38eb3d4eb59f15761516f
+    # via voicepad-core
 zensical==0.0.45 \
     --hash=sha256:01c484bb2ee85e98e21e24b397ff52ffc31101f7485935eee5d3afa6cca6cc08 \
     --hash=sha256:1f2c0e69839ce4274bde34d18139d3b0d96bbf02b245ada46243590c9eedebc1 \
