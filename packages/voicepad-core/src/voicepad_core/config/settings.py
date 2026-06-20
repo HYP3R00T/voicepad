@@ -153,11 +153,11 @@ class Config(BaseModel):
     )
 
     beam_size: int = Field(
-        default=1,
+        default=5,
         description=(
             "Beam search width for Whisper decoder. "
-            "1 = greedy decoding (fastest, minimal accuracy loss for clean speech). "
-            "5 = full beam search (slower, marginally better for noisy/ambiguous audio)."
+            "5 = quality-first default for general dictation. "
+            "1 = greedy decoding when speed matters more than accuracy."
         ),
     )
 

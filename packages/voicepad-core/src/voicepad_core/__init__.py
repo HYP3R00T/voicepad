@@ -160,7 +160,7 @@ def transcribe_file(
 
     # 1. Load audio via FileSource
     source = FileSource(wav_path)
-    audio, sample_rate = source.read()
+    source.read()
 
     # 2. Preprocess to 16kHz mono using process_array (standalone method)
     preprocessor = AudioPreProcessor(source)

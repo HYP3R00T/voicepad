@@ -37,7 +37,7 @@ def test_transcribe_file_uses_config_defaults(tmp_path: Path) -> None:
         patch("voicepad_core.get_config", return_value=config),
         patch("voicepad_core.postprocessing.agreement.apply_local_agreement", return_value=result) as mock_agreement,
     ):
-        source.read.return_value = ("raw-audio", 44_100)
+        source.read.return_value = "raw-audio"
         returned = transcribe_file(wav_path)
 
     mock_source.assert_called_once_with(wav_path)
@@ -71,7 +71,7 @@ def test_transcribe_file_skips_local_agreement_when_disabled(tmp_path: Path) -> 
         patch("voicepad_core.get_config", return_value=config),
         patch("voicepad_core.postprocessing.agreement.apply_local_agreement") as mock_agreement,
     ):
-        source.read.return_value = ("raw-audio", 44_100)
+        source.read.return_value = "raw-audio"
         returned = transcribe_file(wav_path)
 
     mock_transcribe.assert_called_once()

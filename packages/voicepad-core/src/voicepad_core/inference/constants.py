@@ -28,7 +28,7 @@ DISTIL_MODELS: frozenset[str] = frozenset({
 # Transcription quality
 # ---------------------------------------------------------------------------
 
-BEAM_SIZE: int = 1
+BEAM_SIZE: int = 5
 LANGUAGE: str = "en"
 NO_SPEECH_THRESHOLD: float = 0.6
 HALLUCINATION_SILENCE_THRESHOLD: float = 2.0

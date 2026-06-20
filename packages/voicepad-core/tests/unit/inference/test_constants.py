@@ -83,9 +83,9 @@ def test_distil_models_is_immutable() -> None:
 # ============================================================================
 
 
-def test_beam_size_is_1() -> None:
-    """BEAM_SIZE is 1 (greedy decoding — fastest, minimal accuracy loss for clean speech)."""
-    assert BEAM_SIZE == 1
+def test_beam_size_is_5() -> None:
+    """BEAM_SIZE is 5 for quality-first decoding."""
+    assert BEAM_SIZE == 5
     assert isinstance(BEAM_SIZE, int)
 
 
