@@ -275,6 +275,36 @@ class StreamingTranscriber:
                 )
             )
 
+    def _trim_final_audio_to_speech(
+        self,
+        full_audio: np.ndarray,
+        fresh_audio: np.ndarray,
+        capture_rate: int,
+    ) -> np.ndarray:
+        """Trim final audio to the last VAD-confirmed fresh speech boundary.
+
+        Returns the original full audio when this is not a skippable tail.
+        Returns audio truncated to the end of the last confirmed fresh speech.
+        Returns audio truncated to the already-consumed boundary when there is
+        no meaningful fresh speech to transcribe.
+        """
+        if len(fresh_audio) == 0 or self._vad is None:
+            return full_audio[: self._consumed_samples]
+
+        vad_audio = fresh_audio if capture_rate == SAMPLE_RATE else _resample(fresh_audio, capture_rate, SAMPLE_RATE)
+        self._vad.reset()
+        speech_segments = self._vad.detect(vad_audio, sample_rate=SAMPLE_RATE)
+        if not speech_segments:
+            return full_audio[: self._consumed_samples]
+
+        speech_duration_s = sum(segment.end - segment.start for segment in speech_segments)
+        if speech_duration_s < self._config.min_fresh_speech_duration_s:
+            return full_audio[: self._consumed_samples]
+
+        last_speech_end_s = min(max(segment.end for segment in speech_segments), len(vad_audio) / SAMPLE_RATE)
+        fresh_end_samples = min(len(fresh_audio), int(round(last_speech_end_s * capture_rate)))
+        return full_audio[: self._consumed_samples + fresh_end_samples]
+
     def _dispatch_chunk(
         self,
         full_audio: np.ndarray,
@@ -296,10 +326,17 @@ class StreamingTranscriber:
 
         overlap_samples = int(self._overlap_s * capture_rate)
         start_sample = max(0, self._consumed_samples - overlap_samples)
-        chunk_audio = full_audio[start_sample:]
+        fresh_audio = full_audio[self._consumed_samples :]
+        final_audio = full_audio
+
+        if is_final:
+            final_audio = self._trim_final_audio_to_speech(full_audio, fresh_audio, capture_rate)
+            fresh_audio = final_audio[self._consumed_samples :]
+
+        chunk_audio = final_audio[start_sample:]
 
         chunk_start_s = self._consumed_samples / capture_rate
-        chunk_end_s = len(full_audio) / capture_rate
+        chunk_end_s = len(final_audio) / capture_rate
         audio_offset_s = start_sample / capture_rate
         chunk_duration_s = len(chunk_audio) / capture_rate
 
@@ -318,6 +355,21 @@ class StreamingTranscriber:
 
         if slog and capture_rate != SAMPLE_RATE:
             slog.debug(f"Preprocessing chunk from {capture_rate}Hz to {SAMPLE_RATE}Hz")
+
+        if is_final and len(fresh_audio) == 0:
+            if slog:
+                slog.info(f"Skipping final chunk {self._chunk_index + 1}: no fresh VAD-confirmed speech")
+            self._consumed_samples = len(full_audio)
+            self._on_chunk(
+                ChunkResult(
+                    index=self._chunk_index + 1,
+                    text="",
+                    start_s=chunk_start_s,
+                    end_s=chunk_end_s,
+                    is_final=True,
+                )
+            )
+            return
 
         # Keep streaming chunks on the same preprocessing path as saved WAV
         # transcriptions so the final words are not lost to inconsistent audio prep.
@@ -389,8 +441,9 @@ class StreamingTranscriber:
             if slog:
                 slog.debug(f"Raw text before post-processing: '{text[:100]}{'...' if len(text) > 100 else ''}'")
 
-            text = remove_hallucinations(text, max_repetitions=self._config.hallucination_max_repetitions)
-            text = normalize(text)
+            if self._config.text_postprocessing_enabled:
+                text = remove_hallucinations(text, max_repetitions=self._config.hallucination_max_repetitions)
+                text = normalize(text)
 
             if slog:
                 slog.info(

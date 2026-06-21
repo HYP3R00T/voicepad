@@ -275,8 +275,9 @@ def transcribe(
     if slog:
         slog.debug(f"Raw text length: {len(text)} characters")
 
-    text = remove_hallucinations(text, max_repetitions=resolved_config.hallucination_max_repetitions)
-    text = normalize(text)
+    if resolved_config.text_postprocessing_enabled:
+        text = remove_hallucinations(text, max_repetitions=resolved_config.hallucination_max_repetitions)
+        text = normalize(text)
 
     if slog:
         slog.debug(f"Post-processed text length: {len(text)} characters")

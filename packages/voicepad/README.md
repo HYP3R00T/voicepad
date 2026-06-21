@@ -44,9 +44,11 @@ min_chunk_s: 15.0
 max_chunk_s: 29.0
 overlap_s: 0.5
 silence_threshold_ms: 1000
+min_fresh_speech_duration_s: 0.25
 
 # Inference cleanup / prompting
 initial_prompt: "Hello. This is a transcription with proper punctuation, capitalization, and grammar."
+text_postprocessing_enabled: false
 no_speech_threshold: 0.6
 hallucination_max_repetitions: 3
 

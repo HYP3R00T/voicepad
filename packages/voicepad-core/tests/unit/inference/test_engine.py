@@ -360,7 +360,7 @@ def test_transcribe_returns_transcription_result() -> None:
         assert result.text == "Hello world"
         assert len(result.segments) == 1
         assert result.language == "en"
-        assert result.device == "cuda"
+        assert result.device == "auto"
         assert result.fallback_to_cpu is False
 
 
@@ -378,6 +378,7 @@ def test_transcribe_uses_config_defaults_when_args_omitted() -> None:
         hallucination_silence_threshold=1.5,
         no_speech_threshold=0.4,
         hallucination_max_repetitions=2,
+        text_postprocessing_enabled=True,
     )
 
     with (
@@ -411,3 +412,32 @@ def test_transcribe_uses_config_defaults_when_args_omitted() -> None:
         assert call_kwargs["no_speech_threshold"] == 0.4
         mock_remove.assert_called_once_with("Hola mundo", max_repetitions=2)
         assert result.device == "cpu"
+
+
+def test_transcribe_bypasses_text_postprocessing_when_disabled() -> None:
+    """transcribe returns raw joined segment text when text cleanup is disabled."""
+    audio = np.random.randn(SAMPLE_RATE).astype(np.float32) * 0.5
+    config = Config(text_postprocessing_enabled=False)
+
+    with (
+        patch("voicepad_core.inference.engine.load") as mock_load,
+        patch("voicepad_core.inference.engine.remove_hallucinations") as mock_remove,
+        patch("voicepad_core.inference.engine.normalize") as mock_normalize,
+    ):
+        mock_segment = Mock()
+        mock_segment.start = 0.0
+        mock_segment.end = 1.0
+        mock_segment.text = "  Hello world  "
+        mock_segment.avg_logprob = -0.5
+        mock_segment.no_speech_prob = 0.1
+        mock_segment.words = []
+
+        mock_model = Mock()
+        mock_model.transcribe.return_value = ([mock_segment], Mock(language="en", language_probability=0.99))
+        mock_load.return_value = mock_model
+
+        result = transcribe(audio, config=config)
+
+        mock_remove.assert_not_called()
+        mock_normalize.assert_not_called()
+        assert result.text == "Hello world"
