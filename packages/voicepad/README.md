@@ -18,7 +18,7 @@ uv tool install voicepad
 voicepad
 ```
 
-That's it. The interactive TUI opens, loads the Whisper model, and you're ready to record.
+That's it. On first run, the interactive TUI opens an onboarding flow so you can choose a microphone and a starter Whisper model before the first download begins.
 
 | Key | Action |
 |---|---|
@@ -29,7 +29,7 @@ That's it. The interactive TUI opens, loads the Whisper model, and you're ready 
 
 ## Configuration
 
-Settings are stored at `~/.config/voicepad/voicepad.yaml` and can be changed from the **Settings** tab inside the app.
+Settings are stored at `~/.config/voicepad/voicepad.yaml` and can be changed from the **Settings** tab inside the app. Some advanced options remain config-only.
 
 ```yaml
 transcription_model: turbo
@@ -57,6 +57,8 @@ vad_threshold: 0.5
 vad_min_speech_duration_ms: 250
 vad_speech_pad_ms: 30
 ```
+
+The UI intentionally exposes a short curated model list for most users. If you want advanced model IDs or lower-level transcription tuning, edit `voicepad.yaml` directly.
 
 ## Documentation
 
