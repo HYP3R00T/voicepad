@@ -18,7 +18,6 @@ import time
 import numpy as np
 
 from .constants import (
-    DISTIL_MODELS,
     NO_SPEECH_THRESHOLD,
     SAMPLE_RATE,
 )
@@ -32,6 +31,7 @@ from .model_manager import (
 )
 from .types import Segment, TranscriptionResult, WordTimestamp
 from ..config import Config, get_config
+from ..models import is_distil_model
 
 # Post-processing is imported here so the engine applies the full pipeline.
 # _trim_trailing_silence lives in this module because it is a pre-inference
@@ -163,7 +163,7 @@ def transcribe(
     if slog:
         slog.info(f"Model loaded in {model_load_time:.0f}ms")
 
-    is_distil = model_name in DISTIL_MODELS
+    is_distil = is_distil_model(model_name)
     default_prompt = resolved_config.initial_prompt if initial_prompt is None else initial_prompt
     prompt = None if is_distil else default_prompt
 

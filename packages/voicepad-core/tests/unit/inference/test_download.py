@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import Mock
 
 import pytest
 from huggingface_hub.utils import HfHubHTTPError
@@ -11,97 +11,65 @@ from voicepad_core.config import Config
 from voicepad_core.inference import download as download_module
 from voicepad_core.inference.errors import ModelNotFoundError
 
-# ============================================================================
-# _get_models_dir tests
-# ============================================================================
+REQUIRED_SNAPSHOT_FILES = {
+    "model.bin": b"binary model placeholder",
+    "tokenizer.json": b"{}",
+    "config.json": b'{"model_type": "whisper"}',
+}
+
+
+def _write_snapshot(snapshot_dir: Path, *, include_required: bool = True) -> None:
+    snapshot_dir.mkdir(parents=True)
+    if include_required:
+        for name, content in REQUIRED_SNAPSHOT_FILES.items():
+            path = snapshot_dir / name
+            if name.endswith(".json"):
+                path.write_text(content.decode("utf-8"), encoding="utf-8")
+            else:
+                path.write_bytes(content)
 
 
 def test_get_models_dir_uses_config_default(tmp_path: Path, monkeypatch) -> None:
-    """_get_models_dir returns configured model_cache_path when no override."""
     config = Config(recordings_path=tmp_path / "recordings", markdown_path=tmp_path / "markdown")
     monkeypatch.setattr(download_module, "get_config", lambda: config)
-
-    result = download_module._get_models_dir()
-    assert result == config.model_cache_path
+    assert download_module._get_models_dir() == config.model_cache_path
 
 
 def test_get_models_dir_uses_override(tmp_path: Path) -> None:
-    """_get_models_dir returns override path when provided."""
     override = tmp_path / "override"
-    result = download_module._get_models_dir(override)
-    assert result == override
-
-
-# ============================================================================
-# _get_cache_roots tests
-# ============================================================================
+    assert download_module._get_models_dir(override) == override
 
 
 def test_get_cache_roots_returns_hub_and_base(tmp_path: Path) -> None:
-    """_get_cache_roots returns both hub and base directories."""
     roots = download_module._get_cache_roots(tmp_path)
-    assert len(roots) == 2
-    assert roots[0] == tmp_path / "hub"
-    assert roots[1] == tmp_path
+    assert roots == (tmp_path / "hub", tmp_path)
 
 
-# ============================================================================
-# _get_repo_id tests
-# ============================================================================
-
-
-def test_get_repo_id_uses_faster_whisper_registry() -> None:
-    """_get_repo_id uses faster_whisper's _MODELS registry when available."""
-    # Mock the faster_whisper.utils module with _MODELS
-    mock_utils = MagicMock()
-    mock_utils._MODELS = {"turbo": "Systran/faster-distil-whisper-large-v3"}
-
-    with patch.dict("sys.modules", {"faster_whisper.utils": mock_utils}):
-        result = download_module._get_repo_id("turbo")
-        assert result == "Systran/faster-distil-whisper-large-v3"
+def test_get_repo_id_uses_voicepad_registry() -> None:
+    assert download_module._get_repo_id("turbo") == "mobiuslabsgmbh/faster-whisper-large-v3-turbo"
 
 
 def test_get_repo_id_falls_back_to_prefix() -> None:
-    """_get_repo_id falls back to HF_REPO_PREFIX for unknown models."""
-    result = download_module._get_repo_id("custom-model")
-    assert result == "Systran/faster-whisper-custom-model"
-
-
-def test_get_repo_id_handles_import_error() -> None:
-    """_get_repo_id handles ImportError gracefully."""
-    # Simulate import failure by making the import raise an exception
-    with patch("builtins.__import__", side_effect=ImportError):
-        result = download_module._get_repo_id("turbo")
-        assert result == "Systran/faster-whisper-turbo"
-
-
-# ============================================================================
-# model_downloaded tests
-# ============================================================================
+    assert download_module._get_repo_id("custom-model") == "Systran/faster-whisper-custom-model"
 
 
 def test_model_downloaded_returns_true_when_model_exists(tmp_path: Path, monkeypatch) -> None:
-    """model_downloaded returns True when model.bin exists in snapshots."""
     cache_path = tmp_path / "custom-model-cache"
     config = Config(recordings_path=tmp_path / "recordings", markdown_path=tmp_path / "markdown")
     object.__setattr__(config, "model_cache_path", cache_path)
-
     monkeypatch.setattr(download_module, "get_config", lambda: config)
     monkeypatch.setattr(download_module, "_get_repo_id", lambda model_name: "owner/model")
 
     snapshot_dir = cache_path / "hub" / "models--owner--model" / "snapshots" / "abc123"
-    snapshot_dir.mkdir(parents=True)
-    (snapshot_dir / "model.bin").write_bytes(b"binary model placeholder")
+    _write_snapshot(snapshot_dir)
 
     assert download_module.model_downloaded("turbo") is True
 
 
 def test_model_downloaded_returns_false_when_model_missing(tmp_path: Path, monkeypatch) -> None:
-    """model_downloaded returns False when model.bin does not exist."""
     cache_path = tmp_path / "custom-model-cache"
     config = Config(recordings_path=tmp_path / "recordings", markdown_path=tmp_path / "markdown")
     object.__setattr__(config, "model_cache_path", cache_path)
-
     monkeypatch.setattr(download_module, "get_config", lambda: config)
     monkeypatch.setattr(download_module, "_get_repo_id", lambda model_name: "owner/model")
 
@@ -109,101 +77,104 @@ def test_model_downloaded_returns_false_when_model_missing(tmp_path: Path, monke
 
 
 def test_model_downloaded_checks_base_cache_root(tmp_path: Path, monkeypatch) -> None:
-    """model_downloaded checks base cache root when hub root doesn't exist."""
     cache_path = tmp_path / "custom-model-cache"
     config = Config(recordings_path=tmp_path / "recordings", markdown_path=tmp_path / "markdown")
     object.__setattr__(config, "model_cache_path", cache_path)
-
     monkeypatch.setattr(download_module, "get_config", lambda: config)
     monkeypatch.setattr(download_module, "_get_repo_id", lambda model_name: "owner/model")
 
-    # Create model in base cache root instead of hub
     snapshot_dir = cache_path / "models--owner--model" / "snapshots" / "abc123"
-    snapshot_dir.mkdir(parents=True)
-    (snapshot_dir / "model.bin").write_bytes(b"binary model placeholder")
+    _write_snapshot(snapshot_dir)
 
     assert download_module.model_downloaded("turbo") is True
 
 
 def test_model_downloaded_with_explicit_models_dir(tmp_path: Path, monkeypatch) -> None:
-    """model_downloaded accepts explicit models_dir parameter."""
     monkeypatch.setattr(download_module, "_get_repo_id", lambda model_name: "owner/model")
-
     snapshot_dir = tmp_path / "hub" / "models--owner--model" / "snapshots" / "abc123"
-    snapshot_dir.mkdir(parents=True)
-    (snapshot_dir / "model.bin").write_bytes(b"binary model placeholder")
-
+    _write_snapshot(snapshot_dir)
     assert download_module.model_downloaded("turbo", models_dir=tmp_path) is True
 
 
-def test_model_downloaded_ignores_snapshots_without_model_bin(tmp_path: Path, monkeypatch) -> None:
-    """model_downloaded returns False if snapshot exists but model.bin is missing."""
+def test_model_downloaded_rejects_incompatible_snapshots(tmp_path: Path, monkeypatch) -> None:
     cache_path = tmp_path / "custom-model-cache"
     config = Config(recordings_path=tmp_path / "recordings", markdown_path=tmp_path / "markdown")
     object.__setattr__(config, "model_cache_path", cache_path)
-
     monkeypatch.setattr(download_module, "get_config", lambda: config)
     monkeypatch.setattr(download_module, "_get_repo_id", lambda model_name: "owner/model")
 
-    # Create snapshot directory but no model.bin
     snapshot_dir = cache_path / "hub" / "models--owner--model" / "snapshots" / "abc123"
     snapshot_dir.mkdir(parents=True)
-    (snapshot_dir / "config.json").write_text("{}")
+    (snapshot_dir / "model.bin").write_bytes(b"binary model placeholder")
 
     assert download_module.model_downloaded("turbo") is False
 
 
-# ============================================================================
-# ensure_model_downloaded tests
-# ============================================================================
-
-
 def test_ensure_model_downloaded_uses_configured_cache_path(tmp_path: Path, monkeypatch) -> None:
-    """ensure_model_downloaded passes configured cache path to snapshot_download."""
     cache_path = tmp_path / "custom-model-cache"
     config = Config(recordings_path=tmp_path / "recordings", markdown_path=tmp_path / "markdown")
     object.__setattr__(config, "model_cache_path", cache_path)
-
-    calls: list[tuple[str, str]] = []
+    expected_snapshot = cache_path / "models--owner--model" / "snapshots" / "abc123"
+    calls: list[tuple[str, str, str | None]] = []
 
     monkeypatch.setattr(download_module, "get_config", lambda: config)
-    monkeypatch.setattr(download_module, "_get_repo_id", lambda model_name: "owner/model")
-    monkeypatch.setattr(download_module, "model_downloaded", lambda model_name, models_dir=None: False)
     monkeypatch.setattr(
         download_module,
-        "snapshot_download",
-        lambda *, repo_id, cache_dir, ignore_patterns, tqdm_class: calls.append((repo_id, cache_dir)),
+        "_find_model_snapshot",
+        lambda model_name, models_dir=None: expected_snapshot if expected_snapshot.exists() else None,
+    )
+    monkeypatch.setattr(
+        download_module, "resolve_model_spec", lambda model_name: Mock(repo_id="owner/model", revision=None)
     )
 
-    download_module.ensure_model_downloaded("turbo")
+    def mock_snapshot_download(*, repo_id, cache_dir, ignore_patterns, tqdm_class, revision):
+        calls.append((repo_id, cache_dir, revision))
+        _write_snapshot(expected_snapshot)
 
-    assert calls == [("owner/model", str(cache_path))]
+    monkeypatch.setattr(download_module, "snapshot_download", mock_snapshot_download)
+
+    snapshot = download_module.ensure_model_downloaded("turbo")
+
+    assert calls == [("owner/model", str(cache_path), None)]
+    assert snapshot == expected_snapshot
 
 
 def test_ensure_model_downloaded_skips_if_already_cached(tmp_path: Path, monkeypatch) -> None:
-    """ensure_model_downloaded is no-op when model already exists."""
     cache_path = tmp_path / "custom-model-cache"
-    download_called = []
+    expected_snapshot = cache_path / "hub" / "models--owner--model" / "snapshots" / "abc123"
+    _write_snapshot(expected_snapshot)
+    download_called: list[bool] = []
 
-    monkeypatch.setattr(download_module, "model_downloaded", lambda model_name, models_dir: True)
     monkeypatch.setattr(
         download_module,
-        "snapshot_download",
-        lambda **kwargs: download_called.append(True),
+        "_find_model_snapshot",
+        lambda model_name, models_dir=None: expected_snapshot if expected_snapshot.exists() else None,
     )
+    monkeypatch.setattr(download_module, "snapshot_download", lambda **kwargs: download_called.append(True))
 
-    download_module.ensure_model_downloaded("turbo", models_dir=cache_path)
+    result = download_module.ensure_model_downloaded("turbo", models_dir=cache_path)
 
+    assert result == expected_snapshot
     assert len(download_called) == 0
 
 
 def test_ensure_model_downloaded_creates_cache_dir(tmp_path: Path, monkeypatch) -> None:
-    """ensure_model_downloaded creates cache directory if it doesn't exist."""
     cache_path = tmp_path / "new-cache"
+    expected_snapshot = cache_path / "models--owner--model" / "snapshots" / "abc123"
 
-    monkeypatch.setattr(download_module, "_get_repo_id", lambda model_name: "owner/model")
-    monkeypatch.setattr(download_module, "model_downloaded", lambda model_name, models_dir: False)
-    monkeypatch.setattr(download_module, "snapshot_download", lambda **kwargs: None)
+    monkeypatch.setattr(
+        download_module,
+        "_find_model_snapshot",
+        lambda model_name, models_dir=None: expected_snapshot if expected_snapshot.exists() else None,
+    )
+    monkeypatch.setattr(
+        download_module, "resolve_model_spec", lambda model_name: Mock(repo_id="owner/model", revision=None)
+    )
+
+    def mock_snapshot_download(**kwargs):
+        _write_snapshot(expected_snapshot)
+
+    monkeypatch.setattr(download_module, "snapshot_download", mock_snapshot_download)
 
     download_module.ensure_model_downloaded("turbo", models_dir=cache_path)
 
@@ -211,51 +182,61 @@ def test_ensure_model_downloaded_creates_cache_dir(tmp_path: Path, monkeypatch) 
 
 
 def test_ensure_model_downloaded_passes_ignore_patterns(tmp_path: Path, monkeypatch) -> None:
-    """ensure_model_downloaded passes correct ignore patterns to snapshot_download."""
     captured_kwargs = {}
+    expected_snapshot = tmp_path / "models--owner--model" / "snapshots" / "abc123"
 
     def mock_snapshot_download(**kwargs):
         captured_kwargs.update(kwargs)
+        _write_snapshot(expected_snapshot)
 
-    monkeypatch.setattr(download_module, "_get_repo_id", lambda model_name: "owner/model")
-    monkeypatch.setattr(download_module, "model_downloaded", lambda model_name, models_dir: False)
+    monkeypatch.setattr(
+        download_module,
+        "_find_model_snapshot",
+        lambda model_name, models_dir=None: expected_snapshot if expected_snapshot.exists() else None,
+    )
+    monkeypatch.setattr(
+        download_module, "resolve_model_spec", lambda model_name: Mock(repo_id="owner/model", revision="main")
+    )
     monkeypatch.setattr(download_module, "snapshot_download", mock_snapshot_download)
 
     download_module.ensure_model_downloaded("turbo", models_dir=tmp_path)
 
-    assert "ignore_patterns" in captured_kwargs
     patterns = captured_kwargs["ignore_patterns"]
     assert "*.msgpack" in patterns
     assert "*.h5" in patterns
     assert "flax_model*" in patterns
     assert "tf_model*" in patterns
     assert "rust_model*" in patterns
+    assert captured_kwargs["revision"] == "main"
 
 
 def test_ensure_model_downloaded_with_progress_callback(tmp_path: Path, monkeypatch) -> None:
-    """ensure_model_downloaded accepts progress callback."""
     progress_calls = []
+    expected_snapshot = tmp_path / "models--owner--model" / "snapshots" / "abc123"
 
     def on_progress(downloaded: int, total: int):
         progress_calls.append((downloaded, total))
 
-    monkeypatch.setattr(download_module, "_get_repo_id", lambda model_name: "owner/model")
-    monkeypatch.setattr(download_module, "model_downloaded", lambda model_name, models_dir: False)
-    monkeypatch.setattr(download_module, "snapshot_download", lambda **kwargs: None)
+    monkeypatch.setattr(
+        download_module,
+        "_find_model_snapshot",
+        lambda model_name, models_dir=None: expected_snapshot if expected_snapshot.exists() else None,
+    )
+    monkeypatch.setattr(
+        download_module, "resolve_model_spec", lambda model_name: Mock(repo_id="owner/model", revision=None)
+    )
+    monkeypatch.setattr(download_module, "snapshot_download", lambda **kwargs: _write_snapshot(expected_snapshot))
 
     download_module.ensure_model_downloaded("turbo", models_dir=tmp_path, on_progress=on_progress)
 
-    # Progress callback should be wrapped in tqdm class
-    # We can't easily test the callback itself without mocking tqdm
-
 
 def test_ensure_model_downloaded_raises_on_hf_http_error(tmp_path: Path, monkeypatch) -> None:
-    """ensure_model_downloaded raises ModelNotFoundError on HuggingFace HTTP error."""
-    monkeypatch.setattr(download_module, "_get_repo_id", lambda model_name: "owner/model")
-    monkeypatch.setattr(download_module, "model_downloaded", lambda model_name, models_dir: False)
+    monkeypatch.setattr(download_module, "_find_model_snapshot", lambda model_name, models_dir=None: None)
+    monkeypatch.setattr(
+        download_module, "resolve_model_spec", lambda model_name: Mock(repo_id="owner/model", revision=None)
+    )
 
     def mock_snapshot_download(**kwargs):
-        # Create a mock response object for HfHubHTTPError
         mock_response = Mock()
         mock_response.status_code = 404
         mock_response.text = "Not Found"
@@ -268,9 +249,10 @@ def test_ensure_model_downloaded_raises_on_hf_http_error(tmp_path: Path, monkeyp
 
 
 def test_ensure_model_downloaded_raises_on_generic_error(tmp_path: Path, monkeypatch) -> None:
-    """ensure_model_downloaded raises ModelNotFoundError on generic errors."""
-    monkeypatch.setattr(download_module, "_get_repo_id", lambda model_name: "owner/model")
-    monkeypatch.setattr(download_module, "model_downloaded", lambda model_name, models_dir: False)
+    monkeypatch.setattr(download_module, "_find_model_snapshot", lambda model_name, models_dir=None: None)
+    monkeypatch.setattr(
+        download_module, "resolve_model_spec", lambda model_name: Mock(repo_id="owner/model", revision=None)
+    )
 
     def mock_snapshot_download(**kwargs):
         raise RuntimeError("Network error")
@@ -281,13 +263,28 @@ def test_ensure_model_downloaded_raises_on_generic_error(tmp_path: Path, monkeyp
         download_module.ensure_model_downloaded("turbo", models_dir=tmp_path)
 
 
-# ============================================================================
-# _make_progress_tqdm tests
-# ============================================================================
+def test_ensure_model_downloaded_raises_on_incompatible_download(tmp_path: Path, monkeypatch) -> None:
+    expected_snapshot = tmp_path / "models--owner--model" / "snapshots" / "abc123"
+    monkeypatch.setattr(
+        download_module,
+        "_find_model_snapshot",
+        lambda model_name, models_dir=None: expected_snapshot if expected_snapshot.exists() else None,
+    )
+    monkeypatch.setattr(
+        download_module, "resolve_model_spec", lambda model_name: Mock(repo_id="owner/model", revision=None)
+    )
+
+    def mock_snapshot_download(**kwargs):
+        expected_snapshot.mkdir(parents=True)
+        (expected_snapshot / "model.bin").write_bytes(b"binary model placeholder")
+
+    monkeypatch.setattr(download_module, "snapshot_download", mock_snapshot_download)
+
+    with pytest.raises(ModelNotFoundError, match="not compatible"):
+        download_module.ensure_model_downloaded("turbo", models_dir=tmp_path)
 
 
 def test_make_progress_tqdm_creates_tqdm_subclass() -> None:
-    """_make_progress_tqdm returns a tqdm subclass."""
     callback = Mock()
     tqdm_class = download_module._make_progress_tqdm(callback)
 
@@ -297,20 +294,14 @@ def test_make_progress_tqdm_creates_tqdm_subclass() -> None:
 
 
 def test_make_progress_tqdm_calls_callback_on_update() -> None:
-    """_make_progress_tqdm tqdm subclass calls callback on update."""
     calls = []
 
     def callback(downloaded: int, total: int):
         calls.append((downloaded, total))
 
     tqdm_class = download_module._make_progress_tqdm(callback)
-
-    # Create instance with large total to trigger tracking
     instance = tqdm_class(total=2_000_000)
-
-    # Simulate updates
     instance.update(100_000)
     instance.update(50_000)
 
-    # Callback should have been called
     assert len(calls) >= 1

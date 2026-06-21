@@ -36,11 +36,9 @@ import numpy as np
 from .errors import StreamingConfigurationError
 from .types import ChunkResult
 from ..config import Config, get_config
-from ..inference.constants import (
-    DISTIL_MODELS,
-    SAMPLE_RATE,
-)
+from ..inference.constants import SAMPLE_RATE
 from ..inference.errors import AudioTooShortError, TranscriptionError
+from ..models import is_distil_model
 from ..postprocessing import deduplicate_overlap, normalize, remove_hallucinations
 from ..vad import SileroVAD
 
@@ -323,7 +321,7 @@ class StreamingTranscriber:
             chunk_audio = _resample(chunk_audio, capture_rate, SAMPLE_RATE)
 
         try:
-            is_distil = self._model_name in DISTIL_MODELS
+            is_distil = is_distil_model(self._model_name)
             prompt = None if is_distil else _build_prompt(self._prev_context, self._config.initial_prompt)
 
             if slog:

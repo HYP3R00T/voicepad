@@ -72,6 +72,14 @@ from .logging_utils import (
     log_transcription_start,
     setup_transcription_logger,
 )
+from .models import (
+    ModelCompatibilityError,
+    ModelSpec,
+    list_model_ids,
+    list_model_specs,
+    register_model,
+    register_models,
+)
 from .postprocessing import (
     deduplicate_overlap,
     filter_segments,
@@ -162,6 +170,12 @@ __all__ = [
     "get_config",
     "get_config_with_metadata",
     "VALID_TRANSCRIPTION_MODELS",
+    "ModelCompatibilityError",
+    "ModelSpec",
+    "list_model_ids",
+    "list_model_specs",
+    "register_model",
+    "register_models",
     # Inference
     "transcribe",
     "transcribe_file",

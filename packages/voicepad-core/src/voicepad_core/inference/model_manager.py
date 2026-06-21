@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import time
+from pathlib import Path
 
 import numpy as np
 from faster_whisper import WhisperModel
@@ -38,6 +39,12 @@ logger = logging.getLogger(__name__)
 _model_cache: dict[tuple[str, str, str], WhisperModel] = {}
 
 _session_logger: logging.Logger | None = None
+
+
+def _resolve_model_source(model_name: str) -> str:
+    """Return the validated local snapshot path to use with WhisperModel."""
+    model_path = ensure_model_downloaded(model_name)
+    return str(model_path if isinstance(model_path, Path) else model_name)
 
 
 def set_model_manager_session_logger(session_logger: logging.Logger | None) -> None:
@@ -93,11 +100,10 @@ def load(
         slog.debug(f"  Compute type: {compute_type}")
         slog.debug(f"  Cache key: {cache_key}")
 
-    # Ensure weights are present before attempting to load
     if slog:
         slog.info("Checking if model is downloaded...")
 
-    ensure_model_downloaded(model_name)
+    model_source = _resolve_model_source(model_name)
 
     if slog:
         slog.info("Model files confirmed present")
@@ -110,7 +116,7 @@ def load(
 
     try:
         model = WhisperModel(
-            model_name,
+            model_source,
             device=device,
             compute_type=compute_type,
         )
@@ -130,10 +136,7 @@ def load(
             except Exception:
                 slog.debug("  Model device/compute_type: unavailable")
 
-            # Try to get model size info
             try:
-                from pathlib import Path
-
                 model_path = Path.home() / ".cache" / "huggingface" / "hub"
                 if model_path.exists():
                     slog.debug(f"  Model cache path: {model_path}")
@@ -145,10 +148,6 @@ def load(
         if slog:
             slog.info(f"Model added to cache (total cached: {len(_model_cache)})")
 
-        # Run a short dummy inference to force CTranslate2 to allocate CUDA
-        # compute buffers and warm up GPU kernels. Without this, the first real
-        # transcription call pays the ~1-3s kernel initialization cost instead
-        # of it happening here during model warm-up.
         _warmup_model(model, slog)
 
         return model
@@ -272,7 +271,6 @@ def _warmup_model(model: WhisperModel, slog: logging.Logger | None) -> None:
         if slog:
             slog.info(msg)
     except Exception as e:
-        # Warm-up failure is non-fatal — log and continue
         logger.warning(f"Model warm-up failed (non-fatal): {e}")
         if slog:
             slog.warning(f"Model warm-up failed (non-fatal): {e}")
@@ -300,8 +298,9 @@ def _load_cpu_fallback(model_name: str) -> WhisperModel:
 
     try:
         logger.info(f"Loading '{model_name}' on CPU ({CPU_COMPUTE_TYPE})")
+        model_source = _resolve_model_source(model_name)
         model = WhisperModel(
-            model_name,
+            model_source,
             device="cpu",
             compute_type=CPU_COMPUTE_TYPE,
         )

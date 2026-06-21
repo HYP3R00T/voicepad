@@ -15,6 +15,7 @@ from .constants import (
     VALID_TRANSCRIPTION_MODELS,
 )
 from .errors import UnknownTranscriptionModelError
+from ..models import list_model_ids
 
 
 class Config(BaseModel):
@@ -72,7 +73,7 @@ class Config(BaseModel):
     @classmethod
     def validate_transcription_model(cls, v: str) -> str:
         if v not in VALID_TRANSCRIPTION_MODELS:
-            valid = ", ".join(VALID_TRANSCRIPTION_MODELS)
+            valid = ", ".join(list_model_ids())
             raise UnknownTranscriptionModelError(f"Unknown transcription model '{v}'. Valid models: {valid}.")
         return v
 
