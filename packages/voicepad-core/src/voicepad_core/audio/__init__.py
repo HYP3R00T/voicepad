@@ -1,15 +1,28 @@
-# audio/__init__.py
-
 from .base import AudioSource
-from .file import SUPPORTED_FORMATS, FileSource
+from .constants import SUPPORTED_FORMATS
+from .errors import (
+    AudioConversionDependencyError,
+    AudioConversionError,
+    AudioError,
+    AudioFileNotFoundError,
+    AudioStreamStateError,
+    UnsupportedAudioFormatError,
+)
+from .file import FileSource
 from .microphone import MicrophoneStream
-from .preprocessor import TARGET_SAMPLE_RATE, AudioPreProcessor
+from .types import AudioFormat, RawAudio
 
 __all__ = [
     "AudioSource",
+    "AudioFormat",
+    "RawAudio",
+    "AudioError",
+    "AudioFileNotFoundError",
+    "UnsupportedAudioFormatError",
+    "AudioConversionDependencyError",
+    "AudioConversionError",
+    "AudioStreamStateError",
     "FileSource",
     "SUPPORTED_FORMATS",
     "MicrophoneStream",
-    "AudioPreProcessor",
-    "TARGET_SAMPLE_RATE",
 ]

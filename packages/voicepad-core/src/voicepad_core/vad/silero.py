@@ -7,21 +7,12 @@ from pathlib import Path
 import numpy as np
 import onnxruntime as ort
 
-from .base import SpeechSegment, VADBase
+from .base import VADBase
+from .constants import REQUIRED_SAMPLE_RATE, STATE_SIZE, WINDOW_SIZE
+from .errors import InvalidVADSampleRateError
 from .silero_download import ensure_model_exists
+from .types import SpeechSegment
 from ..config import Config, get_config
-
-# Silero VAD requires audio at exactly 16kHz.
-_REQUIRED_SAMPLE_RATE = 16_000
-
-# Silero processes audio in fixed 512-sample windows at 16kHz.
-# 512 samples = 32ms per window. This is non-negotiable —
-# the ONNX model weights were trained for exactly this window size.
-_WINDOW_SIZE = 512
-
-# LSTM state dimensions for Silero VAD v6.
-# These are fixed by the model architecture — do not change.
-_STATE_SIZE = (1, 1, 128)
 
 
 class SileroVAD(VADBase):
@@ -95,9 +86,9 @@ class SileroVAD(VADBase):
         speech_pad_ms = speech_pad_ms if speech_pad_ms is not None else self._config.vad_speech_pad_ms
 
         self._threshold = threshold
-        self._min_speech_samples = int(min_speech_duration_ms * _REQUIRED_SAMPLE_RATE / 1000)
-        self._min_silence_samples = int(min_silence_duration_ms * _REQUIRED_SAMPLE_RATE / 1000)
-        self._speech_pad_samples = int(speech_pad_ms * _REQUIRED_SAMPLE_RATE / 1000)
+        self._min_speech_samples = int(min_speech_duration_ms * REQUIRED_SAMPLE_RATE / 1000)
+        self._min_silence_samples = int(min_silence_duration_ms * REQUIRED_SAMPLE_RATE / 1000)
+        self._speech_pad_samples = int(speech_pad_ms * REQUIRED_SAMPLE_RATE / 1000)
         self._vad_model_dir = vad_model_dir
 
         self._session: ort.InferenceSession = self._load_session()
@@ -105,14 +96,10 @@ class SileroVAD(VADBase):
         self._c: np.ndarray
         self._h, self._c = self._init_states()
 
-    # ------------------------------------------------------------------
-    # VADBase interface
-    # ------------------------------------------------------------------
-
     def detect(
         self,
         audio: np.ndarray,
-        sample_rate: int = _REQUIRED_SAMPLE_RATE,
+        sample_rate: int = REQUIRED_SAMPLE_RATE,
     ) -> list[SpeechSegment]:
         """
         Run Silero VAD on a full audio buffer.
@@ -129,13 +116,13 @@ class SileroVAD(VADBase):
         Raises:
             ValueError: If sample_rate is not 16000.
         """
-        if sample_rate != _REQUIRED_SAMPLE_RATE:
-            raise ValueError(
-                f"SileroVAD requires audio at {_REQUIRED_SAMPLE_RATE}Hz. "
+        if sample_rate != REQUIRED_SAMPLE_RATE:
+            raise InvalidVADSampleRateError(
+                f"SileroVAD requires audio at {REQUIRED_SAMPLE_RATE}Hz. "
                 f"Got {sample_rate}Hz. Run AudioPreProcessor first."
             )
 
-        if len(audio) < _WINDOW_SIZE:
+        if len(audio) < WINDOW_SIZE:
             return []
 
         audio = _ensure_float32(audio)
@@ -157,10 +144,6 @@ class SileroVAD(VADBase):
         """
         self._h, self._c = self._init_states()
 
-    # ------------------------------------------------------------------
-    # Internal — ONNX inference
-    # ------------------------------------------------------------------
-
     def _score_windows(self, audio: np.ndarray) -> list[tuple[int, float]]:
         """
         Slide a 512-sample window over the audio and run the ONNX
@@ -170,12 +153,12 @@ class SileroVAD(VADBase):
             List of (window_start_sample, speech_probability) tuples.
         """
         num_samples = len(audio)
-        if num_samples % _WINDOW_SIZE != 0:
-            pad_size = _WINDOW_SIZE - (num_samples % _WINDOW_SIZE)
+        if num_samples % WINDOW_SIZE != 0:
+            pad_size = WINDOW_SIZE - (num_samples % WINDOW_SIZE)
             audio = np.pad(audio, (0, pad_size), "constant")
 
-        num_chunks = len(audio) // _WINDOW_SIZE
-        batched_audio = audio.reshape(num_chunks, _WINDOW_SIZE)
+        num_chunks = len(audio) // WINDOW_SIZE
+        batched_audio = audio.reshape(num_chunks, WINDOW_SIZE)
 
         # Context padding: prepend last 64 samples of previous chunk
         context_size = 64
@@ -200,12 +183,8 @@ class SileroVAD(VADBase):
         self._h = np.asarray(outputs[1], dtype=np.float32)
         self._c = np.asarray(outputs[2], dtype=np.float32)
 
-        results = [(i * _WINDOW_SIZE, float(probs[i])) for i in range(num_chunks)]
+        results = [(i * WINDOW_SIZE, float(probs[i])) for i in range(num_chunks)]
         return results
-
-    # ------------------------------------------------------------------
-    # Internal — segment building
-    # ------------------------------------------------------------------
 
     def _build_segments(
         self,
@@ -226,13 +205,12 @@ class SileroVAD(VADBase):
         if not speech_probs:
             return []
 
-        # --- Step 1 & 2: group consecutive speech windows ---
         raw: list[tuple[int, int]] = []  # (start_sample, end_sample)
         in_speech = False
         seg_start = 0
 
         for start, prob in speech_probs:
-            end = start + _WINDOW_SIZE
+            end = start + WINDOW_SIZE
             if prob >= self._threshold:
                 if not in_speech:
                     seg_start = start
@@ -245,12 +223,11 @@ class SileroVAD(VADBase):
 
         # Close a segment that runs to the end of audio
         if in_speech:
-            raw.append((seg_start, speech_probs[-1][0] + _WINDOW_SIZE))
+            raw.append((seg_start, speech_probs[-1][0] + WINDOW_SIZE))
 
         if not raw:
             return []
 
-        # --- Step 3: merge segments with short silence gaps ---
         merged: list[tuple[int, int]] = [raw[0]]
         for curr_start, curr_end in raw[1:]:
             prev_start, prev_end = merged[-1]
@@ -259,7 +236,6 @@ class SileroVAD(VADBase):
             else:
                 merged.append((curr_start, curr_end))
 
-        # --- Step 4 & 5: filter short segments and add padding ---
         segments: list[SpeechSegment] = []
 
         for start_s, end_s in merged:
@@ -271,16 +247,12 @@ class SileroVAD(VADBase):
 
             segments.append(
                 SpeechSegment(
-                    start=padded_start / _REQUIRED_SAMPLE_RATE,
-                    end=padded_end / _REQUIRED_SAMPLE_RATE,
+                    start=padded_start / REQUIRED_SAMPLE_RATE,
+                    end=padded_end / REQUIRED_SAMPLE_RATE,
                 )
             )
 
         return segments
-
-    # ------------------------------------------------------------------
-    # Internal — setup
-    # ------------------------------------------------------------------
 
     def _load_session(self) -> ort.InferenceSession:
         """
@@ -313,14 +285,12 @@ class SileroVAD(VADBase):
           h : (1, 1, 128)
           c : (1, 1, 128)
         """
-        h = np.zeros(_STATE_SIZE, dtype=np.float32)
-        c = np.zeros(_STATE_SIZE, dtype=np.float32)
+        h = np.zeros(STATE_SIZE, dtype=np.float32)
+        c = np.zeros(STATE_SIZE, dtype=np.float32)
         return h, c
 
 
-# ------------------------------------------------------------------
 # Module-level helper
-# ------------------------------------------------------------------
 
 
 def _ensure_float32(audio: np.ndarray) -> np.ndarray:

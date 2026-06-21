@@ -105,7 +105,10 @@ Configure VoicePad without editing any files. Changes are saved to your global c
 - Press ++p++ to open the config directory in your file explorer
 - The config file path is shown at the top of the settings panel
 
-See [Configuration](configuration/) for more details on each setting.
+!!! note "Curated settings UI"
+    The Settings tab intentionally shows a simpler model list than the full config file. Advanced model IDs and lower-level transcription behavior can still be changed by editing `voicepad.yaml` directly.
+
+See [Configuration](configuration/index.md) for more details on each setting.
 
 ## Info Panel
 

@@ -57,16 +57,12 @@ def normalize(text: str) -> str:
     if not text:
         return text
 
-    # Step 1 — initial strip
     result = text.strip()
 
-    # Step 2 — remove artefact tokens
     result = _ARTEFACT_RE.sub(" ", result)
 
-    # Step 3 — collapse multiple spaces
     result = re.sub(r" {2,}", " ", result)
 
-    # Step 4 — final strip
     result = result.strip()
 
     if not result:

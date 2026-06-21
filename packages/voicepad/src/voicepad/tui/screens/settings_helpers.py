@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from textual.widgets import Input, Label, Select, Static
-from voicepad_core import VALID_TRANSCRIPTION_MODELS
+from voicepad_core import list_basic_model_options
 
 from voicepad.tui.components.checkbox import VoiceCheckbox
 
@@ -38,7 +38,7 @@ def populate_settings_form(
         "recordings_path": "Where your WAV recordings are saved",
         "markdown_path": "Where your transcription files are saved",
         "vad_model_path": "Where VAD (Voice Activity Detection) model is stored",
-        "transcription_model": "Whisper model to use for transcription",
+        "transcription_model": "Simple model choices for the UI. Edit voicepad.yaml for advanced models.",
         "input_device_index": "Microphone to record from",
         "theme": "UI color theme",
     }
@@ -48,6 +48,7 @@ def populate_settings_form(
     device_options: list[tuple[str, int]] = [("System default", -1)]
     device_options += [(d.name, d.index) for d in audio_devices]
 
+    # Create field widgets
     # Create field widgets
     for field_name, hint in user_fields.items():
         # Use the Config *class* model_fields to avoid accessing Pydantic
@@ -63,11 +64,12 @@ def populate_settings_form(
         )
 
         if field_name == "transcription_model":
-            options = [(m, m) for m in VALID_TRANSCRIPTION_MODELS]
             current_str = str(current_val) if current_val is not None else "turbo"
+            options = list_basic_model_options(current_model=current_str)
+            valid_models = {value for _, value in options}
             widget = Select(
                 options=options,
-                value=current_str if current_str in VALID_TRANSCRIPTION_MODELS else "turbo",
+                value=current_str if current_str in valid_models else "turbo",
                 id="setting-transcription_model",
                 classes="settings-input",
                 allow_blank=False,

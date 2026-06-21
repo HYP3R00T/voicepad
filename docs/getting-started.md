@@ -10,7 +10,7 @@ icon: lucide/rocket
 |---|---|
 | Python | 3.13 or newer |
 | Microphone | Any input device recognised by your OS |
-| NVIDIA GPU | Required for GPU-accelerated transcription. See [GPU Acceleration](configuration/gpu/) |
+| NVIDIA GPU | Required for GPU-accelerated transcription. See [GPU Acceleration](configuration/gpu.md) |
 | uv | Required for installation. [Install uv](https://docs.astral.sh/uv/getting-started/installation/) |
 
 !!! warning "NVIDIA GPUs only"
@@ -44,7 +44,7 @@ After installing, restart your terminal so the `uv` and `uvx` commands are avail
 uvx voicepad
 ```
 
-On first run, it downloads the package and the default Whisper model (`turbo`, ~800 MB). Subsequent runs start immediately from cache.
+On first run, it downloads the package. VoicePad then walks you through a short onboarding flow to choose a microphone and a starter Whisper model before the first model download begins. Subsequent runs start immediately from cache.
 
 ### Option 2: Install as a persistent tool
 
@@ -62,9 +62,14 @@ This installs VoicePad into an isolated environment managed by uv and adds the `
 When you run VoicePad for the first time:
 
 1. The interface opens and shows **initialising** in the header
-2. The `turbo` Whisper model downloads from HuggingFace (~800 MB, one time only)
-3. The model loads into GPU memory (or CPU if no NVIDIA GPU is detected)
-4. The status changes to **ready**. You can now record
+2. The onboarding flow asks you to choose a microphone
+3. The onboarding flow asks you to choose a starter Whisper model
+4. VoicePad downloads that model from HuggingFace (one time only)
+5. The model loads into GPU memory (or CPU if no NVIDIA GPU is detected)
+6. The status changes to **ready**. You can now record
+
+!!! tip "Simple model list by default"
+    The onboarding flow shows a short curated list of starter models so new users are not overwhelmed. Advanced models are still available by editing `voicepad.yaml` directly.
 
 !!! tip "Subsequent launches are instant"
     The model is cached locally after the first download. Future launches skip the download and start in seconds.
@@ -78,7 +83,7 @@ When you run VoicePad for the first time:
 5. Press ++space++ again to stop. Transcription begins immediately
 6. The transcribed text appears in the transcription panel within seconds
 
-The recording is saved as a WAV file and the transcription as a markdown file. Both go to `~/.config/voicepad/data/` by default. See [Configuration](configuration/) to change this.
+The recording is saved as a WAV file and the transcription as a markdown file. Both go to `~/.config/voicepad/data/` by default. See [Configuration](configuration/index.md) to change this.
 
 ## Check Your Microphone
 
@@ -87,5 +92,5 @@ If nothing is captured, your microphone may not be set as the default input devi
 ## Next Steps
 
 - [User Interface](interface.md): learn the full terminal interface
-- [Configuration](configuration/): change output paths, model, and device settings
-- [GPU Acceleration](configuration/gpu/): get the most out of your NVIDIA GPU
+- [Configuration](configuration/index.md): change output paths, model, and device settings
+- [GPU Acceleration](configuration/gpu.md): get the most out of your NVIDIA GPU

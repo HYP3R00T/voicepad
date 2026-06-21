@@ -17,6 +17,7 @@ The global config file lives at:
 On Windows, this expands to `C:\Users\<YourName>\.config\voicepad\voicepad.yaml`.
 
 This file is created automatically when you save settings from the interface.
+If the file is missing or invalid, VoicePad shows onboarding again and rebuilds the configuration from your selections.
 
 ## Settings
 
@@ -31,7 +32,7 @@ log_level: INFO
 input_device_index: null
 recording_prefix: recording
 
-global_hotkey: <ctrl>+<alt>+v
+global_hotkey: ctrl+alt+v
 
 transcription_model: turbo
 transcription_device: auto
@@ -40,10 +41,12 @@ language: en
 beam_size: 1
 transcription_vad_filter: false
 initial_prompt: "Hello. This is a transcription with proper punctuation, capitalization, and grammar."
+text_postprocessing_enabled: false
 no_speech_threshold: 0.6
 hallucination_silence_threshold: 2.0
 hallucination_max_repetitions: 3
 min_audio_duration_s: 0.5
+min_fresh_speech_duration_s: 0.25
 trim_trailing_silence_rms_threshold: 0.01
 trim_trailing_silence_frame_ms: 20
 
@@ -81,14 +84,21 @@ model_warmup_vad_filter: false
     The hotkey works system-wide on Windows, allowing you to start/stop recording from any application.
 
 !!! note "Settings visibility"
-    Not all settings are shown in the Settings tab interface. Advanced runtime tuning such as inference thresholds, VAD behavior, overlap deduplication, warm-up behavior, and download locations can be changed by editing the YAML file directly.
+    Not all settings are shown in the Settings tab interface. Advanced runtime tuning such as inference thresholds, VAD behavior, overlap deduplication, warm-up behavior, text post-processing, final-chunk speech gating, model download locations, and the full advanced model list can be changed by editing the YAML file directly.
+
+## Notes on Advanced Settings
+
+- `text_postprocessing_enabled`
+  Keeps raw model text by default. When set to `true`, VoicePad re-enables its lightweight text cleanup pipeline.
+- `min_fresh_speech_duration_s`
+  Controls how much new VAD-confirmed speech must exist in the final tail of a recording before VoicePad sends that tail to Whisper. This helps avoid hallucinated last-word or last-phrase endings.
 
 For details on individual settings, see:
 
-- [Whisper Models](configuration/models/): choose the right model for your hardware
-- [Input Device](configuration/input-device/): select which microphone to use
-- [Output Paths](configuration/output-paths/): change where recordings and transcriptions are saved
-- [GPU Acceleration](configuration/gpu/): NVIDIA GPU requirements and performance
+- [Whisper Models](models.md): choose the right model for your hardware
+- [Input Device](input-device.md): select which microphone to use
+- [Output Paths](output-paths.md): change where recordings and transcriptions are saved
+- [GPU Acceleration](gpu.md): NVIDIA GPU requirements and performance
 
 ## Changing Settings
 

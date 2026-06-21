@@ -343,6 +343,45 @@ class TestStopRecording:
         np.testing.assert_array_equal(call_args[0], audio)
 
 
+class TestFinalizeWorker:
+    """Tests for finalize_worker and final full-audio fallback."""
+
+    @patch("voicepad.tui.handlers.recording_handler.end_transcription_session")
+    @patch.object(RecordingHandler, "_transcribe_final_audio")
+    def test_finalize_worker_uses_final_full_audio_result_for_simple_sessions(self, mock_final_pass, mock_end_session):
+        mock_app = Mock()
+        mock_app._streamer = Mock()
+        mock_app._stream_chunks = []
+        mock_app.call_from_thread = Mock()
+
+        handler = RecordingHandler(mock_app)
+        handler._final_chunk_event = threading.Event()
+        handler._final_chunk_event.set()
+        handler._session_logger = Mock()
+        handler._log_file = Path("/tmp/test.log")
+
+        audio = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+        final_result = Mock()
+        mock_final_pass.return_value = final_result
+
+        handler.finalize_worker(audio)
+
+        mock_app._streamer.stop.assert_called_once()
+        mock_final_pass.assert_called_once()
+        np.testing.assert_array_equal(mock_final_pass.call_args[0][0], audio)
+        mock_app.call_from_thread.assert_called_once_with(handler.save_recording, audio, final_result)
+        mock_end_session.assert_called_once_with(include_streaming=True)
+
+    def test_transcribe_final_audio_skips_when_multiple_stream_chunks_exist(self):
+        mock_app = Mock()
+        mock_app._stream_chunks = [Mock(), Mock()]
+        handler = RecordingHandler(mock_app)
+
+        result = handler._transcribe_final_audio(np.array([1.0], dtype=np.float32))
+
+        assert result is None
+
+
 class TestOnStreamChunk:
     """Tests for on_stream_chunk method."""
 
@@ -565,6 +604,46 @@ class TestSaveRecording:
         mock_recorder.save_wav.assert_called_once()
         assert mock_app._current_text == "Test text"
         assert mock_button.disabled is False
+
+    @patch("voicepad.tui.handlers.recording_handler._format_markdown")
+    @patch("voicepad.tui.handlers.recording_handler._format_markdown_streaming")
+    def test_save_recording_prefers_final_result_text(self, mock_format_streaming, mock_format_markdown):
+        mock_app = Mock()
+        chunk = ChunkResult(text="Truncated", is_final=True, device="cuda", latency_ms=100.0, segments=[], index=0)
+        mock_app._stream_chunks = [chunk]
+        mock_app._entries = []
+        mock_app.config.recordings_path = Path("/tmp/recordings")
+        mock_app.config.markdown_path = Path("/tmp/markdown")
+        mock_app.config.recording_prefix = "recording"
+        mock_app.config.transcription_model = "turbo"
+
+        mock_recorder = Mock()
+        mock_session = Mock()
+        mock_session._recorder = mock_recorder
+        mock_app._session = mock_session
+
+        mock_button = Mock()
+        mock_app.query_one.return_value = mock_button
+
+        mock_format_markdown.return_value = "# Final markdown"
+        final_result = Mock(text="Complete ending at the moment.", latency_ms=321.0, device="cpu")
+        audio = np.array([1.0, 2.0], dtype=np.float32)
+
+        handler = RecordingHandler(mock_app)
+        with (
+            patch("voicepad.tui.handlers.recording_handler.time.strftime", return_value="20220101_120000"),
+            patch.object(Path, "write_text"),
+            patch.object(Path, "mkdir"),
+        ):
+            handler.save_recording(audio, final_result)
+
+        assert mock_app._current_text == "Complete ending at the moment."
+        assert mock_button.disabled is False
+        mock_format_markdown.assert_called_once()
+        mock_format_streaming.assert_not_called()
+        assert mock_app._entries[0].text == "Complete ending at the moment."
+        assert mock_app._entries[0].device == "cpu"
+        assert mock_app._entries[0].latency_ms == 321.0
 
     def test_adds_history_entry(self):
         """Test that save_recording adds history entry."""

@@ -18,11 +18,10 @@ import time
 import numpy as np
 
 from .constants import (
-    DISTIL_MODELS,
     NO_SPEECH_THRESHOLD,
     SAMPLE_RATE,
 )
-from .exceptions import AudioTooShortError, TranscriptionError
+from .errors import AudioTooShortError, TranscriptionError
 from .model_manager import (
     _is_cuda_error,
     _load_cpu_fallback,
@@ -32,6 +31,7 @@ from .model_manager import (
 )
 from .types import Segment, TranscriptionResult, WordTimestamp
 from ..config import Config, get_config
+from ..models import is_distil_model
 
 # Post-processing is imported here so the engine applies the full pipeline.
 # _trim_trailing_silence lives in this module because it is a pre-inference
@@ -41,7 +41,6 @@ from ..postprocessing.normalizer import normalize
 
 logger = logging.getLogger(__name__)
 
-# Session logger for detailed per-transcription logging
 _session_logger: logging.Logger | None = None
 
 
@@ -54,13 +53,7 @@ def set_session_logger(session_logger: logging.Logger | None) -> None:
     global _session_logger
     _session_logger = session_logger
 
-    # Also set it for the model manager
     set_model_manager_session_logger(session_logger)
-
-
-# ---------------------------------------------------------------------------
-# Public entry point
-# ---------------------------------------------------------------------------
 
 
 def transcribe(
@@ -110,12 +103,11 @@ def transcribe(
     vad_filter = vad_filter if vad_filter is not None else resolved_config.transcription_vad_filter
 
     call_start = time.perf_counter()
-    slog = _session_logger  # Use session logger if available
+    slog = _session_logger
 
     if slog:
         slog.debug(f"transcribe() called with model={model_name}, device={device}, compute={compute_type}")
 
-    # --- Language warning for non-English ---
     if language != "en":
         msg = (
             f"Language '{language}' selected. English is the primary supported language. "
@@ -125,7 +117,6 @@ def transcribe(
         if slog:
             slog.warning(msg)
 
-    # --- Normalise input ---
     audio = np.asarray(audio, dtype=np.float32)
     if audio.ndim > 1:
         if slog:
@@ -162,7 +153,6 @@ def transcribe(
 
     # No finite total-duration cap; chunking is handled by the streaming layer.
 
-    # --- Load model (cached after first call) ---
     if slog:
         slog.info(f"Loading model: {model_name} on {device} ({compute_type})")
 
@@ -173,8 +163,7 @@ def transcribe(
     if slog:
         slog.info(f"Model loaded in {model_load_time:.0f}ms")
 
-    # --- Build prompt (distil models don't support initial_prompt) ---
-    is_distil = model_name in DISTIL_MODELS
+    is_distil = is_distil_model(model_name)
     default_prompt = resolved_config.initial_prompt if initial_prompt is None else initial_prompt
     prompt = None if is_distil else default_prompt
 
@@ -185,7 +174,6 @@ def transcribe(
     actual_device = device
     actual_compute = compute_type
 
-    # --- Run inference ---
     if slog:
         slog.info("Starting inference...")
 
@@ -279,7 +267,6 @@ def transcribe(
             slog.error(msg)
         raise TranscriptionError(msg) from e
 
-    # --- Post-process text ---
     if slog:
         slog.debug("Starting post-processing...")
 
@@ -288,13 +275,13 @@ def transcribe(
     if slog:
         slog.debug(f"Raw text length: {len(text)} characters")
 
-    text = remove_hallucinations(text, max_repetitions=resolved_config.hallucination_max_repetitions)
-    text = normalize(text)
+    if resolved_config.text_postprocessing_enabled:
+        text = remove_hallucinations(text, max_repetitions=resolved_config.hallucination_max_repetitions)
+        text = normalize(text)
 
     if slog:
         slog.debug(f"Post-processed text length: {len(text)} characters")
 
-    # --- Compute quality metrics ---
     avg_confidence = sum(s.avg_logprob for s in segments) / len(segments) if segments else 0.0
     low_confidence_count = sum(1 for s in segments if s.avg_logprob < -1.0)
 
@@ -326,11 +313,6 @@ def transcribe(
     )
 
 
-# ---------------------------------------------------------------------------
-# Internal — segment building
-# ---------------------------------------------------------------------------
-
-
 def _build_segments(
     segments_iter,
     duration_s: float,
@@ -350,11 +332,9 @@ def _build_segments(
     result: list[Segment] = []
 
     for s in segments_iter:
-        # Drop segments that are entirely outside the audio duration
         if s.start >= duration_s:
             continue
 
-        # Drop segments where Whisper is almost certain there's no speech
         if s.no_speech_prob > no_speech_threshold:
             continue
 
@@ -382,11 +362,6 @@ def _build_segments(
         )
 
     return result
-
-
-# ---------------------------------------------------------------------------
-# Internal — audio utilities
-# ---------------------------------------------------------------------------
 
 
 def _trim_trailing_silence(
@@ -418,11 +393,6 @@ def _trim_trailing_silence(
         end -= frame_size
 
     return audio[:end] if end < len(audio) else audio
-
-
-# ---------------------------------------------------------------------------
-# Internal — VAD parameters
-# ---------------------------------------------------------------------------
 
 
 def _vad_parameters() -> dict[str, float | int]:

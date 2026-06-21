@@ -19,21 +19,21 @@ import numpy as np
 import numpy.testing as npt
 import pytest
 from voicepad_core.audio.base import AudioSource
-from voicepad_core.audio.preprocessor import TARGET_SAMPLE_RATE, AudioPreProcessor
-
-# ============================================================================
-# Fixtures
-# ============================================================================
+from voicepad_core.audio.types import RawAudio
+from voicepad_core.preprocessing.errors import InvalidAudioMetadataError, InvalidAudioShapeError
+from voicepad_core.preprocessing.preprocessor import TARGET_SAMPLE_RATE, AudioPreProcessor
+from voicepad_core.preprocessing.types import PreprocessedAudio
 
 
 @pytest.fixture
 def mock_audio_source() -> Mock:
     """Create a mock AudioSource for testing."""
     source = Mock(spec=AudioSource)
-    # Default values - can be overridden in tests
-    source.read.return_value = np.array([0.1, 0.2, 0.3], dtype=np.float32)
+    audio = np.array([0.1, 0.2, 0.3], dtype=np.float32)
+    source.read.return_value = audio
     source.get_sample_rate.return_value = 16000
     source.get_channels.return_value = 1
+    source.read_audio.return_value = RawAudio(samples=audio, sample_rate=16000, channels=1)
     return source
 
 
@@ -388,16 +388,18 @@ def test_process_full_pipeline_with_mock(mock_audio_source: Mock) -> None:
     mock_audio_source.read.return_value = stereo_audio
     mock_audio_source.get_sample_rate.return_value = 44100
     mock_audio_source.get_channels.return_value = 2
+    mock_audio_source.read_audio.return_value = RawAudio(samples=stereo_audio, sample_rate=44100, channels=2)
 
     preprocessor = AudioPreProcessor(mock_audio_source)
     result = preprocessor.process()
 
-    # Verify output properties
-    assert result.dtype == np.float32
-    assert result.ndim == 1  # Mono
-    assert len(result) > 0
-    # Should be normalized
-    assert np.max(np.abs(result)) <= 1.0
+    assert isinstance(result, PreprocessedAudio)
+    assert result.samples.dtype == np.float32
+    assert result.samples.ndim == 1
+    assert len(result.samples) > 0
+    assert result.sample_rate == TARGET_SAMPLE_RATE
+    assert result.channels == 1
+    assert np.max(np.abs(result.samples)) <= 1.0
 
 
 def test_process_end_to_end_stereo_to_mono(mock_audio_source: Mock, capsys) -> None:
@@ -415,22 +417,20 @@ def test_process_end_to_end_stereo_to_mono(mock_audio_source: Mock, capsys) -> N
     mock_audio_source.read.return_value = stereo_audio
     mock_audio_source.get_sample_rate.return_value = sample_rate
     mock_audio_source.get_channels.return_value = 2
+    mock_audio_source.read_audio.return_value = RawAudio(samples=stereo_audio, sample_rate=sample_rate, channels=2)
 
     preprocessor = AudioPreProcessor(mock_audio_source)
     result = preprocessor.process()
 
-    # Verify all transformations applied
-    assert result.dtype == np.float32
-    assert result.ndim == 1  # Mono
+    assert isinstance(result, PreprocessedAudio)
+    assert result.samples.dtype == np.float32
+    assert result.samples.ndim == 1
 
-    # Output should be approximately 1 second at 16kHz
     expected_length = int(duration * TARGET_SAMPLE_RATE)
-    assert abs(len(result) - expected_length) < 100  # Allow tolerance
-
-    # Should be normalized to [-1.0, 1.0]
-    assert np.max(np.abs(result)) == pytest.approx(1.0, abs=1e-5)
-    assert np.min(result) >= -1.0
-    assert np.max(result) <= 1.0
+    assert abs(len(result.samples) - expected_length) < 100
+    assert np.max(np.abs(result.samples)) == pytest.approx(1.0, abs=1e-5)
+    assert np.min(result.samples) >= -1.0
+    assert np.max(result.samples) <= 1.0
 
 
 # ============================================================================
@@ -614,3 +614,31 @@ def test_normalize_very_small_values(mock_audio_source: Mock) -> None:
     assert result[2] == pytest.approx(1.0, abs=1e-6)
     assert result[1] == pytest.approx(2.0 / 3.0, abs=1e-6)
     assert result[0] == pytest.approx(1.0 / 3.0, abs=1e-6)
+
+
+def test_process_array_rejects_non_positive_sample_rate(mock_audio_source: Mock) -> None:
+    preprocessor = AudioPreProcessor(mock_audio_source)
+
+    with pytest.raises(InvalidAudioMetadataError, match="sample_rate must be positive"):
+        preprocessor.process_array(np.array([0.1], dtype=np.float32), sample_rate=0, channels=1)
+
+
+def test_process_array_rejects_non_positive_channels(mock_audio_source: Mock) -> None:
+    preprocessor = AudioPreProcessor(mock_audio_source)
+
+    with pytest.raises(InvalidAudioMetadataError, match="channels must be positive"):
+        preprocessor.process_array(np.array([0.1], dtype=np.float32), sample_rate=16_000, channels=0)
+
+
+def test_to_mono_rejects_mismatched_2d_channel_shape(mock_audio_source: Mock) -> None:
+    preprocessor = AudioPreProcessor(mock_audio_source)
+
+    with pytest.raises(InvalidAudioShapeError, match="declares 2 channels"):
+        preprocessor._to_mono(np.array([[0.1], [0.2]], dtype=np.float32), channels=2)
+
+
+def test_to_mono_rejects_invalid_interleaved_length(mock_audio_source: Mock) -> None:
+    preprocessor = AudioPreProcessor(mock_audio_source)
+
+    with pytest.raises(InvalidAudioShapeError, match="cannot be reshaped"):
+        preprocessor._to_mono(np.array([0.1, 0.2, 0.3], dtype=np.float32), channels=2)

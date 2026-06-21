@@ -195,6 +195,22 @@ class TestSetupModal:
 
             hint = modal.query_one("#wizard-model-hint", Static)
             assert hint is not None
+            assert "default for most users" in str(hint.render())
+
+    async def test_step_1_uses_curated_model_options(self) -> None:
+        """Step 1 shows only the simple curated model choices."""
+        config = create_mock_config()
+        app = SetupModalTestApp(config)
+        async with app.run_test() as pilot:
+            modal = app.screen_stack[-1]
+            assert isinstance(modal, SetupModal)
+
+            await pilot.click("#wizard-next")
+            await pilot.pause()
+
+            model_select = modal.query_one("#wizard-model-select", Select)
+            option_values = [opt[1] for opt in model_select._options]
+            assert option_values == ["small", "large-v3", "turbo"]
 
     async def test_step_1_has_download_status(self) -> None:
         """Step 1 has download status display."""
@@ -344,11 +360,11 @@ class TestSetupModal:
 
             # Change model selection
             model_select = modal.query_one("#wizard-model-select", Select)
-            model_select.value = "base.en"
+            model_select.value = "small"
             await pilot.pause()
 
             # Model should be updated
-            assert modal._chosen_model == "base.en"
+            assert modal._chosen_model == "small"
 
     async def test_set_download_status_updates_status_label(self) -> None:
         """_set_download_status updates the status label."""

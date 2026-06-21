@@ -7,7 +7,7 @@ the configured VoicePad model cache directory.
 
 The public surface is two functions:
     model_downloaded(model_name)          -> bool
-    ensure_model_downloaded(model_name)   -> None
+    ensure_model_downloaded(model_name)   -> Path
 """
 
 from __future__ import annotations
@@ -19,9 +19,9 @@ from pathlib import Path
 from huggingface_hub import snapshot_download
 from huggingface_hub.utils import HfHubHTTPError
 
-from .constants import HF_REPO_PREFIX
-from .exceptions import ModelNotFoundError
+from .errors import ModelNotFoundError
 from ..config import get_config
+from ..models import ModelCompatibilityError, resolve_model_spec, validate_model_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -39,106 +39,62 @@ def _get_cache_roots(models_dir: Path | None = None) -> tuple[Path, ...]:
     return (base_dir / "hub", base_dir)
 
 
-# ---------------------------------------------------------------------------
-# Repo resolution
-# ---------------------------------------------------------------------------
-
-
 def _get_repo_id(model_name: str) -> str:
-    """Resolve the HuggingFace repository ID for a given model name.
-
-    Uses faster-whisper's internal registry first for accurate resolution.
-    Falls back to the Systran prefix for unknown or custom model names.
-
-    Args:
-        model_name: Whisper model name (e.g. 'turbo', 'large-v3').
-
-    Returns:
-        HuggingFace repository ID string.
-    """
-    try:
-        from faster_whisper.utils import _MODELS  # type: ignore[attr-defined]
-
-        if model_name in _MODELS:
-            return _MODELS[model_name]
-    except Exception:
-        pass
-
-    return f"{HF_REPO_PREFIX}{model_name}"
+    """Resolve the HuggingFace repository ID for a given model name."""
+    return resolve_model_spec(model_name).repo_id
 
 
-# ---------------------------------------------------------------------------
-# Cache check
-# ---------------------------------------------------------------------------
-
-
-def model_downloaded(model_name: str, models_dir: Path | None = None) -> bool:
-    """Check whether model weights exist in the local cache.
-
-    Verifies presence of the actual weight file (model.bin), not just
-    metadata or snapshot directories. Makes no network requests.
-
-    Args:
-        model_name: Whisper model name (e.g. 'turbo').
-        models_dir: Override the default models directory.
-                Defaults to the configured model_cache_path.
-
-    Returns:
-        True if the model weights are fully cached locally.
-    """
+def _find_model_snapshot(model_name: str, models_dir: Path | None = None) -> Path | None:
+    """Return the most recent cached model snapshot path, if present."""
     repo_id = _get_repo_id(model_name)
     repo_cache_dir = f"models--{repo_id.replace('/', '--')}"
+    snapshots_found: list[Path] = []
 
     for cache_root in _get_cache_roots(models_dir):
         snapshots = cache_root / repo_cache_dir / "snapshots"
-
         if not snapshots.exists():
             continue
+        snapshots_found.extend(snap for snap in snapshots.iterdir() if snap.is_dir() and (snap / "model.bin").exists())
 
-        if any(snap.is_dir() and (snap / "model.bin").exists() for snap in snapshots.iterdir()):
-            return True
+    if not snapshots_found:
+        return None
 
-    return False
+    return max(snapshots_found, key=lambda snap: snap.stat().st_mtime)
 
 
-# ---------------------------------------------------------------------------
-# Download
-# ---------------------------------------------------------------------------
+def model_downloaded(model_name: str, models_dir: Path | None = None) -> bool:
+    """Check whether compatible model weights exist in the local cache."""
+    snapshot = _find_model_snapshot(model_name, models_dir)
+    if snapshot is None:
+        return False
+
+    try:
+        validate_model_snapshot(snapshot)
+    except ModelCompatibilityError:
+        return False
+
+    return True
 
 
 def ensure_model_downloaded(
     model_name: str,
     models_dir: Path | None = None,
     on_progress: Callable[[int, int], None] | None = None,
-) -> None:
-    """Download model weights from HuggingFace if not already cached.
-
-    Blocks until the download is complete. Safe to call on every startup —
-    it is a no-op when the model is already present.
-
-    Downloaded files are stored at:
-        <model_cache_path>/models--<repo_id>/snapshots/<hash>/
-
-    Ignored file patterns (not downloaded):
-        *.msgpack, *.h5, flax_model*, tf_model*, rust_model*
-
-    Args:
-        model_name:   Whisper model name (e.g. 'turbo').
-        models_dir:   Override the default models directory.
-        on_progress:  Optional callback(downloaded_bytes, total_bytes).
-                      Called during download for progress tracking.
-
-    Raises:
-        ModelNotFoundError: If the download fails for any reason
-                            (network error, HuggingFace unavailable, etc.)
-    """
+) -> Path:
+    """Download model weights from HuggingFace if not already cached."""
     cache_dir = _get_models_dir(models_dir)
 
-    if model_downloaded(model_name, cache_dir):
+    cached_snapshot = _find_model_snapshot(model_name, cache_dir)
+    if cached_snapshot is not None:
+        try:
+            validate_model_snapshot(cached_snapshot)
+        except ModelCompatibilityError as e:
+            raise ModelNotFoundError(f"Cached model '{model_name}' is not compatible: {e}") from e
         logger.debug(f"Model '{model_name}' already cached — skipping download.")
-        return
+        return cached_snapshot
 
-    repo_id = _get_repo_id(model_name)
+    model_spec = resolve_model_spec(model_name)
+    repo_id = model_spec.repo_id
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     logger.info(f"Downloading '{model_name}' from {repo_id} → {cache_dir}")
@@ -159,22 +115,27 @@ def ensure_model_downloaded(
                 "rust_model*",
             ],
             tqdm_class=tqdm_class,
+            revision=model_spec.revision,
         )
         logger.info(f"Model '{model_name}' downloaded successfully.")
 
-        # Attempt to detect which snapshot directory was used and log it
         try:
             repo_cache_dir = f"models--{repo_id.replace('/', '--')}"
             snapshots_dir = cache_dir / repo_cache_dir / "snapshots"
             if snapshots_dir.exists():
                 snaps = [d for d in snapshots_dir.iterdir() if d.is_dir() and (d / "model.bin").exists()]
                 if snaps:
-                    # Pick the most recent snapshot by mtime
                     used = max(snaps, key=lambda p: p.stat().st_mtime)
                     total_bytes = sum(f.stat().st_size for f in used.rglob("*") if f.is_file())
                     logger.info(f"Snapshot used: {used} ({total_bytes} bytes)")
         except Exception:
             logger.debug("Could not determine snapshot directory after download", exc_info=True)
+
+        snapshot = _find_model_snapshot(model_name, cache_dir)
+        if snapshot is None:
+            raise ModelNotFoundError(f"Failed to locate cached snapshot for model '{model_name}' after download.")
+        validate_model_snapshot(snapshot)
+        return snapshot
 
     except HfHubHTTPError as e:
         raise ModelNotFoundError(
@@ -183,14 +144,10 @@ def ensure_model_downloaded(
             f"  reason: {e}\n\n"
             "Check your internet connection and try again."
         ) from e
-
+    except ModelCompatibilityError as e:
+        raise ModelNotFoundError(f"Downloaded model '{model_name}' is not compatible: {e}") from e
     except Exception as e:
         raise ModelNotFoundError(f"Failed to download model '{model_name}'.\n  reason: {e}") from e
-
-
-# ---------------------------------------------------------------------------
-# Internal — progress tqdm wrapper
-# ---------------------------------------------------------------------------
 
 
 def _make_progress_tqdm(callback: Callable[[int, int], None]):

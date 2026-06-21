@@ -10,7 +10,7 @@ from textual import on, work
 from textual.binding import Binding
 from textual.screen import ModalScreen
 from textual.widgets import Button, DataTable, ProgressBar, Select, Static
-from voicepad_core import VALID_TRANSCRIPTION_MODELS
+from voicepad_core import get_model_hint, list_basic_model_options
 
 from voicepad.tui.components import VoiceButton
 
@@ -22,28 +22,6 @@ try:
     _APP_VERSION = f"v{_pkg_version('voicepad')}"
 except Exception:
     _APP_VERSION = "dev"
-
-_HINTS: dict[str, str] = {
-    "tiny": "~40 MB · fastest · low accuracy · CPU",
-    "tiny.en": "~40 MB · fastest · English only · CPU",
-    "base": "~75 MB · very fast · fair accuracy · CPU",
-    "base.en": "~75 MB · very fast · English only · CPU",
-    "small": "~250 MB · fast · good accuracy · ~1 GB VRAM",
-    "small.en": "~250 MB · fast · English only · ~1 GB VRAM",
-    "medium": "~770 MB · moderate · very good · ~2 GB VRAM",
-    "medium.en": "~770 MB · moderate · English only · ~2 GB VRAM",
-    "large-v1": "~1.5 GB · slow · excellent · ~5 GB VRAM",
-    "large-v2": "~1.5 GB · slow · excellent · ~5 GB VRAM",
-    "large-v3": "~1.5 GB · slow · best accuracy · ~5 GB VRAM",
-    "large": "~1.5 GB · slow · excellent · ~5 GB VRAM",
-    "large-v3-turbo": "~800 MB · recommended · excellent · ~3 GB VRAM",
-    "turbo": "~800 MB · recommended · excellent · ~3 GB VRAM",
-    "distil-small.en": "~135 MB · fast · English only · ~1 GB VRAM",
-    "distil-medium.en": "~395 MB · moderate · English only · ~1 GB VRAM",
-    "distil-large-v2": "~760 MB · fast · English only · ~3 GB VRAM",
-    "distil-large-v3": "~760 MB · fast · English only · ~3 GB VRAM",
-    "distil-large-v3.5": "~760 MB · fast · English only · ~3 GB VRAM",
-}
 
 
 class SetupModal(ModalScreen[tuple[str, int | None]]):
@@ -167,19 +145,19 @@ class SetupModal(ModalScreen[tuple[str, int | None]]):
         body.mount(Static("Choose a Whisper Model", classes="wizard-title"))
         body.mount(
             Static(
-                "[dim]turbo[/] is recommended for most NVIDIA GPU users.",
+                "Pick one of these simple starting points. You can unlock more models later by editing [dim]voicepad.yaml[/].",
                 classes="wizard-text",
             )
         )
         body.mount(
             Select(
-                options=[(m, m) for m in VALID_TRANSCRIPTION_MODELS],
+                options=list_basic_model_options(current_model=self._chosen_model),
                 value=self._chosen_model,
                 id="wizard-model-select",
                 allow_blank=False,
             )
         )
-        body.mount(Static("", id="wizard-model-hint", classes="wizard-hint"))
+        body.mount(Static(get_model_hint(self._chosen_model), id="wizard-model-hint", classes="wizard-hint"))
         body.mount(Static("", id="wizard-download-status", classes="wizard-status"))
         # Indeterminate progress bar — no percentage, just a looping animation
         bar = ProgressBar(id="wizard-progress", show_eta=False, show_percentage=False)
@@ -191,7 +169,7 @@ class SetupModal(ModalScreen[tuple[str, int | None]]):
         if event.value is not Select.BLANK:
             self._chosen_model = str(event.value)
             with contextlib.suppress(Exception):
-                self.query_one("#wizard-model-hint", Static).update(_HINTS.get(self._chosen_model, ""))
+                self.query_one("#wizard-model-hint", Static).update(get_model_hint(self._chosen_model))
 
     def _start_download(self) -> None:
         if self._downloading:

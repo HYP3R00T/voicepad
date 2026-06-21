@@ -13,7 +13,7 @@ Quick start:
 
 from .download import ensure_model_downloaded, model_downloaded
 from .engine import transcribe
-from .exceptions import (
+from .errors import (
     AudioTooLongWarning,
     AudioTooShortError,
     ModelNotFoundError,
@@ -23,22 +23,17 @@ from .model_manager import get, is_loaded, load, unload, unload_all
 from .types import Segment, TranscriptionResult, WordTimestamp
 
 __all__ = [
-    # Core
     "transcribe",
-    # Model lifecycle
     "load",
     "unload",
     "unload_all",
     "is_loaded",
     "get",
-    # Download
     "ensure_model_downloaded",
     "model_downloaded",
-    # Types
     "TranscriptionResult",
     "Segment",
     "WordTimestamp",
-    # Exceptions
     "TranscriptionError",
     "AudioTooShortError",
     "AudioTooLongWarning",

@@ -46,24 +46,12 @@ if sys.platform == "win32":
         if not _remaining:
             break
 
-# ---------------------------------------------------------------------------
-# Public API — audio
-# ---------------------------------------------------------------------------
-from .audio import TARGET_SAMPLE_RATE, AudioPreProcessor, FileSource, MicrophoneStream
-
-# ---------------------------------------------------------------------------
-# Public API — config
-# ---------------------------------------------------------------------------
-from .config import Config, get_config, get_config_with_metadata
-from .config.settings import VALID_TRANSCRIPTION_MODELS
-
-# ---------------------------------------------------------------------------
-# Public API — inference
-# ---------------------------------------------------------------------------
+from .audio import FileSource, MicrophoneStream
+from .config import VALID_TRANSCRIPTION_MODELS, Config, get_config, get_config_with_metadata
 from .inference import transcribe
 from .inference.constants import COMPUTE_TYPE, DEFAULT_MODEL, DEVICE, LANGUAGE, SAMPLE_RATE
 from .inference.download import ensure_model_downloaded, model_downloaded
-from .inference.exceptions import (
+from .inference.errors import (
     AudioTooLongWarning,
     AudioTooShortError,
     ModelNotFoundError,
@@ -76,10 +64,6 @@ from .inference.model_manager import load as load_model
 from .inference.model_manager import unload as unload_model
 from .inference.model_manager import unload_all as unload_all_models
 from .inference.types import Segment, TranscriptionResult, WordTimestamp
-
-# ---------------------------------------------------------------------------
-# Public API — logging
-# ---------------------------------------------------------------------------
 from .logging_utils import (
     begin_transcription_session,
     configure_global_logging,
@@ -88,31 +72,28 @@ from .logging_utils import (
     log_transcription_start,
     setup_transcription_logger,
 )
-
-# ---------------------------------------------------------------------------
-# Public API — postprocessing
-# ---------------------------------------------------------------------------
+from .models import (
+    ModelCompatibilityError,
+    ModelSpec,
+    get_model_hint,
+    get_model_label,
+    list_basic_model_ids,
+    list_basic_model_options,
+    list_model_ids,
+    list_model_specs,
+    register_model,
+    register_models,
+)
 from .postprocessing import (
     deduplicate_overlap,
     filter_segments,
     normalize,
     remove_hallucinations,
 )
-
-# ---------------------------------------------------------------------------
-# Public API — streaming
-# ---------------------------------------------------------------------------
+from .preprocessing import TARGET_SAMPLE_RATE, AudioPreProcessor
 from .streaming import ChunkResult, StreamingTranscriber
-
-# ---------------------------------------------------------------------------
-# Public API — VAD
-# ---------------------------------------------------------------------------
 from .vad import SileroVAD, SpeechSegment
 from .vad import ensure_model_exists as ensure_vad_model
-
-# ---------------------------------------------------------------------------
-# High-level transcription functions
-# ---------------------------------------------------------------------------
 
 
 def transcribe_file(
@@ -158,17 +139,14 @@ def transcribe_file(
     if not wav_path.exists():
         raise FileNotFoundError(f"WAV file not found: {wav_path}")
 
-    # 1. Load audio via FileSource
     source = FileSource(wav_path)
     source.read()
 
-    # 2. Preprocess to 16kHz mono using process_array (standalone method)
     preprocessor = AudioPreProcessor(source)
-    audio = preprocessor.process()
+    processed_audio = preprocessor.process()
 
-    # 3. Transcribe
     result = transcribe(
-        audio,
+        processed_audio.samples,
         model_name=model_name,
         device=device,
         compute_type=compute_type,
@@ -176,11 +154,10 @@ def transcribe_file(
         config=resolved_config,
     )
 
-    # 4. Apply LocalAgreement if enabled
     if local_agreement:
         from .postprocessing.agreement import apply_local_agreement
 
-        result = apply_local_agreement(audio, result, model_name, device, compute_type, language)
+        result = apply_local_agreement(processed_audio.samples, result, model_name, device, compute_type, language)
 
     return result
 
@@ -196,7 +173,17 @@ __all__ = [
     "Config",
     "get_config",
     "get_config_with_metadata",
+    "get_model_hint",
+    "get_model_label",
+    "list_basic_model_ids",
+    "list_basic_model_options",
     "VALID_TRANSCRIPTION_MODELS",
+    "ModelCompatibilityError",
+    "ModelSpec",
+    "list_model_ids",
+    "list_model_specs",
+    "register_model",
+    "register_models",
     # Inference
     "transcribe",
     "transcribe_file",
