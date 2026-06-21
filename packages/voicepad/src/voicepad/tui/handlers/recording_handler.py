@@ -20,6 +20,7 @@ from voicepad_core import (
 
 from voicepad.tui.components import VoiceButton
 from voicepad.tui.utils.clipboard import copy_to_clipboard as _copy_to_clipboard
+from voicepad.tui.utils.markdown import format_markdown as _format_markdown
 from voicepad.tui.utils.markdown import format_markdown_streaming as _format_markdown_streaming
 from voicepad.tui.workers import RecordingSession
 
@@ -149,7 +150,8 @@ class RecordingHandler:
         if self._final_chunk_event is not None:
             self._final_chunk_event.wait(timeout=5.0)
 
-        self.app.call_from_thread(self.save_recording, audio)
+        final_result = self._transcribe_final_audio(audio)
+        self.app.call_from_thread(self.save_recording, audio, final_result)
 
         # Clear the session logger
         end_transcription_session(include_streaming=True)
@@ -158,6 +160,29 @@ class RecordingHandler:
             self._session_logger.info("=" * 80)
             self._session_logger.info(f"Session complete. Log saved to: {self._log_file}")
             self._session_logger.info("=" * 80)
+
+    def _transcribe_final_audio(self, audio: np.ndarray):
+        """Use the fully recorded audio as the final authority for short/simple sessions."""
+        if len(self.app._stream_chunks) > 1:
+            return None
+
+        from voicepad_core import transcribe
+
+        try:
+            if self._session_logger:
+                self._session_logger.info("Running final full-audio transcription pass")
+            return transcribe(
+                audio,
+                model_name=self.app.config.transcription_model,
+                device=self.app.config.transcription_device,
+                compute_type=self.app.config.transcription_compute_type,
+                language=self.app.config.language,
+                word_timestamps=False,
+            )
+        except Exception as e:
+            if self._session_logger:
+                self._session_logger.warning(f"Final full-audio pass failed, keeping streaming result: {e}")
+            return None
 
     def _handle_stream_chunk(self, chunk: ChunkResult) -> None:
         """Handle streamed chunks on the main thread and signal completion for the final chunk."""
@@ -204,11 +229,12 @@ class RecordingHandler:
             else:
                 self.app._overlay_set("hidden")
 
-    def save_recording(self, audio: np.ndarray) -> None:
+    def save_recording(self, audio: np.ndarray, final_result: object | None = None) -> None:
         """Save WAV + markdown and add history entry after streaming completes."""
         from voicepad.tui.models import SessionEntry
 
-        full_text = " ".join(c.text for c in self.app._stream_chunks).strip()
+        final_text = getattr(final_result, "text", "") if final_result is not None else ""
+        full_text = final_text or " ".join(c.text for c in self.app._stream_chunks).strip()
         self.app._current_text = full_text
         copy_button = self.app.query_one("#tx-copy-btn", VoiceButton)
         copy_button.disabled = not bool(full_text)
@@ -223,20 +249,21 @@ class RecordingHandler:
             try:
                 recorder_ref.save_wav(audio, wav_path, sample_rate=16000)
                 if full_text:
-                    # Build a synthetic TranscriptionResult-like object for _format_markdown
                     md_path = self.app.config.markdown_path / f"{wav_path.stem}.md"
                     self.app.config.markdown_path.mkdir(parents=True, exist_ok=True)
                     duration_s = len(audio) / 16000
-                    md_path.write_text(
-                        _format_markdown_streaming(
+                    markdown = (
+                        _format_markdown(wav_path, final_result, self.app.config.transcription_model)
+                        if final_result is not None
+                        else _format_markdown_streaming(
                             wav_path,
                             full_text,
                             duration_s,
                             self.app._stream_chunks,
                             self.app.config.transcription_model,
-                        ),
-                        encoding="utf-8",
+                        )
                     )
+                    md_path.write_text(markdown, encoding="utf-8")
             except Exception:
                 wav_path = None
                 md_path = None
@@ -247,8 +274,12 @@ class RecordingHandler:
             md_path=md_path,
             duration_s=len(audio) / 16000,
             text=full_text,
-            latency_ms=0.0,
-            device=self.app._stream_chunks[-1].device if self.app._stream_chunks else "cuda",
+            latency_ms=float(getattr(final_result, "latency_ms", 0.0)),
+            device=str(
+                getattr(
+                    final_result, "device", self.app._stream_chunks[-1].device if self.app._stream_chunks else "cuda"
+                )
+            ),
         )
         self.app._entries.append(entry)
         self.app._add_history_entry(entry)

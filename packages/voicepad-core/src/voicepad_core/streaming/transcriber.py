@@ -40,6 +40,7 @@ from ..inference.constants import SAMPLE_RATE
 from ..inference.errors import AudioTooShortError, TranscriptionError
 from ..models import is_distil_model
 from ..postprocessing import deduplicate_overlap, normalize, remove_hallucinations
+from ..preprocessing import AudioPreProcessor
 from ..vad import SileroVAD
 
 logger = logging.getLogger(__name__)
@@ -315,10 +316,12 @@ class StreamingTranscriber:
                 f"overlap_samples={overlap_samples}, chunk_samples={len(chunk_audio)}"
             )
 
-        if capture_rate != SAMPLE_RATE:
-            if slog:
-                slog.debug(f"Resampling from {capture_rate}Hz to {SAMPLE_RATE}Hz")
-            chunk_audio = _resample(chunk_audio, capture_rate, SAMPLE_RATE)
+        if slog and capture_rate != SAMPLE_RATE:
+            slog.debug(f"Preprocessing chunk from {capture_rate}Hz to {SAMPLE_RATE}Hz")
+
+        # Keep streaming chunks on the same preprocessing path as saved WAV
+        # transcriptions so the final words are not lost to inconsistent audio prep.
+        chunk_audio = AudioPreProcessor(self._recorder).process_array(chunk_audio, sample_rate=capture_rate)
 
         try:
             is_distil = is_distil_model(self._model_name)

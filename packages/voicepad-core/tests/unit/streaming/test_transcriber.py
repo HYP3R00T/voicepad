@@ -148,9 +148,11 @@ def test_stop_joins_thread_and_clears_it() -> None:
     "voicepad_core.streaming.transcriber.remove_hallucinations", side_effect=lambda text, max_repetitions: text + "!"
 )
 @patch("voicepad_core.streaming.transcriber.deduplicate_overlap")
+@patch("voicepad_core.streaming.transcriber.AudioPreProcessor")
 @patch("voicepad_core.inference.transcribe")
 def test_dispatch_chunk_uses_configured_postprocessing(
     mock_transcribe: Mock,
+    mock_preprocessor: Mock,
     mock_dedup: Mock,
     mock_remove: Mock,
     mock_normalize: Mock,
@@ -178,6 +180,7 @@ def test_dispatch_chunk_uses_configured_postprocessing(
     )
     mock_transcribe.return_value = result
     mock_dedup.side_effect = lambda segments, *_args, **_kwargs: segments
+    mock_preprocessor.return_value.process_array.side_effect = lambda audio, sample_rate: audio
 
     audio = np.zeros(32_000, dtype=np.float32)
     streamer._dispatch_chunk(audio, is_final=False, capture_rate=16_000)
@@ -187,6 +190,12 @@ def test_dispatch_chunk_uses_configured_postprocessing(
     assert kwargs["full_duplicate_threshold"] == 0.9
     assert kwargs["min_overlap_words_for_partial"] == 4
     assert kwargs["partial_lead_words"] == 6
+    mock_preprocessor.assert_called_once_with(streamer._recorder)
+    mock_preprocessor.return_value.process_array.assert_called_once()
+    process_args = mock_preprocessor.return_value.process_array.call_args.args
+    assert process_args[0].dtype == np.float32
+    assert len(process_args[0]) == 28_000
+    assert mock_preprocessor.return_value.process_array.call_args.kwargs == {"sample_rate": 16_000}
     mock_remove.assert_called_once_with("hello", max_repetitions=2)
     mock_normalize.assert_called_once_with("hello!")
     assert streamer._prev_context == "ELLO!"
