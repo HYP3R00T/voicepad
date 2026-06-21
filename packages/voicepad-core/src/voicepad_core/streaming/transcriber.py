@@ -33,7 +33,8 @@ from collections.abc import Callable
 
 import numpy as np
 
-from .chunk_result import ChunkResult
+from .errors import StreamingConfigurationError
+from .types import ChunkResult
 from ..config import Config, get_config
 from ..inference.constants import (
     DISTIL_MODELS,
@@ -57,26 +58,6 @@ def set_streaming_session_logger(session_logger: logging.Logger | None) -> None:
     """
     global _session_logger
     _session_logger = session_logger
-
-
-# ---------------------------------------------------------------------------
-# Module-level defaults — overridable via constructor
-# ---------------------------------------------------------------------------
-
-# Minimum audio (seconds) accumulated before a silence-triggered split fires
-MIN_CHUNK_S: float = 15.0
-
-# Hard cap — Whisper's 30s context window minus 1s safety margin
-MAX_CHUNK_S: float = 29.0
-
-# How often the monitor thread polls the recorder buffer
-POLL_INTERVAL_S: float = 0.3
-
-# Audio overlap kept at chunk boundaries to preserve acoustic context
-OVERLAP_S: float = 0.5
-
-# Default silence threshold (ms) for VAD-based chunk splitting
-SILENCE_THRESHOLD_MS: int = 1000
 
 
 # ---------------------------------------------------------------------------
@@ -150,6 +131,7 @@ class StreamingTranscriber:
         self._beam_size = beam_size if beam_size is not None else self._config.beam_size
         self._vad_filter = vad_filter if vad_filter is not None else self._config.transcription_vad_filter
         self._poll_interval_s = self._config.stream_poll_interval_s
+        self._validate_configuration()
         self._stream_context_chars = self._config.stream_context_chars
 
         self._stop_event = threading.Event()
@@ -166,8 +148,19 @@ class StreamingTranscriber:
         # Silero VAD instance — created lazily on first start()
         self._vad: SileroVAD | None = None
 
+    def _validate_configuration(self) -> None:
+        if self._min_chunk_s <= 0 or self._max_chunk_s <= 0:
+            raise StreamingConfigurationError("min_chunk_s and max_chunk_s must be positive")
+        if self._min_chunk_s > self._max_chunk_s:
+            raise StreamingConfigurationError("min_chunk_s cannot be greater than max_chunk_s")
+        if self._overlap_s < 0:
+            raise StreamingConfigurationError("overlap_s cannot be negative")
+        if self._silence_threshold_ms <= 0:
+            raise StreamingConfigurationError("silence_threshold_ms must be positive")
+
     # -----------------------------------------------------------------------
     # Public lifecycle
+
     # -----------------------------------------------------------------------
 
     def start(self) -> None:
@@ -226,6 +219,7 @@ class StreamingTranscriber:
 
     # -----------------------------------------------------------------------
     # Monitor loop (background thread)
+
     # -----------------------------------------------------------------------
 
     def _monitor_loop(self) -> None:
@@ -310,6 +304,7 @@ class StreamingTranscriber:
 
     # -----------------------------------------------------------------------
     # Chunk dispatch
+
     # -----------------------------------------------------------------------
 
     def _dispatch_chunk(

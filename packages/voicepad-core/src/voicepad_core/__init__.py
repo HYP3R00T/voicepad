@@ -54,8 +54,7 @@ from .audio import FileSource, MicrophoneStream
 # ---------------------------------------------------------------------------
 # Public API — config
 # ---------------------------------------------------------------------------
-from .config import Config, get_config, get_config_with_metadata
-from .config.settings import VALID_TRANSCRIPTION_MODELS
+from .config import VALID_TRANSCRIPTION_MODELS, Config, get_config, get_config_with_metadata
 
 # ---------------------------------------------------------------------------
 # Public API — inference
