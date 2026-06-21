@@ -135,6 +135,15 @@ def validate_model_snapshot(snapshot_path: str | Path) -> Path:
         raise ModelCompatibilityError(f"Model config is not valid JSON: {config_path}") from exc
 
     model_type = str(config.get("model_type", "")).strip().lower()
+    if "whisper" in model_type:
+        return snapshot_dir
+
+    # Many CTranslate2 Whisper exports omit model_type entirely. Accept those
+    # when they still expose the characteristic Whisper conversion keys.
+    whisper_markers = ("alignment_heads", "lang_ids", "suppress_ids", "suppress_ids_begin")
+    if any(marker in config for marker in whisper_markers):
+        return snapshot_dir
+
     if "whisper" not in model_type:
         raise ModelCompatibilityError(
             f"Model config at {config_path} is not Whisper-compatible (model_type={model_type!r})."

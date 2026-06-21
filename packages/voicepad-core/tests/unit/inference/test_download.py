@@ -66,6 +66,23 @@ def test_model_downloaded_returns_true_when_model_exists(tmp_path: Path, monkeyp
     assert download_module.model_downloaded("turbo") is True
 
 
+def test_model_downloaded_accepts_ctranslate2_whisper_config_without_model_type(tmp_path: Path, monkeypatch) -> None:
+    cache_path = tmp_path / "custom-model-cache"
+    config = Config(recordings_path=tmp_path / "recordings", markdown_path=tmp_path / "markdown")
+    object.__setattr__(config, "model_cache_path", cache_path)
+    monkeypatch.setattr(download_module, "get_config", lambda: config)
+    monkeypatch.setattr(download_module, "_get_repo_id", lambda model_name: "owner/model")
+
+    snapshot_dir = cache_path / "hub" / "models--owner--model" / "snapshots" / "abc123"
+    _write_snapshot(snapshot_dir)
+    (snapshot_dir / "config.json").write_text(
+        '{"alignment_heads": [[2, 4]], "lang_ids": [50259], "suppress_ids": [1], "suppress_ids_begin": [220]}',
+        encoding="utf-8",
+    )
+
+    assert download_module.model_downloaded("turbo") is True
+
+
 def test_model_downloaded_returns_false_when_model_missing(tmp_path: Path, monkeypatch) -> None:
     cache_path = tmp_path / "custom-model-cache"
     config = Config(recordings_path=tmp_path / "recordings", markdown_path=tmp_path / "markdown")
