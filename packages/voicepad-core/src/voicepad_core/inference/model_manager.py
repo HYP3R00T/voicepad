@@ -29,7 +29,7 @@ from .constants import (
     DEVICE,
 )
 from .download import ensure_model_downloaded
-from .exceptions import TranscriptionError
+from .errors import TranscriptionError
 from ..config import get_config
 
 logger = logging.getLogger(__name__)

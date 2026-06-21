@@ -9,7 +9,7 @@ import pytest
 from huggingface_hub.utils import HfHubHTTPError
 from voicepad_core.config import Config
 from voicepad_core.inference import download as download_module
-from voicepad_core.inference.exceptions import ModelNotFoundError
+from voicepad_core.inference.errors import ModelNotFoundError
 
 # ============================================================================
 # _get_models_dir tests

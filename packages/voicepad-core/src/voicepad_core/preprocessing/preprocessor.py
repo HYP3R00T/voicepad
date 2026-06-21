@@ -7,30 +7,33 @@ import numpy as np
 
 from .constants import MONO_CHANNELS, TARGET_SAMPLE_RATE
 from .errors import InvalidAudioMetadataError, InvalidAudioShapeError
+from .types import PreprocessedAudio
 from ..audio.base import AudioSource
 
 logger = logging.getLogger(__name__)
 
 
 class AudioPreProcessor:
-    """
-    Normalize audio from any AudioSource into Whisper-ready audio.
-
-    Output is float32, mono, 16kHz, and peak-normalized.
-    """
+    """Normalize audio from any AudioSource into Whisper-ready audio."""
 
     def __init__(self, source: AudioSource) -> None:
         self._source = source
 
-    def process(self) -> np.ndarray:
-        """Read from the source and return normalized audio."""
-        audio = self._source.read()
-        sample_rate = self._source.get_sample_rate()
-        channels = self._source.get_channels()
-        logger.debug("PreProcessor: input %s %sHz %sch", audio.shape, sample_rate, channels)
-        normalized = self.process_array(audio, sample_rate=sample_rate, channels=channels)
+    def process(self) -> PreprocessedAudio:
+        raw_audio = self._source.read_audio()
+        logger.debug(
+            "PreProcessor: input %s %sHz %sch",
+            raw_audio.samples.shape,
+            raw_audio.sample_rate,
+            raw_audio.channels,
+        )
+        normalized = self.process_array(
+            raw_audio.samples,
+            sample_rate=raw_audio.sample_rate,
+            channels=raw_audio.channels,
+        )
         logger.debug("PreProcessor: output %s samples %sHz", len(normalized), TARGET_SAMPLE_RATE)
-        return normalized
+        return PreprocessedAudio(samples=normalized)
 
     def process_array(
         self,
@@ -38,7 +41,6 @@ class AudioPreProcessor:
         sample_rate: int,
         channels: int = MONO_CHANNELS,
     ) -> np.ndarray:
-        """Normalize a raw audio array directly."""
         self._validate_metadata(sample_rate, channels)
         audio = self._to_float32(audio)
         audio = self._to_mono(audio, channels)
@@ -67,7 +69,12 @@ class AudioPreProcessor:
             raise InvalidAudioShapeError(f"audio with length {audio.size} cannot be reshaped into {channels} channels")
         return audio.reshape(-1, channels).mean(axis=1).astype(np.float32)
 
-    def _resample(self, audio: np.ndarray, from_rate: int, to_rate: int) -> np.ndarray:
+    def _resample(
+        self,
+        audio: np.ndarray,
+        from_rate: int,
+        to_rate: int,
+    ) -> np.ndarray:
         if from_rate == to_rate:
             return audio
 

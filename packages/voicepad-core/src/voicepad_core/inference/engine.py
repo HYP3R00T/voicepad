@@ -22,7 +22,7 @@ from .constants import (
     NO_SPEECH_THRESHOLD,
     SAMPLE_RATE,
 )
-from .exceptions import AudioTooShortError, TranscriptionError
+from .errors import AudioTooShortError, TranscriptionError
 from .model_manager import (
     _is_cuda_error,
     _load_cpu_fallback,

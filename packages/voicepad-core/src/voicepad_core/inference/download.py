@@ -20,7 +20,7 @@ from huggingface_hub import snapshot_download
 from huggingface_hub.utils import HfHubHTTPError
 
 from .constants import HF_REPO_PREFIX
-from .exceptions import ModelNotFoundError
+from .errors import ModelNotFoundError
 from ..config import get_config
 
 logger = logging.getLogger(__name__)

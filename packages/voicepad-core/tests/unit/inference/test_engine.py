@@ -9,7 +9,7 @@ import pytest
 from voicepad_core.config import Config
 from voicepad_core.inference.constants import MAX_AUDIO_DURATION_S, SAMPLE_RATE
 from voicepad_core.inference.engine import _build_segments, _trim_trailing_silence, _vad_parameters, transcribe
-from voicepad_core.inference.exceptions import AudioTooShortError, TranscriptionError
+from voicepad_core.inference.errors import AudioTooShortError, TranscriptionError
 
 # ============================================================================
 # _vad_parameters tests
@@ -360,7 +360,7 @@ def test_transcribe_returns_transcription_result() -> None:
         assert result.text == "Hello world"
         assert len(result.segments) == 1
         assert result.language == "en"
-        assert result.device == "auto"
+        assert result.device == "cuda"
         assert result.fallback_to_cpu is False
 
 

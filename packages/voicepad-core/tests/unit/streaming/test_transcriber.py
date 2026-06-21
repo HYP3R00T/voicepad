@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 
 import numpy as np
 from voicepad_core.config import Config
-from voicepad_core.inference.exceptions import AudioTooShortError, TranscriptionError
+from voicepad_core.inference.errors import AudioTooShortError, TranscriptionError
 from voicepad_core.streaming.transcriber import StreamingTranscriber, _build_prompt, _resample
 
 

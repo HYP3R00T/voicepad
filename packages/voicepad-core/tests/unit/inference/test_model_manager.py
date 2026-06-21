@@ -5,7 +5,7 @@ from __future__ import annotations
 from unittest.mock import Mock, patch
 
 import pytest
-from voicepad_core.inference.exceptions import TranscriptionError
+from voicepad_core.inference.errors import TranscriptionError
 from voicepad_core.inference.model_manager import (
     _is_cuda_error,
     _load_cpu_fallback,

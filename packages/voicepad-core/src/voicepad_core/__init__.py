@@ -63,7 +63,7 @@ from .config.settings import VALID_TRANSCRIPTION_MODELS
 from .inference import transcribe
 from .inference.constants import COMPUTE_TYPE, DEFAULT_MODEL, DEVICE, LANGUAGE, SAMPLE_RATE
 from .inference.download import ensure_model_downloaded, model_downloaded
-from .inference.exceptions import (
+from .inference.errors import (
     AudioTooLongWarning,
     AudioTooShortError,
     ModelNotFoundError,
@@ -163,13 +163,13 @@ def transcribe_file(
     source = FileSource(wav_path)
     source.read()
 
-    # 2. Preprocess to 16kHz mono using process_array (standalone method)
+    # 2. Preprocess to 16kHz mono using the preprocessing contract
     preprocessor = AudioPreProcessor(source)
-    audio = preprocessor.process()
+    processed_audio = preprocessor.process()
 
     # 3. Transcribe
     result = transcribe(
-        audio,
+        processed_audio.samples,
         model_name=model_name,
         device=device,
         compute_type=compute_type,
@@ -181,7 +181,7 @@ def transcribe_file(
     if local_agreement:
         from .postprocessing.agreement import apply_local_agreement
 
-        result = apply_local_agreement(audio, result, model_name, device, compute_type, language)
+        result = apply_local_agreement(processed_audio.samples, result, model_name, device, compute_type, language)
 
     return result
 

@@ -22,22 +22,9 @@ logger = logging.getLogger(__name__)
 
 
 class FileSource(AudioSource):
-    """
-    Read raw audio from a file on disk.
-
-    Native formats are loaded directly with soundfile. MP3, M4A, and MP4 are
-    converted to a temporary WAV with ffmpeg before loading.
-    """
+    """Read raw audio from a file on disk."""
 
     def __init__(self, file_path: str | Path) -> None:
-        """
-        Args:
-            file_path: Path to the audio file.
-
-        Raises:
-            AudioFileNotFoundError: If the file does not exist.
-            UnsupportedAudioFormatError: If the file format is not supported.
-        """
         self._file_path = Path(file_path)
         self._validate()
         self._audio: np.ndarray | None = None
@@ -45,7 +32,6 @@ class FileSource(AudioSource):
         self._channels = 0
 
     def read(self) -> np.ndarray:
-        """Load and return the file's raw audio."""
         if self._audio is None:
             logger.debug("FileSource loading %s", self._file_path)
             self._load()

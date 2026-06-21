@@ -10,9 +10,12 @@ from .errors import (
 )
 from .file import FileSource
 from .microphone import MicrophoneStream
+from .types import AudioFormat, RawAudio
 
 __all__ = [
     "AudioSource",
+    "AudioFormat",
+    "RawAudio",
     "AudioError",
     "AudioFileNotFoundError",
     "UnsupportedAudioFormatError",

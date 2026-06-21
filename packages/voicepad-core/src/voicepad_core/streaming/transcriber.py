@@ -39,7 +39,7 @@ from ..inference.constants import (
     DISTIL_MODELS,
     SAMPLE_RATE,
 )
-from ..inference.exceptions import AudioTooShortError, TranscriptionError
+from ..inference.errors import AudioTooShortError, TranscriptionError
 from ..postprocessing import deduplicate_overlap, normalize, remove_hallucinations
 from ..vad import SileroVAD
 

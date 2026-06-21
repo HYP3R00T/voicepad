@@ -4,9 +4,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+import numpy as np
 import pytest
 from voicepad_core import transcribe_file
 from voicepad_core.config import Config
+from voicepad_core.preprocessing.types import PreprocessedAudio
 
 
 def make_config(tmp_path: Path) -> Config:
@@ -27,7 +29,8 @@ def test_transcribe_file_uses_config_defaults(tmp_path: Path) -> None:
     config = make_config(tmp_path)
     source = Mock()
     preprocessor = Mock()
-    preprocessor.process.return_value = "processed-audio"
+    processed_audio = PreprocessedAudio(samples=np.zeros(4, dtype=np.float32))
+    preprocessor.process.return_value = processed_audio
     result = SimpleNamespace(text="hola")
 
     with (
@@ -43,14 +46,14 @@ def test_transcribe_file_uses_config_defaults(tmp_path: Path) -> None:
     mock_source.assert_called_once_with(wav_path)
     mock_preprocessor.assert_called_once_with(source)
     mock_transcribe.assert_called_once_with(
-        "processed-audio",
+        processed_audio.samples,
         model_name="base",
         device="cpu",
         compute_type="int8",
         language="es",
         config=config,
     )
-    mock_agreement.assert_called_once_with("processed-audio", result, "base", "cpu", "int8", "es")
+    mock_agreement.assert_called_once_with(processed_audio.samples, result, "base", "cpu", "int8", "es")
     assert returned is result
 
 
@@ -61,7 +64,7 @@ def test_transcribe_file_skips_local_agreement_when_disabled(tmp_path: Path) -> 
     object.__setattr__(config, "local_agreement_file", False)
     source = Mock()
     preprocessor = Mock()
-    preprocessor.process.return_value = "processed-audio"
+    preprocessor.process.return_value = PreprocessedAudio(samples=np.zeros(4, dtype=np.float32))
     result = SimpleNamespace(text="hola")
 
     with (
