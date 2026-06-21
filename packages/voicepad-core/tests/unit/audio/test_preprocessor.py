@@ -19,7 +19,8 @@ import numpy as np
 import numpy.testing as npt
 import pytest
 from voicepad_core.audio.base import AudioSource
-from voicepad_core.audio.preprocessor import TARGET_SAMPLE_RATE, AudioPreProcessor
+from voicepad_core.preprocessing.errors import InvalidAudioMetadataError, InvalidAudioShapeError
+from voicepad_core.preprocessing.preprocessor import TARGET_SAMPLE_RATE, AudioPreProcessor
 
 # ============================================================================
 # Fixtures
@@ -614,3 +615,31 @@ def test_normalize_very_small_values(mock_audio_source: Mock) -> None:
     assert result[2] == pytest.approx(1.0, abs=1e-6)
     assert result[1] == pytest.approx(2.0 / 3.0, abs=1e-6)
     assert result[0] == pytest.approx(1.0 / 3.0, abs=1e-6)
+
+
+def test_process_array_rejects_non_positive_sample_rate(mock_audio_source: Mock) -> None:
+    preprocessor = AudioPreProcessor(mock_audio_source)
+
+    with pytest.raises(InvalidAudioMetadataError, match="sample_rate must be positive"):
+        preprocessor.process_array(np.array([0.1], dtype=np.float32), sample_rate=0, channels=1)
+
+
+def test_process_array_rejects_non_positive_channels(mock_audio_source: Mock) -> None:
+    preprocessor = AudioPreProcessor(mock_audio_source)
+
+    with pytest.raises(InvalidAudioMetadataError, match="channels must be positive"):
+        preprocessor.process_array(np.array([0.1], dtype=np.float32), sample_rate=16_000, channels=0)
+
+
+def test_to_mono_rejects_mismatched_2d_channel_shape(mock_audio_source: Mock) -> None:
+    preprocessor = AudioPreProcessor(mock_audio_source)
+
+    with pytest.raises(InvalidAudioShapeError, match="declares 2 channels"):
+        preprocessor._to_mono(np.array([[0.1], [0.2]], dtype=np.float32), channels=2)
+
+
+def test_to_mono_rejects_invalid_interleaved_length(mock_audio_source: Mock) -> None:
+    preprocessor = AudioPreProcessor(mock_audio_source)
+
+    with pytest.raises(InvalidAudioShapeError, match="cannot be reshaped"):
+        preprocessor._to_mono(np.array([0.1, 0.2, 0.3], dtype=np.float32), channels=2)

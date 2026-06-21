@@ -1,0 +1,7 @@
+DEFAULT_INPUT_CHANNELS = 1
+DEFAULT_INPUT_SAMPLE_RATE = 16_000
+FFMPEG_COMMAND = "ffmpeg"
+FFMPEG_FORMATS = frozenset({".mp3", ".m4a", ".mp4"})
+NATIVE_FORMATS = frozenset({".wav", ".flac", ".ogg"})
+PCM_WAV_SUBTYPE = "PCM_16"
+SUPPORTED_FORMATS = frozenset(NATIVE_FORMATS | FFMPEG_FORMATS)

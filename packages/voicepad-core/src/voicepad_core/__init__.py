@@ -49,7 +49,7 @@ if sys.platform == "win32":
 # ---------------------------------------------------------------------------
 # Public API — audio
 # ---------------------------------------------------------------------------
-from .audio import TARGET_SAMPLE_RATE, AudioPreProcessor, FileSource, MicrophoneStream
+from .audio import FileSource, MicrophoneStream
 
 # ---------------------------------------------------------------------------
 # Public API — config
@@ -98,6 +98,7 @@ from .postprocessing import (
     normalize,
     remove_hallucinations,
 )
+from .preprocessing import TARGET_SAMPLE_RATE, AudioPreProcessor
 
 # ---------------------------------------------------------------------------
 # Public API — streaming

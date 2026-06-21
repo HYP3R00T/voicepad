@@ -1,5 +1,3 @@
-# audio/file.py
-
 from __future__ import annotations
 
 import logging
@@ -12,28 +10,23 @@ import numpy as np
 import soundfile as sf
 
 from .base import AudioSource
+from .constants import FFMPEG_COMMAND, NATIVE_FORMATS, SUPPORTED_FORMATS
+from .errors import (
+    AudioConversionDependencyError,
+    AudioConversionError,
+    AudioFileNotFoundError,
+    UnsupportedAudioFormatError,
+)
 
 logger = logging.getLogger(__name__)
-
-# Formats soundfile handles natively (no external tool needed)
-_NATIVE_FORMATS = {".wav", ".flac", ".ogg"}
-
-# Formats that require ffmpeg conversion first
-_FFMPEG_FORMATS = {".mp3", ".m4a", ".mp4"}
-
-SUPPORTED_FORMATS = _NATIVE_FORMATS | _FFMPEG_FORMATS
 
 
 class FileSource(AudioSource):
     """
-    Reads audio from a file on disk.
+    Read raw audio from a file on disk.
 
-    Supports WAV, FLAC, OGG natively via soundfile.
-    Supports MP3, M4A, MP4 by converting to a temp WAV
-    via ffmpeg first (ffmpeg must be installed separately).
-
-    Audio is loaded lazily — nothing is read until read() is called.
-    AudioPreProcessor handles resampling and channel conversion.
+    Native formats are loaded directly with soundfile. MP3, M4A, and MP4 are
+    converted to a temporary WAV with ffmpeg before loading.
     """
 
     def __init__(self, file_path: str | Path) -> None:
@@ -42,33 +35,21 @@ class FileSource(AudioSource):
             file_path: Path to the audio file.
 
         Raises:
-            FileNotFoundError: If the file does not exist.
-            ValueError: If the file format is not supported.
+            AudioFileNotFoundError: If the file does not exist.
+            UnsupportedAudioFormatError: If the file format is not supported.
         """
         self._file_path = Path(file_path)
         self._validate()
-
         self._audio: np.ndarray | None = None
-        self._sample_rate: int = 0
-        self._channels: int = 0
-
-    # ------------------------------------------------------------------
-    # AudioSource interface
-    # ------------------------------------------------------------------
+        self._sample_rate = 0
+        self._channels = 0
 
     def read(self) -> np.ndarray:
-        """
-        Load and return all audio from the file.
-
-        Returns:
-            np.ndarray: float32 array.
-                        Shape (N,) for mono, (N, C) for multi-channel.
-        """
+        """Load and return the file's raw audio."""
         if self._audio is None:
-            logger.debug(f"FileSource: loading {self._file_path}")
+            logger.debug("FileSource loading %s", self._file_path)
             self._load()
-            logger.debug("FileSource: loaded")
-
+            logger.debug("FileSource loaded %s", self._file_path)
         assert self._audio is not None
         return self._audio
 
@@ -82,48 +63,24 @@ class FileSource(AudioSource):
             self._load()
         return self._channels
 
-    # ------------------------------------------------------------------
-    # Internal loading
-    # ------------------------------------------------------------------
-
     def _validate(self) -> None:
-        """Check the file exists and is a supported format."""
         if not self._file_path.exists():
-            raise FileNotFoundError(f"Audio file not found: {self._file_path}")
+            raise AudioFileNotFoundError(f"Audio file not found: {self._file_path}")
 
         suffix = self._file_path.suffix.lower()
         if suffix not in SUPPORTED_FORMATS:
-            raise ValueError(f"Unsupported format '{suffix}'. Supported: {sorted(SUPPORTED_FORMATS)}")
+            raise UnsupportedAudioFormatError(f"Unsupported format '{suffix}'. Supported: {sorted(SUPPORTED_FORMATS)}")
 
     def _load(self) -> None:
-        """
-        Load the audio file into memory.
-
-        Native formats go directly through soundfile.
-        Everything else is converted to a temp WAV via ffmpeg first.
-        """
         suffix = self._file_path.suffix.lower()
-
-        if suffix in _NATIVE_FORMATS:
-            audio, sample_rate = sf.read(str(self._file_path), dtype="float32")
-        else:
-            audio, sample_rate = self._load_via_ffmpeg()
-
+        audio, sample_rate = (
+            sf.read(str(self._file_path), dtype="float32") if suffix in NATIVE_FORMATS else self._load_via_ffmpeg()
+        )
         self._sample_rate = sample_rate
         self._channels = 1 if audio.ndim == 1 else audio.shape[1]
         self._audio = audio.astype(np.float32)
 
     def _load_via_ffmpeg(self) -> tuple[np.ndarray, int]:
-        """
-        Convert a non-native format to WAV using ffmpeg,
-        then read it with soundfile.
-
-        ffmpeg is invoked with original rate and channels preserved —
-        AudioPreProcessor handles all normalization after this point.
-
-        Raises:
-            RuntimeError: If ffmpeg is not installed or conversion fails.
-        """
         tmp_path: str | None = None
 
         try:
@@ -131,27 +88,18 @@ class FileSource(AudioSource):
                 tmp_path = tmp.name
 
             subprocess.run(
-                [
-                    "ffmpeg",
-                    "-y",  # overwrite without asking
-                    "-i",
-                    str(self._file_path),
-                    tmp_path,
-                ],
+                [FFMPEG_COMMAND, "-y", "-i", str(self._file_path), tmp_path],
                 check=True,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-
-            audio, sample_rate = sf.read(tmp_path, dtype="float32")
-            return audio, sample_rate
-
+            return sf.read(tmp_path, dtype="float32")
         except FileNotFoundError as err:
-            raise RuntimeError(
-                "ffmpeg is not installed or not on PATH. Install ffmpeg to support MP3/M4A files."
+            raise AudioConversionDependencyError(
+                f"{FFMPEG_COMMAND} is not installed or not on PATH. Install ffmpeg to support MP3/M4A files."
             ) from err
-        except subprocess.CalledProcessError as e:
-            raise RuntimeError(f"ffmpeg failed to convert '{self._file_path}'. Error: {e}") from e
+        except subprocess.CalledProcessError as err:
+            raise AudioConversionError(f"ffmpeg failed to convert '{self._file_path}'. Error: {err}") from err
         finally:
             if tmp_path and os.path.exists(tmp_path):
                 os.remove(tmp_path)
