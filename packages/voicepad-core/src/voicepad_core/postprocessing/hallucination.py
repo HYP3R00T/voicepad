@@ -53,7 +53,6 @@ def remove_hallucinations(
     if len(words) < max_repetitions + 1:
         return text
 
-    # --- Pass 1: single-word repetitions ---
     cleaned: list[str] = []
     i = 0
     while i < len(words):
@@ -70,7 +69,6 @@ def remove_hallucinations(
             cleaned.append(word)
             i += 1
 
-    # --- Pass 2: two-word phrase repetitions ---
     words = cleaned
     final: list[str] = []
     i = 0

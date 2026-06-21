@@ -96,10 +96,6 @@ class SileroVAD(VADBase):
         self._c: np.ndarray
         self._h, self._c = self._init_states()
 
-    # ------------------------------------------------------------------
-    # VADBase interface
-    # ------------------------------------------------------------------
-
     def detect(
         self,
         audio: np.ndarray,
@@ -148,10 +144,6 @@ class SileroVAD(VADBase):
         """
         self._h, self._c = self._init_states()
 
-    # ------------------------------------------------------------------
-    # Internal — ONNX inference
-    # ------------------------------------------------------------------
-
     def _score_windows(self, audio: np.ndarray) -> list[tuple[int, float]]:
         """
         Slide a 512-sample window over the audio and run the ONNX
@@ -194,10 +186,6 @@ class SileroVAD(VADBase):
         results = [(i * WINDOW_SIZE, float(probs[i])) for i in range(num_chunks)]
         return results
 
-    # ------------------------------------------------------------------
-    # Internal — segment building
-    # ------------------------------------------------------------------
-
     def _build_segments(
         self,
         speech_probs: list[tuple[int, float]],
@@ -217,7 +205,6 @@ class SileroVAD(VADBase):
         if not speech_probs:
             return []
 
-        # --- Step 1 & 2: group consecutive speech windows ---
         raw: list[tuple[int, int]] = []  # (start_sample, end_sample)
         in_speech = False
         seg_start = 0
@@ -241,7 +228,6 @@ class SileroVAD(VADBase):
         if not raw:
             return []
 
-        # --- Step 3: merge segments with short silence gaps ---
         merged: list[tuple[int, int]] = [raw[0]]
         for curr_start, curr_end in raw[1:]:
             prev_start, prev_end = merged[-1]
@@ -250,7 +236,6 @@ class SileroVAD(VADBase):
             else:
                 merged.append((curr_start, curr_end))
 
-        # --- Step 4 & 5: filter short segments and add padding ---
         segments: list[SpeechSegment] = []
 
         for start_s, end_s in merged:
@@ -268,10 +253,6 @@ class SileroVAD(VADBase):
             )
 
         return segments
-
-    # ------------------------------------------------------------------
-    # Internal — setup
-    # ------------------------------------------------------------------
 
     def _load_session(self) -> ort.InferenceSession:
         """
@@ -309,9 +290,7 @@ class SileroVAD(VADBase):
         return h, c
 
 
-# ------------------------------------------------------------------
 # Module-level helper
-# ------------------------------------------------------------------
 
 
 def _ensure_float32(audio: np.ndarray) -> np.ndarray:

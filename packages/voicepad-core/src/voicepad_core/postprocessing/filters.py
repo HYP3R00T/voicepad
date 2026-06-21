@@ -53,7 +53,6 @@ def filter_segments(segments_iter, duration_s: float) -> list[Segment]:
             dropped += 1
             continue
 
-        # Drop segments where Whisper is near-certain there's no speech
         if s.no_speech_prob > 0.9:
             dropped += 1
             continue

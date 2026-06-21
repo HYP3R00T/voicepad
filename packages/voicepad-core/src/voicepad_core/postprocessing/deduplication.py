@@ -88,7 +88,6 @@ def deduplicate_overlap(
 
     overlap_text = " ".join(s.text for s in overlap_segments if s.text).strip().lower()
 
-    # --- Full duplicate check ---
     matcher = difflib.SequenceMatcher(None, prev_tail, overlap_text)
     similarity = matcher.ratio()
 
@@ -99,7 +98,6 @@ def deduplicate_overlap(
         )
         return non_overlap_segments
 
-    # --- Partial duplicate check ---
     overlap_words = overlap_text.split()
     if len(overlap_words) >= min_overlap_words_for_partial:
         lead = " ".join(overlap_words[:partial_lead_words])
@@ -112,5 +110,4 @@ def deduplicate_overlap(
                 )
             return kept + non_overlap_segments
 
-    # --- No duplicate ---
     return segments

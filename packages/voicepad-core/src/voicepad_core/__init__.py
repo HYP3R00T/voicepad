@@ -46,19 +46,8 @@ if sys.platform == "win32":
         if not _remaining:
             break
 
-# ---------------------------------------------------------------------------
-# Public API — audio
-# ---------------------------------------------------------------------------
 from .audio import FileSource, MicrophoneStream
-
-# ---------------------------------------------------------------------------
-# Public API — config
-# ---------------------------------------------------------------------------
 from .config import VALID_TRANSCRIPTION_MODELS, Config, get_config, get_config_with_metadata
-
-# ---------------------------------------------------------------------------
-# Public API — inference
-# ---------------------------------------------------------------------------
 from .inference import transcribe
 from .inference.constants import COMPUTE_TYPE, DEFAULT_MODEL, DEVICE, LANGUAGE, SAMPLE_RATE
 from .inference.download import ensure_model_downloaded, model_downloaded
@@ -75,10 +64,6 @@ from .inference.model_manager import load as load_model
 from .inference.model_manager import unload as unload_model
 from .inference.model_manager import unload_all as unload_all_models
 from .inference.types import Segment, TranscriptionResult, WordTimestamp
-
-# ---------------------------------------------------------------------------
-# Public API — logging
-# ---------------------------------------------------------------------------
 from .logging_utils import (
     begin_transcription_session,
     configure_global_logging,
@@ -87,10 +72,6 @@ from .logging_utils import (
     log_transcription_start,
     setup_transcription_logger,
 )
-
-# ---------------------------------------------------------------------------
-# Public API — postprocessing
-# ---------------------------------------------------------------------------
 from .postprocessing import (
     deduplicate_overlap,
     filter_segments,
@@ -98,21 +79,9 @@ from .postprocessing import (
     remove_hallucinations,
 )
 from .preprocessing import TARGET_SAMPLE_RATE, AudioPreProcessor
-
-# ---------------------------------------------------------------------------
-# Public API — streaming
-# ---------------------------------------------------------------------------
 from .streaming import ChunkResult, StreamingTranscriber
-
-# ---------------------------------------------------------------------------
-# Public API — VAD
-# ---------------------------------------------------------------------------
 from .vad import SileroVAD, SpeechSegment
 from .vad import ensure_model_exists as ensure_vad_model
-
-# ---------------------------------------------------------------------------
-# High-level transcription functions
-# ---------------------------------------------------------------------------
 
 
 def transcribe_file(
@@ -158,15 +127,12 @@ def transcribe_file(
     if not wav_path.exists():
         raise FileNotFoundError(f"WAV file not found: {wav_path}")
 
-    # 1. Load audio via FileSource
     source = FileSource(wav_path)
     source.read()
 
-    # 2. Preprocess to 16kHz mono using the preprocessing contract
     preprocessor = AudioPreProcessor(source)
     processed_audio = preprocessor.process()
 
-    # 3. Transcribe
     result = transcribe(
         processed_audio.samples,
         model_name=model_name,
@@ -176,7 +142,6 @@ def transcribe_file(
         config=resolved_config,
     )
 
-    # 4. Apply LocalAgreement if enabled
     if local_agreement:
         from .postprocessing.agreement import apply_local_agreement
 

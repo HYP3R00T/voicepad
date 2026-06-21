@@ -39,9 +39,7 @@ def _get_cache_roots(models_dir: Path | None = None) -> tuple[Path, ...]:
     return (base_dir / "hub", base_dir)
 
 
-# ---------------------------------------------------------------------------
 # Repo resolution
-# ---------------------------------------------------------------------------
 
 
 def _get_repo_id(model_name: str) -> str:
@@ -67,9 +65,7 @@ def _get_repo_id(model_name: str) -> str:
     return f"{HF_REPO_PREFIX}{model_name}"
 
 
-# ---------------------------------------------------------------------------
 # Cache check
-# ---------------------------------------------------------------------------
 
 
 def model_downloaded(model_name: str, models_dir: Path | None = None) -> bool:
@@ -101,9 +97,7 @@ def model_downloaded(model_name: str, models_dir: Path | None = None) -> bool:
     return False
 
 
-# ---------------------------------------------------------------------------
 # Download
-# ---------------------------------------------------------------------------
 
 
 def ensure_model_downloaded(
@@ -186,11 +180,6 @@ def ensure_model_downloaded(
 
     except Exception as e:
         raise ModelNotFoundError(f"Failed to download model '{model_name}'.\n  reason: {e}") from e
-
-
-# ---------------------------------------------------------------------------
-# Internal — progress tqdm wrapper
-# ---------------------------------------------------------------------------
 
 
 def _make_progress_tqdm(callback: Callable[[int, int], None]):

@@ -37,7 +37,6 @@ logger = logging.getLogger(__name__)
 # Module-level cache — keyed by (model_name, device, compute_type)
 _model_cache: dict[tuple[str, str, str], WhisperModel] = {}
 
-# Session logger for detailed per-transcription logging
 _session_logger: logging.Logger | None = None
 
 
@@ -49,11 +48,6 @@ def set_model_manager_session_logger(session_logger: logging.Logger | None) -> N
     """
     global _session_logger
     _session_logger = session_logger
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
 
 
 def load(
@@ -239,11 +233,6 @@ def get(
         WhisperModel if found in cache, None otherwise.
     """
     return _model_cache.get((model_name, device, compute_type))
-
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
 
 
 def _is_cuda_error(e: Exception) -> bool:

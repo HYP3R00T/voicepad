@@ -46,7 +46,6 @@ from ..vad import SileroVAD
 
 logger = logging.getLogger(__name__)
 
-# Session logger for detailed per-transcription logging
 _session_logger: logging.Logger | None = None
 
 
@@ -58,11 +57,6 @@ def set_streaming_session_logger(session_logger: logging.Logger | None) -> None:
     """
     global _session_logger
     _session_logger = session_logger
-
-
-# ---------------------------------------------------------------------------
-# StreamingTranscriber
-# ---------------------------------------------------------------------------
 
 
 class StreamingTranscriber:
@@ -121,7 +115,6 @@ class StreamingTranscriber:
         self._device = device if device is not None else self._config.transcription_device
         self._compute_type = compute_type if compute_type is not None else self._config.transcription_compute_type
 
-        # Configurable thresholds
         self._min_chunk_s = min_chunk_s if min_chunk_s is not None else self._config.min_chunk_s
         self._max_chunk_s = max_chunk_s if max_chunk_s is not None else self._config.max_chunk_s
         self._overlap_s = overlap_s if overlap_s is not None else self._config.overlap_s
@@ -137,15 +130,12 @@ class StreamingTranscriber:
         self._stop_event = threading.Event()
         self._monitor_thread: threading.Thread | None = None
 
-        # Rolling state — reset on each start()
         self._consumed_samples: int = 0
         self._chunk_index: int = 0
 
-        # Context carried across chunks
-        self._prev_context: str = ""  # last 200 chars for initial_prompt
-        self._prev_chunk_text: str = ""  # full prev text for dedup
+        self._prev_context: str = ""
+        self._prev_chunk_text: str = ""
 
-        # Silero VAD instance — created lazily on first start()
         self._vad: SileroVAD | None = None
 
     def _validate_configuration(self) -> None:
@@ -157,11 +147,6 @@ class StreamingTranscriber:
             raise StreamingConfigurationError("overlap_s cannot be negative")
         if self._silence_threshold_ms <= 0:
             raise StreamingConfigurationError("silence_threshold_ms must be positive")
-
-    # -----------------------------------------------------------------------
-    # Public lifecycle
-
-    # -----------------------------------------------------------------------
 
     def start(self) -> None:
         """Spawn the background monitor thread.
@@ -217,11 +202,6 @@ class StreamingTranscriber:
         self._monitor_thread = None
         logger.debug("StreamingTranscriber stopped.")
 
-    # -----------------------------------------------------------------------
-    # Monitor loop (background thread)
-
-    # -----------------------------------------------------------------------
-
     def _monitor_loop(self) -> None:
         """Poll the recorder buffer and dispatch chunks on silence boundaries.
 
@@ -232,7 +212,6 @@ class StreamingTranscriber:
         """
         capture_rate: int = SAMPLE_RATE
 
-        # Attempt to read the recorder's native capture rate
         with contextlib.suppress(AttributeError):
             capture_rate = self._recorder.sample_rate
 
@@ -251,13 +230,11 @@ class StreamingTranscriber:
             accumulated_s = (len(audio) - self._consumed_samples) / capture_rate
 
             if accumulated_s < self._min_chunk_s:
-                # --- Hard cap check: force split even without silence ---
                 if accumulated_s >= self._max_chunk_s:
                     logger.debug(f"Hard cap reached: {accumulated_s:.1f}s >= {self._max_chunk_s}s — forcing split.")
                     self._dispatch_chunk(audio, is_final=False, capture_rate=capture_rate)
                 continue
 
-            # --- Silence detection via Silero VAD on tail window ---
             # Run VAD on the last silence_threshold_ms of audio.
             # If no speech is found in that window, silence is confirmed.
             tail_duration_s = self._silence_threshold_ms / 1000.0
@@ -272,17 +249,14 @@ class StreamingTranscriber:
             speech_segments = self._vad.detect(tail, sample_rate=SAMPLE_RATE)
 
             if not speech_segments:
-                # Tail is silent — dispatch chunk
                 logger.debug(f"VAD confirmed silence in last {tail_duration_s:.1f}s — dispatching chunk.")
                 self._dispatch_chunk(audio, is_final=False, capture_rate=capture_rate)
                 self._vad.reset()
             elif accumulated_s >= self._max_chunk_s:
-                # No silence but hard cap exceeded — force split
                 logger.debug(f"Hard cap reached: {accumulated_s:.1f}s >= {self._max_chunk_s}s — forcing split.")
                 self._dispatch_chunk(audio, is_final=False, capture_rate=capture_rate)
                 self._vad.reset()
 
-        # --- Final chunk: transcribe any remaining audio ---
         try:
             audio = self._recorder.get_snapshot()
         except Exception:
@@ -302,11 +276,6 @@ class StreamingTranscriber:
                 )
             )
 
-    # -----------------------------------------------------------------------
-    # Chunk dispatch
-
-    # -----------------------------------------------------------------------
-
     def _dispatch_chunk(
         self,
         full_audio: np.ndarray,
@@ -321,11 +290,10 @@ class StreamingTranscriber:
             is_final:     True when this is the last chunk of the session.
             capture_rate: Native sample rate of the recorder buffer.
         """
-        # Import here to avoid circular imports at module load time
         from ..inference import transcribe
         from ..inference.types import Segment
 
-        slog = _session_logger  # Use session logger if available
+        slog = _session_logger
 
         overlap_samples = int(self._overlap_s * capture_rate)
         start_sample = max(0, self._consumed_samples - overlap_samples)
@@ -349,14 +317,12 @@ class StreamingTranscriber:
                 f"overlap_samples={overlap_samples}, chunk_samples={len(chunk_audio)}"
             )
 
-        # Resample to 16kHz if the recorder captures at a different rate
         if capture_rate != SAMPLE_RATE:
             if slog:
                 slog.debug(f"Resampling from {capture_rate}Hz to {SAMPLE_RATE}Hz")
             chunk_audio = _resample(chunk_audio, capture_rate, SAMPLE_RATE)
 
         try:
-            # --- Build initial prompt for cross-chunk coherence ---
             is_distil = self._model_name in DISTIL_MODELS
             prompt = None if is_distil else _build_prompt(self._prev_context, self._config.initial_prompt)
 
@@ -382,13 +348,11 @@ class StreamingTranscriber:
             if slog:
                 slog.info(f"Chunk {self._chunk_index + 1} transcribed in {chunk_latency:.0f}ms")
 
-            # --- Reconstruct segments with absolute timestamps ---
             segments = []
             for s in result.segments:
                 abs_start = s.start + audio_offset_s
                 abs_end = s.end + audio_offset_s
 
-                # Drop segments that end before the chunk's logical start
                 if abs_end <= chunk_start_s:
                     continue
 
@@ -406,7 +370,6 @@ class StreamingTranscriber:
             if slog:
                 slog.debug(f"Reconstructed {len(segments)} segments with absolute timestamps")
 
-            # --- Post-processing pipeline ---
             if self._prev_chunk_text and segments:
                 if slog:
                     slog.debug("Deduplicating overlap with previous chunk")
@@ -433,7 +396,6 @@ class StreamingTranscriber:
                     f"Chunk {self._chunk_index + 1} final text ({len(text)} chars): '{text[:100]}{'...' if len(text) > 100 else ''}'"
                 )
 
-            # Update rolling context for next chunk
             if text:
                 self._prev_context = text[-self._stream_context_chars :]
                 self._prev_chunk_text = text
@@ -457,7 +419,6 @@ class StreamingTranscriber:
             )
 
         except AudioTooShortError as e:
-            # Audio was too short to transcribe — advance pointer and
             # emit an empty final marker if this was the last chunk
             if slog:
                 slog.warning(f"Chunk {self._chunk_index + 1} too short: {e}")
@@ -480,11 +441,6 @@ class StreamingTranscriber:
             if slog:
                 slog.error(msg)
             self._on_error(str(e))
-
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
 
 
 def _build_prompt(prev_context: str, initial_prompt: str) -> str:
