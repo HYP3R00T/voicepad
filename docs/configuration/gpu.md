@@ -56,4 +56,6 @@ GPU acceleration provides roughly **4-10x speedup** over CPU.
 
 ### Out of memory error
 
-Switch to a smaller model from the **Settings** tab. Try `small` or `distil-small.en` if your GPU has limited VRAM.
+Switch to a smaller model from the **Settings** tab. The simplest fallback is `small`.
+
+If you want more advanced options such as `distil-small.en`, edit `voicepad.yaml` directly instead of relying on the curated UI list.

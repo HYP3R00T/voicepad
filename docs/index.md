@@ -4,7 +4,18 @@ icon: lucide/home
 
 # VoicePad
 
-GPU-accelerated transcription. Private by design. Your audio never leaves your machine.
+VoicePad is a local-first dictation studio for people who want fast transcription without accounts, cloud APIs, or workflow friction.
+
+You press a hotkey, speak, and get live text plus a saved recording and markdown transcript on your own machine.
+
+## Why VoicePad
+
+Most dictation tools trade privacy for convenience, or speed for control. VoicePad is built to keep all three in the same place.
+
+- Local-first: audio and transcripts stay on your machine
+- Fast: GPU-accelerated Whisper transcription with live streaming feedback
+- Practical: hotkey capture, saved history, markdown output, and re-transcription built in
+- Configurable: simple defaults for most people, deeper control in `voicepad.yaml` when you want it
 
 ## Quick Start
 
@@ -15,43 +26,71 @@ uvx voicepad
 !!! note "Requirements"
     Requires `uv` to be installed. Runs in an isolated environment.
 
-## Features
+On first run, VoicePad walks you through a short onboarding flow so you can pick a microphone and a starter model before the first download begins.
 
-### Private by Design
+## What You Get
 
-Your audio never leaves your machine. Not "we promise we don't look" — there is literally no server to send your data to.
+### Local Recording and Transcription
 
-### Free Forever
+Record with a single keypress and transcribe locally with Whisper-compatible models. No browser tab, no remote upload, no API key setup.
 
-No API keys, no accounts, no usage limits, no subscriptions. Just run it. The only cost is electricity.
+### Live Streaming Feedback
 
-### GPU Accelerated
+Text appears while you speak, so you can see whether the recording is going in the right direction before the session ends.
 
-NVIDIA CUDA support included. No separate CUDA install needed. Transcribe in seconds, not minutes.
+### Markdown-Native History
 
-### Global Hotkey
+Every session is stored as a WAV file plus a markdown transcript, which makes the output easy to archive, search, edit, and re-use.
 
-Press your hotkey in any app — browser, editor, notes. Recording starts instantly. Transcription auto-copies to clipboard.
+### Curated Defaults, Advanced Control
 
-### Streaming Transcription
+The interface shows a short, approachable list of recommended models. If you want more control, you can switch to advanced model IDs and lower-level runtime settings directly in `voicepad.yaml`.
 
-Text appears live as you speak. No waiting until the end. See your words materialize in real-time.
+### Re-Transcription
 
-### Complete History
+You can revisit older recordings and re-run them with a different model later instead of treating the first pass as permanent.
 
-Every recording and transcription saved automatically. Re-transcribe with better models anytime.
+## Who It Is For
+
+VoicePad works especially well for:
+
+- developers who want a keyboard-first dictation workflow
+- writers and note-takers who want local ownership of recordings and transcripts
+- GPU users who want faster-than-real-time transcription without cloud services
+- power users who want plain files and editable configuration instead of a locked-down app
 
 ## System Requirements
 
 | Requirement | Details |
-|-------------|---------|
-| **Python** | 3.13 or newer |
-| **OS** | Windows, Linux |
-| **GPU** | NVIDIA |
-| **Microphone** | Any input device |
+|---|---|
+| Python | 3.13 or newer |
+| OS | Windows, Linux |
+| Microphone | Any input device recognised by your OS |
+| NVIDIA GPU | Recommended for fast transcription |
 
-## Ready to Start?
+See [Getting Started](getting-started.md) for installation and first-run setup, or [Configuration](configuration/index.md) if you want to understand how the app is wired.
 
-Get started in seconds. No sign-up, no credit card, no catch.
+## Should We Build a Custom Docs Site?
+
+Probably not yet.
+
+Right now the bigger issue is writing and information design, not the documentation engine itself. The current system is already good enough for:
+
+- clean navigation
+- fast iteration
+- markdown authoring
+- a searchable static docs site
+
+A custom Astro site starts making sense when we genuinely need one of these:
+
+- a strong marketing-style landing page with custom layouts and richer visual storytelling
+- interactive demos or embedded product walkthroughs
+- a branded docs experience that the current theme cannot express well
+- docs and website merging into one intentional product surface
+
+If the goal is simply "make the docs feel clearer and less generic," we should keep improving the content and structure first. That is much cheaper and will probably get us 80% of the value.
+
+## Start Here
 
 [Get Started](getting-started.md){ .md-button .md-button--primary }
+[Open Configuration](configuration/index.md){ .md-button }
