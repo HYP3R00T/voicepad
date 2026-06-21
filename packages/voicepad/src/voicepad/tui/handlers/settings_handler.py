@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from textual import on
 from textual.widgets import Button, Input, Label, Select, Static
-from voicepad_core import VALID_TRANSCRIPTION_MODELS
+from voicepad_core import list_basic_model_options
 from voicepad_core.config import Config as _Config
 
 from voicepad.tui.components.checkbox import VoiceCheckbox
@@ -44,7 +44,12 @@ class SettingsHandler:
         with contextlib.suppress(Exception):
             # Update model dropdown
             sel_model = self.app.query_one("#setting-transcription_model", Select)
-            sel_model.value = self.app.config.transcription_model
+            model_options = list_basic_model_options(current_model=self.app.config.transcription_model)
+            sel_model.set_options(model_options)
+            valid_models = {value for _, value in model_options}
+            sel_model.value = (
+                self.app.config.transcription_model if self.app.config.transcription_model in valid_models else "turbo"
+            )
 
         with contextlib.suppress(Exception):
             # Update theme dropdown from TUI config
@@ -91,7 +96,7 @@ class SettingsHandler:
             "recordings_path": "Where your WAV recordings are saved",
             "markdown_path": "Where your transcription files are saved",
             "vad_model_path": "Where VAD (Voice Activity Detection) model is stored",
-            "transcription_model": "Whisper model to use for transcription",
+            "transcription_model": "Simple model choices for the UI. Edit voicepad.yaml for advanced models.",
             "input_device_index": "Microphone to record from",
         }
 
@@ -125,11 +130,12 @@ class SettingsHandler:
             )
 
             if field_name == "transcription_model":
-                options = [(m, m) for m in VALID_TRANSCRIPTION_MODELS]
                 current_str = str(current_val) if current_val is not None else "turbo"
+                options = list_basic_model_options(current_model=current_str)
+                valid_models = {value for _, value in options}
                 widget = Select(
                     options=options,
-                    value=current_str if current_str in VALID_TRANSCRIPTION_MODELS else "turbo",
+                    value=current_str if current_str in valid_models else "turbo",
                     id="setting-transcription_model",
                     classes="settings-input",
                     allow_blank=False,

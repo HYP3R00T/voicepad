@@ -141,7 +141,7 @@ class TestPopulateSettingsForm:
             # Check that valid models are in options
             option_values = [opt[1] for opt in select._options]
             assert "turbo" in option_values
-            assert "base" in option_values
+            assert option_values == ["small", "large-v3", "turbo"]
 
     @pytest.mark.asyncio
     @patch(PATCH_TARGET)
@@ -338,6 +338,24 @@ class TestPopulateSettingsForm:
 
             select = app.container.query_one("#setting-transcription_model", Select)
             assert select.value == "turbo"
+
+    @pytest.mark.asyncio
+    @pytest.mark.asyncio
+    @patch(PATCH_TARGET)
+    async def test_preserves_current_advanced_model_when_configured(self, mock_get_devices: MagicMock) -> None:
+        """Advanced config models remain selectable even though the default UI is curated."""
+        mock_get_devices.return_value = create_mock_devices()
+        config = create_mock_config()
+        config.transcription_model = "base.en"
+
+        app = SettingsTestApp(config, "/path/to/config.yaml")
+        async with app.run_test():
+            assert app.container is not None
+
+            select = app.container.query_one("#setting-transcription_model", Select)
+            assert select.value == "base.en"
+            option_values = [opt[1] for opt in select._options]
+            assert option_values == ["small", "large-v3", "turbo", "base.en"]
 
     @pytest.mark.asyncio
     @patch(PATCH_TARGET)

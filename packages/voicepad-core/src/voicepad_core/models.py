@@ -42,6 +42,40 @@ _BUILTIN_MODELS: tuple[ModelSpec, ...] = (
 
 _model_registry: dict[str, ModelSpec] = {spec.id: spec for spec in _BUILTIN_MODELS}
 
+_MODEL_UI: dict[str, dict[str, str | bool]] = {
+    "turbo": {
+        "label": "Recommended · Turbo",
+        "hint": "~800 MB · best default for most users · fast · multilingual · ~3 GB VRAM",
+        "basic": True,
+    },
+    "small": {
+        "label": "Faster · Small",
+        "hint": "~250 MB · lighter on weaker hardware · good accuracy · multilingual · ~1 GB VRAM",
+        "basic": True,
+    },
+    "large-v3": {
+        "label": "Highest Accuracy · Large v3",
+        "hint": "~1.5 GB · best accuracy · slower · multilingual · ~5 GB VRAM",
+        "basic": True,
+    },
+    "tiny.en": {"label": "Tiny English", "hint": "~40 MB · fastest · English only · CPU"},
+    "tiny": {"label": "Tiny", "hint": "~40 MB · fastest · multilingual · CPU"},
+    "base.en": {"label": "Base English", "hint": "~75 MB · very fast · English only · CPU"},
+    "base": {"label": "Base", "hint": "~75 MB · very fast · multilingual · CPU"},
+    "small.en": {"label": "Small English", "hint": "~250 MB · fast · English only · ~1 GB VRAM"},
+    "medium.en": {"label": "Medium English", "hint": "~770 MB · moderate · English only · ~2 GB VRAM"},
+    "medium": {"label": "Medium", "hint": "~770 MB · moderate · multilingual · ~2 GB VRAM"},
+    "large-v1": {"label": "Large v1", "hint": "~1.5 GB · slow · multilingual · ~5 GB VRAM"},
+    "large-v2": {"label": "Large v2", "hint": "~1.5 GB · slow · multilingual · ~5 GB VRAM"},
+    "large": {"label": "Large", "hint": "~1.5 GB · slow · multilingual · ~5 GB VRAM"},
+    "large-v3-turbo": {"label": "Turbo Alias", "hint": "~800 MB · same download as turbo"},
+    "distil-small.en": {"label": "Distil Small English", "hint": "~135 MB · fast · English only · ~1 GB VRAM"},
+    "distil-medium.en": {"label": "Distil Medium English", "hint": "~395 MB · moderate · English only · ~2 GB VRAM"},
+    "distil-large-v2": {"label": "Distil Large v2", "hint": "~760 MB · fast · English only · ~3 GB VRAM"},
+    "distil-large-v3": {"label": "Distil Large v3", "hint": "~760 MB · fast · English only · ~3 GB VRAM"},
+    "distil-large-v3.5": {"label": "Distil Large v3.5", "hint": "~760 MB · fast · English only · ~3 GB VRAM"},
+}
+
 
 class ModelCompatibilityError(ValueError):
     """Raised when a model snapshot does not match VoicePad's compatibility checks."""
@@ -111,6 +145,44 @@ def list_model_ids() -> tuple[str, ...]:
     return tuple(_model_registry)
 
 
+def list_basic_model_ids() -> tuple[str, ...]:
+    """Return the curated beginner-friendly model ids."""
+    return tuple(model_id for model_id in list_model_ids() if _MODEL_UI.get(model_id, {}).get("basic") is True)
+
+
+def get_model_label(model_id: str) -> str:
+    """Return a user-facing label for a model id."""
+    meta = _MODEL_UI.get(model_id, {})
+    label = meta.get("label")
+    if isinstance(label, str) and label.strip():
+        return label
+    return model_id
+
+
+def get_model_hint(model_id: str) -> str:
+    """Return a short user-facing hint for a model id."""
+    meta = _MODEL_UI.get(model_id, {})
+    hint = meta.get("hint")
+    if isinstance(hint, str):
+        return hint
+    return ""
+
+
+def list_basic_model_options(current_model: str | None = None) -> tuple[tuple[str, str], ...]:
+    """Return curated (label, value) pairs for onboarding and simple settings."""
+    ids = list(list_basic_model_ids())
+    if current_model and current_model in _model_registry and current_model not in ids:
+        ids.append(current_model)
+
+    options: list[tuple[str, str]] = []
+    for model_id in ids:
+        label = get_model_label(model_id)
+        if current_model == model_id and model_id not in list_basic_model_ids():
+            label = f"Current Advanced · {model_id}"
+        options.append((label, model_id))
+    return tuple(options)
+
+
 def is_distil_model(model_id: str) -> bool:
     """Return True when the registered model is a distil Whisper variant."""
     return resolve_model_spec(model_id).distil
@@ -138,8 +210,6 @@ def validate_model_snapshot(snapshot_path: str | Path) -> Path:
     if "whisper" in model_type:
         return snapshot_dir
 
-    # Many CTranslate2 Whisper exports omit model_type entirely. Accept those
-    # when they still expose the characteristic Whisper conversion keys.
     whisper_markers = ("alignment_heads", "lang_ids", "suppress_ids", "suppress_ids_begin")
     if any(marker in config for marker in whisper_markers):
         return snapshot_dir
@@ -158,8 +228,12 @@ __all__ = [
     "ModelCompatibilityError",
     "ModelSpec",
     "VALID_TRANSCRIPTION_MODELS",
+    "get_model_hint",
+    "get_model_label",
     "get_model_spec",
     "is_distil_model",
+    "list_basic_model_ids",
+    "list_basic_model_options",
     "list_model_ids",
     "list_model_specs",
     "register_model",
