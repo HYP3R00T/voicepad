@@ -4114,7 +4114,7 @@ requires-dist = [
 
 [[package]]
 name = "voicepad-core"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "packages/voicepad-core" }
 dependencies = [
     { name = "faster-whisper" },
