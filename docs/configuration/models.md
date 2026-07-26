@@ -53,6 +53,8 @@ VoicePad core supports a broader set of compatible Whisper-family models than th
 
 This is useful for power users who want to try smaller, English-only, distil, or other compatible CTranslate2-converted checkpoints without adding complexity to the default interface.
 
+The experimental `parakeet-tdt-0.6b-v3-int8` backend uses ONNX Runtime. VoicePad normalizes its input independently and discards decoder tokens timestamped beyond the supplied audio, preventing clipped phrases from gaining an invented ending.
+
 ## Changing the Model
 
 For the common path, open the **Settings** tab in VoicePad, select one of the curated models from the dropdown, and press **Save**. VoicePad reloads the model immediately.

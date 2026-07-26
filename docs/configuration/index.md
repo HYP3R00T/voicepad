@@ -69,14 +69,7 @@ vad_model_filename: silero_vad_v6.onnx
 vad_model_url: https://raw.githubusercontent.com/SYSTRAN/faster-whisper/master/faster_whisper/assets/silero_vad_v6.onnx
 vad_download_chunk_size: 8192
 
-local_agreement_mic: false
 local_agreement_file: true
-
-model_warmup_enabled: true
-model_warmup_duration_s: 0.5
-model_warmup_language: en
-model_warmup_beam_size: 1
-model_warmup_vad_filter: false
 ```
 
 !!! tip "Global Hotkey Format"
@@ -84,7 +77,7 @@ model_warmup_vad_filter: false
     The hotkey works system-wide on Windows, allowing you to start/stop recording from any application.
 
 !!! note "Settings visibility"
-    Not all settings are shown in the Settings tab interface. Advanced runtime tuning such as inference thresholds, VAD behavior, overlap deduplication, warm-up behavior, text post-processing, final-chunk speech gating, model download locations, and the full advanced model list can be changed by editing the YAML file directly.
+    Not all settings are shown in the Settings tab interface. Advanced runtime tuning such as inference thresholds, VAD behavior, overlap deduplication, text post-processing, final-chunk speech gating, model download locations, and the full advanced model list can be changed by editing the YAML file directly.
 
 ## Notes on Advanced Settings
 
