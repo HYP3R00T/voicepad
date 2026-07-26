@@ -10,6 +10,8 @@ from ..artifacts import prepare_artifact
 from ..constants import COMPUTE_TYPE, CPU_COMPUTE_TYPE, CUDA_ERROR_KEYWORDS, DEVICE
 from ..contracts import (
     BackendCapabilities,
+    BackendContract,
+    OutputCapabilities,
     PreparedModel,
     RuntimeInfo,
     RuntimeOptions,
@@ -17,12 +19,37 @@ from ..contracts import (
 )
 from ..errors import TranscriptionError
 from ..types import Segment, TranscriptionResult, WordTimestamp
+from ...audio.types import WaveformSpec
 from ...config import get_config
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from ...models import ModelSpec
+
+_CONTRACT = BackendContract(
+    audio=WaveformSpec(sample_rate=16_000),
+    decoding=BackendCapabilities(
+        streaming=False,
+        word_timestamps=True,
+        language_detection=True,
+        translation=True,
+        context_biasing=True,
+        language_selection=True,
+        beam_search=True,
+        text_prompt=True,
+        vad_filter=True,
+        no_speech_threshold=True,
+        hallucination_silence_threshold=True,
+    ),
+    output=OutputCapabilities(
+        language="native",
+        word_timestamps="native",
+        word_confidence="native",
+        segment_log_probability="native",
+        no_speech_probability="native",
+    ),
+)
 
 
 class _RawWord(Protocol):
@@ -66,13 +93,11 @@ class FasterWhisperDriver:
 
     @property
     def capabilities(self) -> BackendCapabilities:
-        return BackendCapabilities(
-            streaming=False,
-            word_timestamps=True,
-            language_detection=True,
-            translation=True,
-            context_biasing=True,
-        )
+        return self.contract.decoding
+
+    @property
+    def contract(self) -> BackendContract:
+        return _CONTRACT
 
     def is_available(self) -> bool:
         try:
@@ -179,8 +204,6 @@ class FasterWhisperSession:
         duration_s = request.audio.size / request.sample_rate
         latency_ms = (time.perf_counter() - started_at) * 1000
         text = " ".join(segment.text for segment in segments if segment.text).strip()
-        avg_confidence = sum(segment.avg_logprob for segment in segments) / len(segments) if segments else 0.0
-
         return TranscriptionResult(
             text=text,
             segments=segments,
@@ -191,8 +214,6 @@ class FasterWhisperSession:
             device=self._info.device,
             compute_type=self._info.precision,
             fallback_to_cpu=self._info.fallback_to_cpu,
-            avg_confidence=avg_confidence,
-            low_confidence_count=sum(segment.avg_logprob < -1.0 for segment in segments),
             backend_id=self._info.backend_id,
             model_id=self._info.model_id,
             artifact_format=self._prepared.spec.artifact_format,
@@ -300,11 +321,11 @@ def _adapt_segments(
     *,
     duration_s: float,
     include_words: bool,
-    no_speech_threshold: float,
+    no_speech_threshold: float | None,
 ) -> list[Segment]:
     segments: list[Segment] = []
     for raw in raw_segments:
-        if raw.start >= duration_s or raw.no_speech_prob > no_speech_threshold:
+        if raw.start >= duration_s or (no_speech_threshold is not None and raw.no_speech_prob > no_speech_threshold):
             continue
 
         words = (

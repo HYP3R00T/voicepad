@@ -6,13 +6,13 @@ from threading import RLock
 from typing import Protocol
 
 from .contracts import (
-    BackendCapabilities,
+    BackendContract,
     BackendDriver,
     RuntimeInfo,
     RuntimeOptions,
     TranscriptionSession,
 )
-from .errors import BackendSessionError, BackendUnavailableError
+from .errors import BackendLookupError, BackendSessionError, BackendUnavailableError
 from ..models import ModelSpec
 
 logger = logging.getLogger(__name__)
@@ -26,12 +26,36 @@ class DriverRegistry(Protocol):
     def get(self, backend_id: str) -> BackendDriver: ...
 
 
+class BackendRegistry:
+    """Backend drivers indexed by stable identifier."""
+
+    def __init__(self) -> None:
+        self._drivers: dict[str, BackendDriver] = {}
+
+    def register(self, driver: BackendDriver) -> None:
+        backend_id = driver.id
+        if not backend_id.strip():
+            raise ValueError("backend id must not be empty")
+        if backend_id in self._drivers:
+            raise ValueError(f"Backend '{backend_id}' is already registered.")
+        self._drivers[backend_id] = driver
+
+    def get(self, backend_id: str) -> BackendDriver:
+        try:
+            return self._drivers[backend_id]
+        except KeyError as exc:
+            raise BackendLookupError(f"Backend '{backend_id}' is not registered.") from exc
+
+    def list(self) -> tuple[str, ...]:
+        return tuple(self._drivers)
+
+
 @dataclass(frozen=True, slots=True)
 class RuntimeDescriptor:
     """Model and backend capabilities available before a session is opened."""
 
     model: ModelSpec
-    capabilities: BackendCapabilities
+    contract: BackendContract
     available: bool
 
 
@@ -42,7 +66,7 @@ class ActiveRuntime:
     model: ModelSpec
     options: RuntimeOptions
     info: RuntimeInfo
-    capabilities: BackendCapabilities
+    contract: BackendContract
 
 
 @dataclass(slots=True)
@@ -52,7 +76,7 @@ class _ResidentSession:
     session: TranscriptionSession
 
 
-class ActiveRuntimeManager:
+class RuntimeManager:
     """Keep at most one model session resident to protect limited VRAM.
 
     Driver registration is explicit. Backend discovery and availability checks
@@ -78,7 +102,7 @@ class ActiveRuntimeManager:
             available = self._check_available(driver)
             return RuntimeDescriptor(
                 model=model,
-                capabilities=driver.capabilities,
+                contract=driver.contract,
                 available=available,
             )
 
@@ -131,7 +155,7 @@ class ActiveRuntimeManager:
                 model=model,
                 options=requested,
                 info=info,
-                capabilities=driver.capabilities,
+                contract=driver.contract,
             )
             self._resident = _ResidentSession(
                 identity=identity,
@@ -231,6 +255,7 @@ def _close_invalid_session(session: TranscriptionSession, model: ModelSpec) -> N
 
 __all__ = [
     "ActiveRuntime",
-    "ActiveRuntimeManager",
+    "BackendRegistry",
     "RuntimeDescriptor",
+    "RuntimeManager",
 ]

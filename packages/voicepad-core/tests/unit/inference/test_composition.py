@@ -6,6 +6,7 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 import voicepad_core.inference.composition as composition
+from voicepad_core.audio import WaveformSpec
 from voicepad_core.inference.composition import (
     InferenceCoordinator,
     activate_model,
@@ -16,6 +17,7 @@ from voicepad_core.inference.composition import (
 )
 from voicepad_core.inference.contracts import (
     BackendCapabilities,
+    BackendContract,
     PreparedModel,
     RuntimeInfo,
     RuntimeOptions,
@@ -62,6 +64,10 @@ class _Driver:
     @property
     def capabilities(self) -> BackendCapabilities:
         return BackendCapabilities(context_biasing=True)
+
+    @property
+    def contract(self) -> BackendContract:
+        return BackendContract(WaveformSpec(16_000), self.capabilities)
 
     def is_available(self) -> bool:
         return True
@@ -170,7 +176,7 @@ class TestInferenceCoordinator:
 
         descriptor = coordinator.describe(_model("local"))
 
-        assert (descriptor.available, descriptor.capabilities.context_biasing) == (
+        assert (descriptor.available, descriptor.contract.decoding.context_biasing) == (
             True,
             True,
         )
@@ -194,7 +200,7 @@ def test_fake_session_accepts_the_canonical_request() -> None:
     """The coordinator test session implements the complete transcription protocol."""
     session = _Session(RuntimeInfo("test", "local", "cpu", "int8"))
 
-    result = session.transcribe(TranscriptionRequest(np.zeros(16_000, dtype=np.float32)))
+    result = session.transcribe(TranscriptionRequest(np.zeros(16_000, dtype=np.float32), sample_rate=16_000))
 
     assert result.duration_s == 1.0
 

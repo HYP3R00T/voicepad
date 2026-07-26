@@ -1,5 +1,5 @@
 DEFAULT_INPUT_CHANNELS = 1
-DEFAULT_INPUT_SAMPLE_RATE = 16_000
+FALLBACK_INPUT_SAMPLE_RATE = 16_000
 FFMPEG_COMMAND = "ffmpeg"
 FFMPEG_FORMATS = frozenset({".mp3", ".m4a", ".mp4"})
 NATIVE_FORMATS = frozenset({".wav", ".flac", ".ogg"})

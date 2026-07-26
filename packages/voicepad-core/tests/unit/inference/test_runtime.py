@@ -7,18 +7,19 @@ from threading import Event
 from typing import cast
 
 import pytest
-from voicepad_core.inference.backend_manager import BackendRegistry
+from voicepad_core.audio import WaveformSpec
 from voicepad_core.inference.contracts import (
     BackendCapabilities,
+    BackendContract,
     PreparedModel,
     RuntimeInfo,
     RuntimeOptions,
     TranscriptionRequest,
 )
 from voicepad_core.inference.errors import BackendSessionError
-from voicepad_core.inference.runtime import ActiveRuntimeManager
+from voicepad_core.inference.runtime import BackendRegistry, RuntimeManager
 from voicepad_core.inference.types import TranscriptionResult
-from voicepad_core.models import ModelSpec
+from voicepad_core.models import HuggingFaceArtifact, ModelSpec
 
 
 class _Session:
@@ -55,6 +56,10 @@ class _Driver:
             context_biasing=True,
         )
 
+    @property
+    def contract(self) -> BackendContract:
+        return BackendContract(WaveformSpec(16_000), self.capabilities)
+
     def is_available(self) -> bool:
         self.availability_checks += 1
         return True
@@ -77,14 +82,18 @@ class _Driver:
 
 
 def _model(model_id: str = "tiny") -> ModelSpec:
-    return ModelSpec(model_id, f"owner/{model_id}", backend_id="test")
+    return ModelSpec(
+        model_id,
+        HuggingFaceArtifact(f"owner/{model_id}"),
+        backend_id="test",
+    )
 
 
-def _manager() -> tuple[ActiveRuntimeManager, _Driver]:
+def _manager() -> tuple[RuntimeManager, _Driver]:
     registry = BackendRegistry()
     driver = _Driver()
     registry.register(driver)
-    return ActiveRuntimeManager(registry), driver
+    return RuntimeManager(registry), driver
 
 
 def test_describe_exposes_availability_and_capabilities_without_opening() -> None:
@@ -95,8 +104,8 @@ def test_describe_exposes_availability_and_capabilities_without_opening() -> Non
 
     assert descriptor.available is True
     assert descriptor.model.id == "tiny"
-    assert descriptor.capabilities.word_timestamps is True
-    assert descriptor.capabilities.context_biasing is True
+    assert descriptor.contract.decoding.word_timestamps is True
+    assert descriptor.contract.decoding.context_biasing is True
     assert driver.availability_checks == 1
     assert driver.open_calls == 0
 
@@ -112,7 +121,7 @@ def test_active_runtime_reports_model_options_info_and_capabilities() -> None:
     assert manager.active.model.id == "tiny"
     assert manager.active.options == options
     assert manager.active.info.device == "cuda"
-    assert manager.active.capabilities.language_detection is True
+    assert manager.active.contract.decoding.language_detection is True
 
 
 def test_switch_closes_old_session_before_driver_opens_new_session() -> None:
@@ -134,7 +143,7 @@ def test_switch_closes_old_session_before_driver_opens_new_session() -> None:
     registry = BackendRegistry()
     driver = OrderedDriver()
     registry.register(driver)
-    manager = ActiveRuntimeManager(registry)
+    manager = RuntimeManager(registry)
 
     manager.open(_model("tiny"))
     manager.open(_model("base"))
@@ -177,7 +186,7 @@ def test_open_failure_after_switch_leaves_no_runtime_resident() -> None:
     registry = BackendRegistry()
     driver = FailingReplacementDriver()
     registry.register(driver)
-    manager = ActiveRuntimeManager(registry)
+    manager = RuntimeManager(registry)
     old_session = cast(_Session, manager.open(_model("tiny")))
 
     with pytest.raises(BackendSessionError, match="could not open"):
@@ -205,7 +214,7 @@ def test_close_failure_prevents_replacement_from_opening() -> None:
     registry = BackendRegistry()
     driver = FailingCloseDriver()
     registry.register(driver)
-    manager = ActiveRuntimeManager(registry)
+    manager = RuntimeManager(registry)
     manager.open(_model("tiny"))
 
     with pytest.raises(BackendSessionError, match="Failed to close active"):
@@ -234,7 +243,7 @@ def test_close_waits_for_in_progress_open_then_unloads_once() -> None:
     registry = BackendRegistry()
     driver = BlockingDriver()
     registry.register(driver)
-    manager = ActiveRuntimeManager(registry)
+    manager = RuntimeManager(registry)
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         opening = executor.submit(manager.open, _model())

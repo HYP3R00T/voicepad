@@ -6,7 +6,7 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 import soundfile as sf
-from voicepad_core.audio.persistence import WavArtifact, write_wav_atomic
+from voicepad_core.audio.persistence import LiveWavRecording, WavArtifact, write_wav_atomic
 from voicepad_core.audio.types import RawAudio
 
 
@@ -73,3 +73,20 @@ class TestWriteWavAtomic:
             b"existing recording",
             (),
         )
+
+
+def test_live_recording_reads_sample_range_and_finalizes(tmp_path: Path) -> None:
+    destination = tmp_path / "recording.wav"
+    recording = LiveWavRecording(destination, sample_rate=4, channels=1)
+    recording.start()
+    recording.append(np.array([0.0, 0.25, 0.5, 0.75], dtype=np.float32))
+    recording.append(np.array([-0.25, -0.5], dtype=np.float32))
+
+    window = recording.read_from(2, max_samples=2)
+    artifact = recording.finish()
+    persisted, sample_rate = sf.read(destination, dtype="float32")
+
+    assert (window.start_sample, window.end_sample) == (2, 4)
+    np.testing.assert_allclose(window.samples, [0.5, 0.75])
+    assert (artifact.frame_count, artifact.duration(), sample_rate, len(persisted)) == (6, 1.5, 4, 6)
+    assert tuple(tmp_path.glob(".recording-live-*.wav")) == ()

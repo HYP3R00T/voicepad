@@ -4,6 +4,7 @@ import importlib.util
 import logging
 import re
 import time
+from bisect import bisect_right
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast
@@ -11,9 +12,18 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 import numpy as np
 
 from ..artifacts import prepare_artifact
-from ..contracts import BackendCapabilities, PreparedModel, RuntimeInfo, RuntimeOptions, TranscriptionRequest
+from ..contracts import (
+    BackendCapabilities,
+    BackendContract,
+    OutputCapabilities,
+    PreparedModel,
+    RuntimeInfo,
+    RuntimeOptions,
+    TranscriptionRequest,
+)
 from ..errors import TranscriptionError
 from ..types import Segment, TranscriptionResult, WordTimestamp
+from ...audio.types import WaveformSpec
 from ...config import get_config
 from ...models import ModelCompatibilityError, validate_model_artifact
 
@@ -37,6 +47,23 @@ REQUIRED_ARTIFACTS = (
     "vocab.txt",
 )
 _DECODE_SPACE_RE = re.compile(r"\A\s|\s\B|(\s)\b")
+_CONTRACT = BackendContract(
+    audio=WaveformSpec(sample_rate=SAMPLE_RATE, peak_normalize=True),
+    decoding=BackendCapabilities(
+        streaming=False,
+        word_timestamps=True,
+        language_detection=False,
+        translation=False,
+        context_biasing=True,
+    ),
+    output=OutputCapabilities(
+        language="unavailable",
+        word_timestamps="derived",
+        word_confidence="unavailable",
+        segment_confidence="unavailable",
+        no_speech_probability="unavailable",
+    ),
+)
 
 
 class _OrtNode(Protocol):
@@ -82,13 +109,11 @@ class ParakeetOnnxDriver:
 
     @property
     def capabilities(self) -> BackendCapabilities:
-        return BackendCapabilities(
-            streaming=False,
-            word_timestamps=True,
-            language_detection=False,
-            translation=False,
-            context_biasing=True,
-        )
+        return self.contract.decoding
+
+    @property
+    def contract(self) -> BackendContract:
+        return _CONTRACT
 
     def is_available(self) -> bool:
         try:
@@ -201,11 +226,13 @@ class ParakeetOnnxSession:
             token_ids, frame_indices = self._infer(sessions, padded, bias_sequences)
             token_text = [self._vocab[token_id] for token_id in token_ids]
             timestamps = [max(0.0, frame_index * TIMESTAMP_STEP_S - LEADING_SILENCE_S) for frame_index in frame_indices]
+            duration_s = request.audio.size / request.sample_rate
+            token_text, timestamps = _clip_tokens_to_audio(token_text, timestamps, duration_s)
             text = _decode_text(token_text)
             segments = _build_segments(
                 token_text,
                 timestamps,
-                duration_s=request.audio.size / request.sample_rate,
+                duration_s=duration_s,
                 include_words=request.word_timestamps,
             )
         except TranscriptionError:
@@ -217,8 +244,8 @@ class ParakeetOnnxSession:
         return TranscriptionResult(
             text=text,
             segments=segments,
-            language=request.language or "und",
-            language_probability=0.0,
+            language=None,
+            language_probability=None,
             duration_s=duration_s,
             latency_ms=(time.perf_counter() - started_at) * 1000,
             device=self._info.device,
@@ -412,6 +439,18 @@ def _decode_text(pieces: list[str]) -> str:
     return _DECODE_SPACE_RE.sub(lambda match: " " if match.group(1) is not None else "", joined)
 
 
+def _clip_tokens_to_audio(
+    pieces: list[str],
+    timestamps: list[float],
+    duration_s: float,
+) -> tuple[list[str], list[float]]:
+    """Discard decoder completions timestamped beyond the supplied waveform."""
+    keep = bisect_right(timestamps, duration_s + TIMESTAMP_STEP_S)
+    if keep < len(pieces):
+        logger.warning("Discarded %s Parakeet token(s) beyond the audio boundary.", len(pieces) - keep)
+    return pieces[:keep], timestamps[:keep]
+
+
 def _tokenize_proper_nouns(
     proper_nouns: tuple[str, ...],
     vocab: list[str],
@@ -521,9 +560,7 @@ def _group_segments(words: list[_TimedWord], *, include_words: bool) -> list[Seg
         if not any(separator in word.text for separator in ".?!") and index != len(words) - 1:
             continue
         segment_words = (
-            [WordTimestamp(word=item.text, start=item.start, end=item.end, probability=0.0) for item in current]
-            if include_words
-            else []
+            [WordTimestamp(word=item.text, start=item.start, end=item.end) for item in current] if include_words else []
         )
         segments.append(
             Segment(

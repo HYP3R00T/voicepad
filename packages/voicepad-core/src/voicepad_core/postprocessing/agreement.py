@@ -11,16 +11,15 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-import numpy as np
-
 if TYPE_CHECKING:
+    from ..audio import RawAudio
     from ..inference.types import TranscriptionResult
 
 logger = logging.getLogger(__name__)
 
 
 def apply_local_agreement(
-    audio: np.ndarray,
+    audio: RawAudio,
     first_result: TranscriptionResult,
     model_name: str,
     device: str,
@@ -46,7 +45,6 @@ def apply_local_agreement(
         TranscriptionResult with only agreed-upon tokens
     """
     from ..inference import transcribe
-    from ..inference.types import TranscriptionResult
 
     logger.debug("LocalAgreement: Running second pass")
 
@@ -62,21 +60,19 @@ def apply_local_agreement(
     # Token-level comparison
     agreed_text = _compare_tokens(first_result.text, second_result.text)
 
-    logger.debug(f"LocalAgreement: {len(first_result.text.split())} → {len(agreed_text.split())} tokens")
+    logger.debug(
+        "Local agreement: %s -> %s tokens",
+        len(first_result.text.split()),
+        len(agreed_text.split()),
+    )
 
     # Return modified result with agreed text
-    return TranscriptionResult(
+    from dataclasses import replace
+
+    return replace(
+        first_result,
         text=agreed_text,
-        segments=first_result.segments,  # Keep first pass segments
-        language=first_result.language,
-        language_probability=first_result.language_probability,
-        duration_s=first_result.duration_s,
         latency_ms=first_result.latency_ms + second_result.latency_ms,
-        device=first_result.device,
-        compute_type=first_result.compute_type,
-        fallback_to_cpu=first_result.fallback_to_cpu,
-        avg_confidence=first_result.avg_confidence,
-        low_confidence_count=first_result.low_confidence_count,
     )
 
 
@@ -101,6 +97,6 @@ def _compare_tokens(text1: str, text2: str) -> str:
         if t1.lower() == t2.lower():
             agreed.append(t1)
         else:
-            logger.debug(f"Token mismatch at position {i}: '{t1}' vs '{t2}'")
+            logger.debug("Token mismatch at position %s: %r vs %r", i, t1, t2)
 
     return " ".join(agreed)

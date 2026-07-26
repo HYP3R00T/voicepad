@@ -17,7 +17,7 @@ from voicepad_core.inference.contracts import (
     TranscriptionRequest,
 )
 from voicepad_core.inference.errors import TranscriptionError
-from voicepad_core.models import ModelSpec
+from voicepad_core.models import HuggingFaceArtifact, ModelSpec
 
 
 @dataclass
@@ -64,7 +64,7 @@ class _Model:
 def _spec(*, distil: bool = False, backend_id: str = "faster-whisper") -> ModelSpec:
     return ModelSpec(
         id="tiny",
-        repo_id="owner/tiny",
+        artifact_source=HuggingFaceArtifact("owner/tiny"),
         distil=distil,
         backend_id=backend_id,
         artifact_format="ctranslate2",
@@ -115,7 +115,7 @@ def _session(
 
 
 def _request(**kwargs: Any) -> TranscriptionRequest:
-    return TranscriptionRequest(np.ones(16_000, dtype=np.float32), **kwargs)
+    return TranscriptionRequest(np.ones(16_000, dtype=np.float32), sample_rate=16_000, **kwargs)
 
 
 class TestFasterWhisperDriver:

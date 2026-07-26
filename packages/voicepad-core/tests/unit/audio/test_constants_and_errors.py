@@ -1,5 +1,5 @@
 from voicepad_core.audio import SUPPORTED_FORMATS
-from voicepad_core.audio.constants import DEFAULT_INPUT_CHANNELS, DEFAULT_INPUT_SAMPLE_RATE, PCM_WAV_SUBTYPE
+from voicepad_core.audio.constants import DEFAULT_INPUT_CHANNELS, FALLBACK_INPUT_SAMPLE_RATE, PCM_WAV_SUBTYPE
 from voicepad_core.audio.errors import (
     AudioConversionDependencyError,
     AudioConversionError,
@@ -11,7 +11,7 @@ from voicepad_core.audio.errors import (
 
 def test_audio_constants_match_expected_defaults() -> None:
     assert DEFAULT_INPUT_CHANNELS == 1
-    assert DEFAULT_INPUT_SAMPLE_RATE == 16_000
+    assert FALLBACK_INPUT_SAMPLE_RATE == 16_000
     assert PCM_WAV_SUBTYPE == "PCM_16"
     assert frozenset({".wav", ".flac", ".ogg", ".mp3", ".m4a", ".mp4"}) == SUPPORTED_FORMATS
 

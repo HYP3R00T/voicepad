@@ -15,16 +15,16 @@ class WordTimestamp:
         word:        The word text (may include leading space).
         start:       Word start time in seconds.
         end:         Word end time in seconds.
-        probability: Whisper's token probability for this word (0.0–1.0).
+        probability: Backend word confidence (0.0–1.0), when available.
     """
 
     word: str
     start: float
     end: float
-    probability: float = 0.0
+    probability: float | None = None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class Segment:
     """One transcription segment with timestamps and confidence metrics.
 
@@ -32,8 +32,8 @@ class Segment:
         start:          Segment start time in seconds.
         end:            Segment end time in seconds.
         text:           Transcribed text for this segment.
-        avg_logprob:    Whisper average log probability (typically -inf to 0).
-        no_speech_prob: Whisper no-speech probability (0.0–1.0).
+        avg_logprob:    Segment log probability, when the backend reports it.
+        no_speech_prob: No-speech probability, when the backend reports it.
         words:          Per-word timestamps. Empty list when word_timestamps=False.
         confidence:     Backend-neutral confidence (0.0–1.0), when available.
     """
@@ -41,8 +41,8 @@ class Segment:
     start: float
     end: float
     text: str
-    avg_logprob: float = 0.0
-    no_speech_prob: float = 0.0
+    avg_logprob: float | None = None
+    no_speech_prob: float | None = None
     words: list[WordTimestamp] = field(default_factory=list)
     confidence: float | None = None
 
@@ -57,22 +57,20 @@ class Segment:
         return self.end - self.start
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class TranscriptionResult:
     """Complete transcription result with metadata and quality metrics.
 
     Attributes:
         text:                  Full transcription text (all segments joined).
         segments:              Individual timed segments with confidence scores.
-        language:              Detected language code (e.g. 'en', 'es').
-        language_probability:  Confidence of language detection (0.0–1.0).
+        language:              Detected language code, when available.
+        language_probability:  Language confidence, when available.
         duration_s:            Duration of the audio that was transcribed.
         latency_ms:            Wall-clock time taken for the transcription call.
         device:                Device actually used ('cuda' or 'cpu').
         compute_type:          Precision used ('int8_float16', 'int8', etc.).
         fallback_to_cpu:       True if CUDA failed and CPU was used instead.
-        avg_confidence:        Mean avg_logprob across all segments.
-        low_confidence_count:  Number of segments with avg_logprob < -1.0.
         backend_id:            Backend implementation that produced the result.
         model_id:              Model identifier reported by the backend.
         artifact_format:       Model artifact format, such as ``ct2`` or ``gguf``.
@@ -84,15 +82,22 @@ class TranscriptionResult:
 
     text: str
     segments: list[Segment]
-    language: str
-    language_probability: float
+    language: str | None
+    language_probability: float | None
     duration_s: float
     latency_ms: float
     device: str
     compute_type: str
     fallback_to_cpu: bool = False
-    avg_confidence: float = 0.0
-    low_confidence_count: int = 0
     backend_id: str | None = None
     model_id: str | None = None
     artifact_format: str | None = None
+    audio_transformations: tuple[str, ...] = ()
+    applied_options: tuple[str, ...] = ()
+    ignored_options: tuple[str, ...] = ()
+    language_source: str = "unavailable"
+    word_timestamp_source: str = "unavailable"
+    word_confidence_source: str = "unavailable"
+    segment_log_probability_source: str = "unavailable"
+    segment_confidence_source: str = "unavailable"
+    no_speech_probability_source: str = "unavailable"

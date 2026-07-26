@@ -9,11 +9,14 @@ from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
 import numpy as np
 from numpy.typing import NDArray
 
+from ..audio.types import WaveformSpec
+
 if TYPE_CHECKING:
     from .types import TranscriptionResult
     from ..models import ModelSpec
 
 DecodingIntent = Literal["transcribe", "translate"]
+OutputProvenance = Literal["unavailable", "native", "derived"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +28,33 @@ class BackendCapabilities:
     language_detection: bool = False
     translation: bool = False
     context_biasing: bool = False
+    language_selection: bool = False
+    beam_search: bool = False
+    text_prompt: bool = False
+    vad_filter: bool = False
+    no_speech_threshold: bool = False
+    hallucination_silence_threshold: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class OutputCapabilities:
+    """Provenance of optional values emitted by a backend."""
+
+    language: OutputProvenance = "unavailable"
+    word_timestamps: OutputProvenance = "unavailable"
+    word_confidence: OutputProvenance = "unavailable"
+    segment_log_probability: OutputProvenance = "unavailable"
+    segment_confidence: OutputProvenance = "unavailable"
+    no_speech_probability: OutputProvenance = "unavailable"
+
+
+@dataclass(frozen=True, slots=True)
+class BackendContract:
+    """Complete handover contract published by one backend driver."""
+
+    audio: WaveformSpec
+    decoding: BackendCapabilities = field(default_factory=BackendCapabilities)
+    output: OutputCapabilities = field(default_factory=OutputCapabilities)
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,15 +112,15 @@ class TranscriptionRequest:
     """Canonical audio and decoding intent passed to an open session."""
 
     audio: NDArray[np.float32]
-    sample_rate: int = 16_000
+    sample_rate: int
     language: str | None = None
     word_timestamps: bool = False
-    beam_size: int = 5
+    beam_size: int | None = 5
     intent: DecodingIntent = "transcribe"
     context: TranscriptionContext = field(default_factory=TranscriptionContext)
-    vad_filter: bool = False
-    no_speech_threshold: float = 0.6
-    hallucination_silence_threshold: float = 2.0
+    vad_filter: bool | None = False
+    no_speech_threshold: float | None = 0.6
+    hallucination_silence_threshold: float | None = 2.0
 
     def __post_init__(self) -> None:
         if not isinstance(self.audio, np.ndarray):
@@ -103,13 +133,13 @@ class TranscriptionRequest:
             raise ValueError("sample_rate must be positive")
         if self.language is not None and not self.language.strip():
             raise ValueError("language must not be empty")
-        if self.beam_size < 1:
+        if self.beam_size is not None and self.beam_size < 1:
             raise ValueError("beam_size must be at least 1")
         if self.intent not in ("transcribe", "translate"):
             raise ValueError(f"unsupported decoding intent: {self.intent}")
-        if not 0.0 <= self.no_speech_threshold <= 1.0:
+        if self.no_speech_threshold is not None and not 0.0 <= self.no_speech_threshold <= 1.0:
             raise ValueError("no_speech_threshold must be between 0.0 and 1.0")
-        if self.hallucination_silence_threshold < 0.0:
+        if self.hallucination_silence_threshold is not None and self.hallucination_silence_threshold < 0.0:
             raise ValueError("hallucination_silence_threshold must not be negative")
 
 
@@ -143,6 +173,9 @@ class BackendDriver(Protocol):
     @property
     def capabilities(self) -> BackendCapabilities: ...
 
+    @property
+    def contract(self) -> BackendContract: ...
+
     def is_available(self) -> bool: ...
 
     def prepare(self, model: ModelSpec) -> PreparedModel: ...
@@ -152,8 +185,11 @@ class BackendDriver(Protocol):
 
 __all__ = [
     "BackendCapabilities",
+    "BackendContract",
     "BackendDriver",
     "DecodingIntent",
+    "OutputCapabilities",
+    "OutputProvenance",
     "PreparedModel",
     "RuntimeInfo",
     "RuntimeOptions",

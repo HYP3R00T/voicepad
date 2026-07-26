@@ -18,11 +18,19 @@ from unittest.mock import Mock
 import numpy as np
 import numpy.testing as npt
 import pytest
-from voicepad_core.audio.base import AudioSource
-from voicepad_core.audio.types import RawAudio
-from voicepad_core.preprocessing.errors import InvalidAudioMetadataError, InvalidAudioShapeError
-from voicepad_core.preprocessing.preprocessor import TARGET_SAMPLE_RATE, AudioPreProcessor
-from voicepad_core.preprocessing.types import PreprocessedAudio
+from voicepad_core.audio import AudioSource, RawAudio
+from voicepad_core.preprocessing import (
+    DEFAULT_WAVEFORM_SPEC,
+    TARGET_SAMPLE_RATE,
+    AudioPreProcessor,
+    InvalidAudioShapeError,
+    PreprocessedAudio,
+)
+
+
+def _prepare_samples(audio: np.ndarray, sample_rate: int, channels: int = 1) -> np.ndarray:
+    raw = RawAudio(audio, sample_rate=sample_rate, channels=channels)
+    return AudioPreProcessor.prepare(raw, DEFAULT_WAVEFORM_SPEC).samples
 
 
 @pytest.fixture
@@ -434,16 +442,13 @@ def test_process_end_to_end_stereo_to_mono(mock_audio_source: Mock, capsys) -> N
 
 
 # ============================================================================
-# process_array Tests (6 tests)
+# Canonical prepare Tests
 # ============================================================================
 
 
-def test_process_array_mono_16khz(mock_audio_source: Mock) -> None:
-    """Test process_array with mono 16kHz audio (no conversion needed)."""
-    preprocessor = AudioPreProcessor(mock_audio_source)
-
+def test_prepare_mono_16khz() -> None:
     audio = np.array([0.1, 0.2, 0.3, 0.4], dtype=np.float32)
-    result = preprocessor.process_array(audio, sample_rate=16000, channels=1)
+    result = _prepare_samples(audio, sample_rate=16000)
 
     # Should be normalized but otherwise unchanged
     assert result.dtype == np.float32
@@ -452,13 +457,10 @@ def test_process_array_mono_16khz(mock_audio_source: Mock) -> None:
     assert np.max(np.abs(result)) == pytest.approx(1.0, abs=1e-6)
 
 
-def test_process_array_stereo_to_mono(mock_audio_source: Mock) -> None:
-    """Test process_array converts stereo to mono."""
-    preprocessor = AudioPreProcessor(mock_audio_source)
-
+def test_prepare_stereo_to_mono() -> None:
     # Stereo audio (N, 2)
     audio = np.array([[0.1, 0.3], [0.2, 0.4], [0.3, 0.5]], dtype=np.float32)
-    result = preprocessor.process_array(audio, sample_rate=16000, channels=2)
+    result = _prepare_samples(audio, sample_rate=16000, channels=2)
 
     # Should be mono
     assert result.ndim == 1
@@ -469,26 +471,20 @@ def test_process_array_stereo_to_mono(mock_audio_source: Mock) -> None:
     npt.assert_array_almost_equal(result, expected * 2.5, decimal=5)
 
 
-def test_process_array_resampling_44khz_to_16khz(mock_audio_source: Mock) -> None:
-    """Test process_array resamples 44.1kHz to 16kHz."""
-    preprocessor = AudioPreProcessor(mock_audio_source)
-
+def test_prepare_resampling_44khz_to_16khz() -> None:
     # 1 second at 44.1kHz
     audio = np.random.randn(44100).astype(np.float32) * 0.5
-    result = preprocessor.process_array(audio, sample_rate=44100, channels=1)
+    result = _prepare_samples(audio, sample_rate=44100)
 
     # Should be resampled to 16kHz
     assert result.dtype == np.float32
     assert abs(len(result) - 16000) < 10  # Allow small tolerance
 
 
-def test_process_array_multichannel_to_mono(mock_audio_source: Mock) -> None:
-    """Test process_array converts multi-channel to mono."""
-    preprocessor = AudioPreProcessor(mock_audio_source)
-
+def test_prepare_multichannel_to_mono() -> None:
     # 4-channel audio
     audio = np.array([[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0]], dtype=np.float32)
-    result = preprocessor.process_array(audio, sample_rate=16000, channels=4)
+    result = _prepare_samples(audio, sample_rate=16000, channels=4)
 
     # Should be mono
     assert result.ndim == 1
@@ -499,12 +495,9 @@ def test_process_array_multichannel_to_mono(mock_audio_source: Mock) -> None:
     npt.assert_array_almost_equal(result, expected, decimal=5)
 
 
-def test_process_array_int16_conversion(mock_audio_source: Mock) -> None:
-    """Test process_array converts int16 to float32."""
-    preprocessor = AudioPreProcessor(mock_audio_source)
-
+def test_prepare_int16_conversion() -> None:
     audio = np.array([100, 200, 300, 400], dtype=np.int16)
-    result = preprocessor.process_array(audio, sample_rate=16000, channels=1)
+    result = _prepare_samples(audio, sample_rate=16000)
 
     # Should be float32
     assert result.dtype == np.float32
@@ -512,12 +505,9 @@ def test_process_array_int16_conversion(mock_audio_source: Mock) -> None:
     assert np.max(np.abs(result)) == pytest.approx(1.0, abs=1e-6)
 
 
-def test_process_array_silent_audio(mock_audio_source: Mock) -> None:
-    """Test process_array handles silent audio without errors."""
-    preprocessor = AudioPreProcessor(mock_audio_source)
-
+def test_prepare_silent_audio() -> None:
     audio = np.zeros(1000, dtype=np.float32)
-    result = preprocessor.process_array(audio, sample_rate=16000, channels=1)
+    result = _prepare_samples(audio, sample_rate=16000)
 
     # Should return zeros without NaN or Inf
     assert result.dtype == np.float32
@@ -527,39 +517,29 @@ def test_process_array_silent_audio(mock_audio_source: Mock) -> None:
     assert not np.any(np.isinf(result))
 
 
-def test_process_array_upsampling(mock_audio_source: Mock) -> None:
-    """Test process_array upsamples 8kHz to 16kHz."""
-    preprocessor = AudioPreProcessor(mock_audio_source)
-
+def test_prepare_upsampling() -> None:
     # 1 second at 8kHz
     audio = np.random.randn(8000).astype(np.float32) * 0.5
-    result = preprocessor.process_array(audio, sample_rate=8000, channels=1)
+    result = _prepare_samples(audio, sample_rate=8000)
 
     # Should be upsampled to 16kHz
     assert result.dtype == np.float32
     assert abs(len(result) - 16000) < 10  # Allow small tolerance
 
 
-def test_process_array_downsampling(mock_audio_source: Mock) -> None:
-    """Test process_array downsamples 48kHz to 16kHz."""
-    preprocessor = AudioPreProcessor(mock_audio_source)
-
+def test_prepare_downsampling() -> None:
     # 1 second at 48kHz
     audio = np.random.randn(48000).astype(np.float32) * 0.5
-    result = preprocessor.process_array(audio, sample_rate=48000, channels=1)
+    result = _prepare_samples(audio, sample_rate=48000)
 
     # Should be downsampled to 16kHz
     assert result.dtype == np.float32
     assert abs(len(result) - 16000) < 10  # Allow small tolerance
 
 
-def test_process_array_interleaved_stereo(mock_audio_source: Mock) -> None:
-    """Test process_array handles interleaved stereo correctly."""
-    preprocessor = AudioPreProcessor(mock_audio_source)
-
-    # Interleaved stereo: [L1, R1, L2, R2, L3, R3]
-    audio = np.array([1.0, 3.0, 2.0, 4.0, 3.0, 5.0], dtype=np.float32)
-    result = preprocessor.process_array(audio, sample_rate=16000, channels=2)
+def test_prepare_stereo_matrix() -> None:
+    audio = np.array([[1.0, 3.0], [2.0, 4.0], [3.0, 5.0]], dtype=np.float32)
+    result = _prepare_samples(audio, sample_rate=16000, channels=2)
 
     # Should be mono
     assert result.ndim == 1
@@ -614,20 +594,6 @@ def test_normalize_very_small_values(mock_audio_source: Mock) -> None:
     assert result[2] == pytest.approx(1.0, abs=1e-6)
     assert result[1] == pytest.approx(2.0 / 3.0, abs=1e-6)
     assert result[0] == pytest.approx(1.0 / 3.0, abs=1e-6)
-
-
-def test_process_array_rejects_non_positive_sample_rate(mock_audio_source: Mock) -> None:
-    preprocessor = AudioPreProcessor(mock_audio_source)
-
-    with pytest.raises(InvalidAudioMetadataError, match="sample_rate must be positive"):
-        preprocessor.process_array(np.array([0.1], dtype=np.float32), sample_rate=0, channels=1)
-
-
-def test_process_array_rejects_non_positive_channels(mock_audio_source: Mock) -> None:
-    preprocessor = AudioPreProcessor(mock_audio_source)
-
-    with pytest.raises(InvalidAudioMetadataError, match="channels must be positive"):
-        preprocessor.process_array(np.array([0.1], dtype=np.float32), sample_rate=16_000, channels=0)
 
 
 def test_to_mono_rejects_mismatched_2d_channel_shape(mock_audio_source: Mock) -> None:

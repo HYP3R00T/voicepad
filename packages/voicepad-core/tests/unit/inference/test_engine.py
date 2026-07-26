@@ -7,17 +7,49 @@ from unittest.mock import patch
 
 import numpy as np
 import pytest
+from voicepad_core.audio import RawAudio, WaveformSpec
 from voicepad_core.config import Config
-from voicepad_core.inference.backend_manager import SessionManager
-from voicepad_core.inference.contracts import RuntimeInfo, RuntimeOptions, TranscriptionRequest
-from voicepad_core.inference.engine import (
-    _trim_trailing_silence,
-    close_default_sessions,
-    transcribe,
+from voicepad_core.inference.contracts import (
+    BackendCapabilities,
+    BackendContract,
+    OutputCapabilities,
+    RuntimeInfo,
+    RuntimeOptions,
+    TranscriptionRequest,
 )
+from voicepad_core.inference.engine import _trim_trailing_silence, transcribe
 from voicepad_core.inference.errors import AudioTooShortError, TranscriptionError
+from voicepad_core.inference.runtime import RuntimeDescriptor, RuntimeManager
 from voicepad_core.inference.types import Segment, TranscriptionResult
 from voicepad_core.models import ModelSpec
+
+_WHISPER_CONTRACT = BackendContract(
+    WaveformSpec(16_000),
+    BackendCapabilities(
+        word_timestamps=True,
+        language_detection=True,
+        translation=True,
+        context_biasing=True,
+        language_selection=True,
+        beam_search=True,
+        text_prompt=True,
+        vad_filter=True,
+        no_speech_threshold=True,
+        hallucination_silence_threshold=True,
+    ),
+    OutputCapabilities(
+        language="native",
+        word_timestamps="native",
+        word_confidence="native",
+        segment_log_probability="native",
+        no_speech_probability="native",
+    ),
+)
+_PARAKEET_CONTRACT = BackendContract(
+    WaveformSpec(16_000),
+    BackendCapabilities(word_timestamps=True, context_biasing=True),
+    OutputCapabilities(word_timestamps="derived"),
+)
 
 
 def _config(**updates: object) -> Config:
@@ -28,14 +60,13 @@ def _config(**updates: object) -> Config:
         transcription_model="tiny",
         transcription_device="cpu",
         transcription_compute_type="int8",
-        model_warmup_enabled=False,
     ).model_copy(update=updates)
 
 
 def _result(**updates: object) -> TranscriptionResult:
     base = TranscriptionResult(
         text="VoicePad",
-        segments=[Segment(0.0, 1.0, "VoicePad", avg_logprob=-0.2)],
+        segments=[Segment(start=0.0, end=1.0, text="VoicePad", avg_logprob=-0.2)],
         language="en",
         language_probability=0.99,
         duration_s=1.0,
@@ -71,9 +102,13 @@ class _Session:
 
 
 class _Manager:
-    def __init__(self, session: _Session) -> None:
+    def __init__(self, session: _Session, contract: BackendContract = _WHISPER_CONTRACT) -> None:
         self.session = session
+        self.contract = contract
         self.opens: list[tuple[ModelSpec, RuntimeOptions]] = []
+
+    def describe(self, model: ModelSpec) -> RuntimeDescriptor:
+        return RuntimeDescriptor(model, self.contract, True)
 
     def open(self, model: ModelSpec, options: RuntimeOptions) -> _Session:
         self.opens.append((model, options))
@@ -81,17 +116,21 @@ class _Manager:
 
 
 class _Coordinator:
-    def __init__(self, session: _Session) -> None:
+    def __init__(self, session: _Session, contract: BackendContract = _WHISPER_CONTRACT) -> None:
         self.session = session
+        self.contract = contract
         self.activations: list[tuple[ModelSpec, RuntimeOptions]] = []
+
+    def describe(self, model: ModelSpec) -> RuntimeDescriptor:
+        return RuntimeDescriptor(model, self.contract, True)
 
     def activate(self, model: ModelSpec, options: RuntimeOptions) -> _Session:
         self.activations.append((model, options))
         return self.session
 
 
-def _manager(session: _Session) -> SessionManager:
-    return cast(SessionManager, _Manager(session))
+def _manager(session: _Session) -> RuntimeManager:
+    return cast(RuntimeManager, _Manager(session))
 
 
 class TestTrailingSilence:
@@ -99,41 +138,51 @@ class TestTrailingSilence:
         """A voiced final frame prevents trimming."""
         audio = np.ones(640, dtype=np.float32)
 
-        assert len(_trim_trailing_silence(audio)) == len(audio)
+        assert len(_trim_trailing_silence(audio, 16_000)) == len(audio)
 
     def test_removes_complete_silent_tail_frames(self) -> None:
         """Silence is removed in complete configured frames."""
         audio = np.concatenate([np.ones(320, dtype=np.float32), np.zeros(640, dtype=np.float32)])
 
-        assert len(_trim_trailing_silence(audio)) == 320
+        assert len(_trim_trailing_silence(audio, 16_000)) == 320
 
     def test_leaves_short_audio_unchanged(self) -> None:
         """Audio shorter than one analysis frame is unchanged."""
         audio = np.zeros(100, dtype=np.float32)
 
-        assert _trim_trailing_silence(audio) is audio
+        assert _trim_trailing_silence(audio, 16_000) is audio
 
 
 class TestTranscribe:
     def test_rejects_audio_below_configured_minimum(self) -> None:
         """Short audio fails before a backend session is opened."""
         with pytest.raises(AudioTooShortError):
-            transcribe(np.ones(100, dtype=np.float32), config=_config())
+            transcribe(RawAudio(np.ones(100, dtype=np.float32), 16_000, 1), config=_config())
 
-    def test_flattens_audio_before_backend_request(self) -> None:
-        """Multi-dimensional input crosses the backend boundary as mono float32."""
+    def test_prepares_raw_audio_for_backend_contract(self) -> None:
+        """Raw device metadata drives conversion at the backend handover."""
         session = _Session()
 
-        transcribe(
-            np.ones((2, 8_000), dtype=np.float64),
+        result = transcribe(
+            RawAudio(np.ones(8_000, dtype=np.float64), sample_rate=8_000, channels=1),
             config=_config(),
             session_manager=_manager(session),
         )
 
-        assert (session.requests[0].audio.ndim, session.requests[0].audio.dtype) == (
-            1,
+        request = session.requests[0]
+        assert (request.sample_rate, request.audio.dtype, request.audio.size) == (
+            16_000,
             np.dtype(np.float32),
+            16_000,
         )
+        assert result.audio_transformations == ("float32", "resample:8000->16000")
+        assert (
+            result.language_source,
+            result.word_timestamp_source,
+            result.word_confidence_source,
+            result.segment_log_probability_source,
+            result.no_speech_probability_source,
+        ) == ("native", "native", "native", "native", "native")
 
     def test_passes_model_runtime_and_decoding_context(self) -> None:
         """Config becomes neutral runtime options and semantic backend context."""
@@ -148,10 +197,10 @@ class TestTranscribe:
         )
 
         transcribe(
-            np.ones(16_000, dtype=np.float32),
+            RawAudio(np.ones(16_000, dtype=np.float32), 16_000, 1),
             word_timestamps=True,
             config=config,
-            session_manager=cast(SessionManager, manager),
+            session_manager=cast(RuntimeManager, manager),
         )
 
         model, options = manager.opens[0]
@@ -184,14 +233,14 @@ class TestTranscribe:
         manager = _Manager(session)
 
         transcribe(
-            np.ones(16_000, dtype=np.float32),
+            RawAudio(np.ones(16_000, dtype=np.float32), 16_000, 1),
             device="cuda",
             compute_type="float16",
             language="fr",
             beam_size=1,
             initial_prompt="Override",
             config=_config(),
-            session_manager=cast(SessionManager, manager),
+            session_manager=cast(RuntimeManager, manager),
         )
 
         _, options = manager.opens[0]
@@ -204,17 +253,22 @@ class TestTranscribe:
             request.context.previous_text,
         ) == ("cuda", "float16", "fr", 1, "Override")
 
-    def test_warns_for_non_english_language(self) -> None:
-        """Non-English requests retain the existing support warning."""
-        with patch("voicepad_core.inference.engine.logger") as mocked_logger:
-            transcribe(
-                np.ones(16_000, dtype=np.float32),
-                language="fr",
-                config=_config(),
-                session_manager=_manager(_Session()),
-            )
+    def test_reports_options_ignored_by_backend_contract(self) -> None:
+        """Unsupported controls remain visible instead of disappearing silently."""
+        result = transcribe(
+            RawAudio(np.ones(16_000, dtype=np.float32), 16_000, 1),
+            language="fr",
+            config=_config(beam_size=3, transcription_vad_filter=True),
+            session_manager=cast(RuntimeManager, _Manager(_Session(), _PARAKEET_CONTRACT)),
+        )
 
-        mocked_logger.warning.assert_called_once()
+        assert set(result.ignored_options) >= {
+            "language",
+            "beam_size",
+            "vad_filter",
+            "no_speech_threshold",
+            "hallucination_silence_threshold",
+        }
 
     def test_applies_voicepad_text_postprocessing_once(self) -> None:
         """Enabled text cleanup changes result text after backend inference."""
@@ -229,7 +283,7 @@ class TestTranscribe:
             ) as normalize_text,
         ):
             result = transcribe(
-                np.ones(16_000, dtype=np.float32),
+                RawAudio(np.ones(16_000, dtype=np.float32), 16_000, 1),
                 config=_config(text_postprocessing_enabled=True),
                 session_manager=_manager(_Session()),
             )
@@ -244,7 +298,7 @@ class TestTranscribe:
         """Disabled cleanup returns backend text unchanged."""
         with patch("voicepad_core.inference.engine.normalize") as normalize_text:
             result = transcribe(
-                np.ones(16_000, dtype=np.float32),
+                RawAudio(np.ones(16_000, dtype=np.float32), 16_000, 1),
                 config=_config(text_postprocessing_enabled=False),
                 session_manager=_manager(_Session()),
             )
@@ -252,12 +306,12 @@ class TestTranscribe:
         assert (result.text, normalize_text.call_count) == ("VoicePad", 0)
 
     def test_preserves_backend_transcription_errors(self) -> None:
-        """Backend-domain failures cross the compatibility facade unchanged."""
+        """Backend-domain failures cross the public boundary unchanged."""
         error = TranscriptionError("backend unavailable")
 
         with pytest.raises(TranscriptionError) as exc_info:
             transcribe(
-                np.ones(16_000, dtype=np.float32),
+                RawAudio(np.ones(16_000, dtype=np.float32), 16_000, 1),
                 config=_config(),
                 session_manager=_manager(_Session(error=error)),
             )
@@ -268,7 +322,7 @@ class TestTranscribe:
         """Unexpected backend exceptions become the public TranscriptionError."""
         with pytest.raises(TranscriptionError, match="faster-whisper") as exc_info:
             transcribe(
-                np.ones(16_000, dtype=np.float32),
+                RawAudio(np.ones(16_000, dtype=np.float32), 16_000, 1),
                 config=_config(),
                 session_manager=_manager(_Session(error=RuntimeError("boom"))),
             )
@@ -277,13 +331,13 @@ class TestTranscribe:
 
     def test_default_coordinator_selects_parakeet_from_model_catalogue(self) -> None:
         """Without an injected manager, the resolved Parakeet backend reaches the coordinator."""
-        coordinator = _Coordinator(_Session())
+        coordinator = _Coordinator(_Session(), _PARAKEET_CONTRACT)
         with patch(
             "voicepad_core.inference.engine.get_default_coordinator",
             return_value=coordinator,
         ):
             transcribe(
-                np.ones(16_000, dtype=np.float32),
+                RawAudio(np.ones(16_000, dtype=np.float32), 16_000, 1),
                 config=_config(
                     transcription_model="parakeet-tdt-0.6b-v3-int8",
                     transcription_compute_type="int8",
@@ -292,9 +346,3 @@ class TestTranscribe:
 
         model, options = coordinator.activations[0]
         assert (model.backend_id, options.precision) == ("parakeet-onnx", "int8")
-
-
-def test_close_default_sessions_is_safe_before_first_use() -> None:
-    """Lifecycle cleanup is idempotent when no default session exists."""
-    close_default_sessions()
-    close_default_sessions()

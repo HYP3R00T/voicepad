@@ -4,12 +4,12 @@ import logging
 import os
 import subprocess
 import tempfile
+from abc import ABC, abstractmethod
 from pathlib import Path
 
 import numpy as np
 import soundfile as sf
 
-from .base import AudioSource
 from .constants import FFMPEG_COMMAND, NATIVE_FORMATS, SUPPORTED_FORMATS
 from .errors import (
     AudioConversionDependencyError,
@@ -17,8 +17,25 @@ from .errors import (
     AudioFileNotFoundError,
     UnsupportedAudioFormatError,
 )
+from .types import RawAudio
 
 logger = logging.getLogger(__name__)
+
+
+class AudioSource(ABC):
+    """Source that provides samples and their native format."""
+
+    @abstractmethod
+    def read(self) -> np.ndarray: ...
+
+    @abstractmethod
+    def get_sample_rate(self) -> int: ...
+
+    @abstractmethod
+    def get_channels(self) -> int: ...
+
+    def read_audio(self) -> RawAudio:
+        return RawAudio(self.read(), self.get_sample_rate(), self.get_channels())
 
 
 class FileSource(AudioSource):

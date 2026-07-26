@@ -5,9 +5,10 @@ from typing import cast
 
 import numpy as np
 import pytest
-from voicepad_core.inference.backend_manager import BackendRegistry, SessionManager
+from voicepad_core.audio import WaveformSpec
 from voicepad_core.inference.contracts import (
     BackendCapabilities,
+    BackendContract,
     PreparedModel,
     RuntimeInfo,
     RuntimeOptions,
@@ -18,8 +19,9 @@ from voicepad_core.inference.errors import (
     BackendSessionError,
     BackendUnavailableError,
 )
+from voicepad_core.inference.runtime import BackendRegistry, RuntimeManager
 from voicepad_core.inference.types import TranscriptionResult
-from voicepad_core.models import ModelSpec
+from voicepad_core.models import HuggingFaceArtifact, ModelSpec
 
 
 class FakeSession:
@@ -80,6 +82,10 @@ class FakeDriver:
     def capabilities(self) -> BackendCapabilities:
         return BackendCapabilities()
 
+    @property
+    def contract(self) -> BackendContract:
+        return BackendContract(WaveformSpec(16_000), self.capabilities)
+
     def is_available(self) -> bool:
         self.availability_checks += 1
         return self._available
@@ -103,7 +109,11 @@ class FakeDriver:
 
 
 def model_spec(model_id: str = "tiny", backend_id: str = "test") -> ModelSpec:
-    return ModelSpec(model_id, f"owner/{model_id}", backend_id=backend_id)
+    return ModelSpec(
+        model_id,
+        HuggingFaceArtifact(f"owner/{model_id}"),
+        backend_id=backend_id,
+    )
 
 
 class TestBackendRegistry:
@@ -142,13 +152,13 @@ class TestBackendRegistry:
             registry.get("missing")
 
 
-class TestSessionManager:
+class TestRuntimeManager:
     def test_resolves_driver_from_model_backend_id(self) -> None:
         """Opening a model selects its explicitly registered backend driver."""
         registry = BackendRegistry()
         driver = FakeDriver("selected")
         registry.register(driver)
-        manager = SessionManager(registry)
+        manager = RuntimeManager(registry)
         model = model_spec(backend_id="selected")
 
         session = manager.open(model, RuntimeOptions(device="cuda", precision="int8"))
@@ -161,7 +171,7 @@ class TestSessionManager:
         registry = BackendRegistry()
         driver = FakeDriver("test")
         registry.register(driver)
-        manager = SessionManager(registry)
+        manager = RuntimeManager(registry)
         model = model_spec()
 
         first = manager.open(model, RuntimeOptions(device="cuda", precision="int8"))
@@ -178,7 +188,7 @@ class TestSessionManager:
         registry = BackendRegistry()
         driver = FakeDriver("test")
         registry.register(driver)
-        manager = SessionManager(registry)
+        manager = RuntimeManager(registry)
 
         manager.open(model_spec("tiny"))
         manager.open(model_spec("base"))
@@ -190,7 +200,7 @@ class TestSessionManager:
         registry = BackendRegistry()
         driver = FakeDriver("test", available=False)
         registry.register(driver)
-        manager = SessionManager(registry)
+        manager = RuntimeManager(registry)
 
         with pytest.raises(BackendUnavailableError, match="unavailable"):
             manager.open(model_spec())
@@ -206,7 +216,7 @@ class TestSessionManager:
         registry = BackendRegistry()
         driver = FakeDriver("test", actual_device="cpu", actual_precision="int8")
         registry.register(driver)
-        manager = SessionManager(registry)
+        manager = RuntimeManager(registry)
 
         session = manager.open(
             model_spec(),
@@ -238,7 +248,7 @@ class TestSessionManager:
             reported_model_id=reported_model_id,
         )
         registry.register(driver)
-        manager = SessionManager(registry)
+        manager = RuntimeManager(registry)
 
         with pytest.raises(BackendSessionError, match=message):
             manager.open(model_spec())
@@ -254,7 +264,7 @@ class TestSessionManager:
 
         registry = BackendRegistry()
         registry.register(FailingDriver("test"))
-        manager = SessionManager(registry)
+        manager = RuntimeManager(registry)
 
         with pytest.raises(BackendSessionError, match="could not open") as exc_info:
             manager.open(model_spec())
@@ -266,7 +276,7 @@ class TestSessionManager:
         registry = BackendRegistry()
         driver = FakeDriver("test")
         registry.register(driver)
-        manager = SessionManager(registry)
+        manager = RuntimeManager(registry)
         active = cast(FakeSession, manager.open(model_spec("base")))
 
         manager.close_model("tiny")
@@ -283,7 +293,7 @@ class TestSessionManager:
         registry = BackendRegistry()
         driver = FakeDriver("test")
         registry.register(driver)
-        manager = SessionManager(registry)
+        manager = RuntimeManager(registry)
         first = cast(FakeSession, manager.open(model_spec("tiny")))
         first._close_error = RuntimeError("close failed")
 
@@ -295,7 +305,7 @@ class TestSessionManager:
 
     def test_close_operations_are_safe_when_no_sessions_are_open(self) -> None:
         """Close operations are idempotent when no runtime is active."""
-        manager = SessionManager(BackendRegistry())
+        manager = RuntimeManager(BackendRegistry())
 
         manager.close_model("missing")
         manager.close_all()
@@ -303,7 +313,7 @@ class TestSessionManager:
 
 def test_fake_session_transcribes_canonical_request() -> None:
     """The fake session used by lifecycle tests accepts the canonical request."""
-    request = TranscriptionRequest(np.zeros(16_000, dtype=np.float32))
+    request = TranscriptionRequest(np.zeros(16_000, dtype=np.float32), sample_rate=16_000)
     session = FakeSession(RuntimeInfo("test", "tiny", "cpu", "int8"))
 
     result = session.transcribe(request)

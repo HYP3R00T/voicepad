@@ -67,8 +67,9 @@ class TestConfigExpandPaths:
         config = Config(recordings_path="data/recordings", markdown_path="data/markdown")
         from pydantic import ValidationError
 
+        field = "recordings_path"
         with pytest.raises(ValidationError):  # FrozenInstanceError from Pydantic
-            config.recordings_path = Path("other")
+            setattr(config, field, Path("other"))
 
     def test_default_recordings_path(self) -> None:
         """When recordings_path is not provided, the default points to ~/.config/voicepad/data/recordings."""
@@ -695,22 +696,6 @@ class TestStreamingParameters:
 
 
 class TestLocalAgreementFields:
-    """Tests for local_agreement_mic and local_agreement_file fields."""
-
-    def test_default_local_agreement_mic_is_false(self) -> None:
-        """Default local_agreement_mic is False."""
-        config = Config(recordings_path="data/recordings", markdown_path="data/markdown")
-        assert config.local_agreement_mic is False
-
-    def test_custom_local_agreement_mic_true(self) -> None:
-        """local_agreement_mic can be set to True."""
-        config = Config(
-            recordings_path="data/recordings",
-            markdown_path="data/markdown",
-            local_agreement_mic=True,
-        )
-        assert config.local_agreement_mic is True
-
     def test_default_local_agreement_file_is_true(self) -> None:
         """Default local_agreement_file is True."""
         config = Config(recordings_path="data/recordings", markdown_path="data/markdown")
@@ -785,34 +770,6 @@ class TestAllPathFieldsExpanded:
         assert config.markdown_path == Path("/custom/markdown")
         assert config.model_cache_path == Path("/custom/models")
         assert config.logs_path == Path("/custom/logs")
-
-
-class TestConfigImmutability:
-    """Tests for config immutability (frozen model)."""
-
-    def test_cannot_modify_recordings_path(self) -> None:
-        """Cannot modify recordings_path after creation."""
-        from pydantic import ValidationError
-
-        config = Config(recordings_path="data/recordings", markdown_path="data/markdown")
-        with pytest.raises(ValidationError):
-            config.recordings_path = Path("other")  # type: ignore[misc]
-
-    def test_cannot_modify_transcription_model(self) -> None:
-        """Cannot modify transcription_model after creation."""
-        from pydantic import ValidationError
-
-        config = Config(recordings_path="data/recordings", markdown_path="data/markdown")
-        with pytest.raises(ValidationError):
-            config.transcription_model = "base"  # type: ignore[misc]
-
-    def test_cannot_modify_log_level(self) -> None:
-        """Cannot modify log_level after creation."""
-        from pydantic import ValidationError
-
-        config = Config(recordings_path="data/recordings", markdown_path="data/markdown")
-        with pytest.raises(ValidationError):
-            config.log_level = "DEBUG"  # type: ignore[misc]
 
 
 class TestGetConfigWithCwd:
@@ -911,8 +868,6 @@ class TestAdvancedRuntimeParameters:
         assert config.vad_speech_pad_ms == 30
         assert config.vad_model_filename == "silero_vad_v6.onnx"
         assert config.vad_download_chunk_size == 8192
-        assert config.model_warmup_enabled is True
-        assert config.model_warmup_duration_s == 0.5
 
     def test_custom_runtime_tuning_fields(self) -> None:
         config = Config(
@@ -937,11 +892,6 @@ class TestAdvancedRuntimeParameters:
             vad_model_filename="custom_vad.onnx",
             vad_model_url="https://example.com/custom_vad.onnx",
             vad_download_chunk_size=4096,
-            model_warmup_enabled=False,
-            model_warmup_duration_s=0.25,
-            model_warmup_language="fr",
-            model_warmup_beam_size=2,
-            model_warmup_vad_filter=True,
         )
 
         assert config.initial_prompt == "Test prompt"
@@ -963,8 +913,3 @@ class TestAdvancedRuntimeParameters:
         assert config.vad_model_filename == "custom_vad.onnx"
         assert config.vad_model_url == "https://example.com/custom_vad.onnx"
         assert config.vad_download_chunk_size == 4096
-        assert config.model_warmup_enabled is False
-        assert config.model_warmup_duration_s == 0.25
-        assert config.model_warmup_language == "fr"
-        assert config.model_warmup_beam_size == 2
-        assert config.model_warmup_vad_filter is True

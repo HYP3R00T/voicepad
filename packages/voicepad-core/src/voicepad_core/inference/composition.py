@@ -6,7 +6,6 @@ from pathlib import Path
 from threading import RLock
 
 from .artifacts import ProgressCallback, locate_artifact, prepare_artifact
-from .backend_manager import BackendRegistry, SessionManager
 from .backends import FasterWhisperDriver, ParakeetOnnxDriver
 from .contracts import (
     BackendDriver,
@@ -14,7 +13,7 @@ from .contracts import (
     RuntimeOptions,
     TranscriptionSession,
 )
-from .runtime import ActiveRuntime, RuntimeDescriptor
+from .runtime import ActiveRuntime, BackendRegistry, RuntimeDescriptor, RuntimeManager
 from ..config import get_config
 from ..models import ModelSpec, resolve_model_spec
 
@@ -42,7 +41,7 @@ class InferenceCoordinator:
         for driver in enabled_drivers:
             registry.register(driver)
         self._registry = registry
-        self._sessions = SessionManager(registry)
+        self._sessions = RuntimeManager(registry)
 
     @property
     def cache_dir(self) -> Path:

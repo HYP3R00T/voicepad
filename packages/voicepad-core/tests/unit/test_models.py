@@ -20,8 +20,7 @@ from voicepad_core.models import (
 
 class TestModelSpec:
     def test_whisper_defaults_describe_existing_artifacts(self) -> None:
-        """Existing two-argument registrations remain faster-whisper CTranslate2 models."""
-        spec = ModelSpec("test-defaults", "owner/model")
+        spec = ModelSpec("test-defaults", HuggingFaceArtifact("owner/model"))
 
         assert (spec.family, spec.backend_id, spec.artifact_format) == (
             "whisper",
@@ -47,7 +46,7 @@ class TestModelSpec:
         values[field] = ""
         spec = ModelSpec(
             "invalid-runtime",
-            "owner/model",
+            HuggingFaceArtifact("owner/model"),
             family=values["family"],
             backend_id=values["backend_id"],
             artifact_format=values["artifact_format"],
@@ -62,7 +61,7 @@ class TestModelSpec:
         register_model(
             ModelSpec(
                 model_id,
-                "owner/parakeet",
+                HuggingFaceArtifact("owner/parakeet"),
                 family="parakeet",
                 backend_id="transcribe-cpp",
                 artifact_format="gguf",
@@ -79,12 +78,6 @@ class TestModelSpec:
             "gguf",
             "Q8_0",
         )
-
-    def test_legacy_repository_fields_create_hugging_face_source(self) -> None:
-        """Legacy repository arguments become an explicit Hugging Face source."""
-        spec = ModelSpec("legacy", "owner/model", revision="v1")
-
-        assert spec.artifact_source == HuggingFaceArtifact("owner/model", "v1")
 
     @pytest.mark.parametrize(
         "source",
@@ -105,7 +98,7 @@ class TestModelSpec:
 
         register_model(spec, overwrite=True)
 
-        assert resolve_model_spec("portable").repo_id == ""
+        assert resolve_model_spec("portable").artifact_source == source
 
     def test_snapshot_validation_uses_declared_layout(self, tmp_path: Path) -> None:
         """A backend-specific artifact is validated without Whisper file assumptions."""

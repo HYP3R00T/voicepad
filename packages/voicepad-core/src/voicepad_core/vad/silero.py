@@ -1,47 +1,33 @@
-# vad/silero.py
-
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 import onnxruntime as ort
 
-from .base import VADBase
-from .constants import REQUIRED_SAMPLE_RATE, STATE_SIZE, WINDOW_SIZE
-from .errors import InvalidVADSampleRateError
 from .silero_download import ensure_model_exists
-from .types import SpeechSegment
 from ..config import Config, get_config
 
+REQUIRED_SAMPLE_RATE = 16_000
+WINDOW_SIZE = 512
+STATE_SIZE = (1, 1, 128)
 
-class SileroVAD(VADBase):
-    """
-    Voice Activity Detection using the Silero VAD ONNX model.
 
-    Runs on CPU via onnxruntime. The model is ~2.5 MB and fast
-    enough that GPU is unnecessary for VAD — save the GPU for
-    Whisper inference.
+class InvalidVADSampleRateError(ValueError):
+    """Raised when Silero receives audio at an unsupported sample rate."""
 
-    The ONNX file is stored in the configured vad_model_path directory
-    (default: ~/.config/voicepad/models/vad/silero_vad_v6.onnx) and is
-    downloaded automatically on first use via ensure_model_exists().
 
-    Processing:
-      - Audio is sliced into 512-sample (32ms) windows.
-      - Each window is passed through the ONNX session with
-        the LSTM hidden/cell state carried forward across windows
-        for accurate sequential detection.
-      - Windows above threshold are marked as speech.
-      - Adjacent speech windows are merged into SpeechSegment objects
-        with min_speech_duration, min_silence_duration, and padding
-        applied during merging.
+@dataclass(frozen=True)
+class SpeechSegment:
+    """A detected speech interval measured in seconds."""
 
-    Usage:
-        vad = SileroVAD(threshold=0.5)
-        segments = vad.detect(audio_float32_16khz)
-        vad.reset()  # between recordings
-    """
+    start: float
+    end: float
+
+
+class SileroVAD:
+    """Detect speech in 16 kHz mono audio with Silero ONNX on CPU."""
 
     def __init__(
         self,
@@ -52,29 +38,6 @@ class SileroVAD(VADBase):
         vad_model_dir: Path | None = None,
         config: Config | None = None,
     ) -> None:
-        """
-        Args:
-            threshold:
-                Speech probability threshold. Frames above this
-                are classified as speech. Range [0.0, 1.0].
-                0.5 is safe for most environments.
-
-            min_speech_duration_ms:
-                Minimum duration (ms) to keep a speech region.
-                Shorter bursts are discarded as noise.
-
-            min_silence_duration_ms:
-                Minimum silence gap (ms) to split two speech regions.
-                Shorter gaps merge adjacent segments into one.
-
-            speech_pad_ms:
-                Extra padding (ms) added to the start and end of each
-                speech segment to avoid clipping first/last syllables.
-
-            vad_model_dir:
-                Directory where VAD model is stored. If None, uses
-                config default (~/.config/voicepad/models/vad).
-        """
         self._config = config or get_config()
         threshold = threshold if threshold is not None else self._config.vad_threshold
         min_speech_duration_ms = (
@@ -101,21 +64,7 @@ class SileroVAD(VADBase):
         audio: np.ndarray,
         sample_rate: int = REQUIRED_SAMPLE_RATE,
     ) -> list[SpeechSegment]:
-        """
-        Run Silero VAD on a full audio buffer.
-
-        Args:
-            audio:       float32 mono array at 16kHz.
-                         AudioPreProcessor guarantees this upstream.
-            sample_rate: Must be 16000. Raises clearly if not.
-
-        Returns:
-            List of SpeechSegment sorted by start time.
-            Empty list if no speech detected or audio too short.
-
-        Raises:
-            ValueError: If sample_rate is not 16000.
-        """
+        """Return detected speech intervals in chronological order."""
         if sample_rate != REQUIRED_SAMPLE_RATE:
             raise InvalidVADSampleRateError(
                 f"SileroVAD requires audio at {REQUIRED_SAMPLE_RATE}Hz. "
@@ -127,31 +76,14 @@ class SileroVAD(VADBase):
 
         audio = _ensure_float32(audio)
 
-        # Score each 512-sample window
         speech_probs = self._score_windows(audio)
-
-        # Merge scored windows into SpeechSegment objects
-        segments = self._build_segments(speech_probs, total_samples=len(audio))
-
-        return segments
+        return self._build_segments(speech_probs, total_samples=len(audio))
 
     def reset(self) -> None:
-        """
-        Reset the LSTM hidden and cell states.
-
-        Call this between separate recordings so the hidden state
-        from a previous session does not affect the next detection pass.
-        """
+        """Clear recurrent state between recordings."""
         self._h, self._c = self._init_states()
 
     def _score_windows(self, audio: np.ndarray) -> list[tuple[int, float]]:
-        """
-        Slide a 512-sample window over the audio and run the ONNX
-        session on each window, carrying LSTM state forward.
-
-        Returns:
-            List of (window_start_sample, speech_probability) tuples.
-        """
         num_samples = len(audio)
         if num_samples % WINDOW_SIZE != 0:
             pad_size = WINDOW_SIZE - (num_samples % WINDOW_SIZE)
@@ -160,13 +92,11 @@ class SileroVAD(VADBase):
         num_chunks = len(audio) // WINDOW_SIZE
         batched_audio = audio.reshape(num_chunks, WINDOW_SIZE)
 
-        # Context padding: prepend last 64 samples of previous chunk
         context_size = 64
         context = np.zeros((num_chunks, context_size), dtype=np.float32)
         if num_chunks > 1:
             context[1:] = batched_audio[:-1, -context_size:]
 
-        # Shape (num_chunks, 576)
         inputs_audio = np.concatenate([context, batched_audio], axis=1)
 
         outputs = self._session.run(
@@ -178,7 +108,6 @@ class SileroVAD(VADBase):
             },
         )
 
-        # onnxruntime returns broad runtime value unions; normalize to ndarrays.
         probs = np.asarray(outputs[0], dtype=np.float32).reshape(-1)
         self._h = np.asarray(outputs[1], dtype=np.float32)
         self._c = np.asarray(outputs[2], dtype=np.float32)
@@ -191,17 +120,6 @@ class SileroVAD(VADBase):
         speech_probs: list[tuple[int, float]],
         total_samples: int,
     ) -> list[SpeechSegment]:
-        """
-        Convert per-window probabilities into merged SpeechSegment objects.
-
-        Steps:
-          1. Threshold each window into speech / silence boolean.
-          2. Group consecutive speech windows into raw segments.
-          3. Merge segments whose gap is below min_silence_samples.
-          4. Drop segments shorter than min_speech_samples.
-          5. Add speech_pad_samples padding, clamped to audio bounds.
-          6. Convert sample indices to seconds.
-        """
         if not speech_probs:
             return []
 
@@ -221,7 +139,6 @@ class SileroVAD(VADBase):
                     raw.append((seg_start, seg_end))  # type: ignore[possibly-undefined]
                     in_speech = False
 
-        # Close a segment that runs to the end of audio
         if in_speech:
             raw.append((seg_start, speech_probs[-1][0] + WINDOW_SIZE))
 
@@ -255,15 +172,6 @@ class SileroVAD(VADBase):
         return segments
 
     def _load_session(self) -> ort.InferenceSession:
-        """
-        Run the startup model check and load the ONNX session.
-
-        ensure_model_exists() downloads the file if missing.
-        The session is created with CPU execution provider only.
-
-        Raises:
-            RuntimeError: If download fails or ONNX session cannot load.
-        """
         model_path = ensure_model_exists(vad_model_dir=self._vad_model_dir, verbose=True, config=self._config)
 
         session_options = ort.SessionOptions()
@@ -278,23 +186,12 @@ class SileroVAD(VADBase):
 
     @staticmethod
     def _init_states() -> tuple[np.ndarray, np.ndarray]:
-        """
-        Initialise LSTM hidden and cell states to zeros.
-
-        Shapes are fixed by the Silero ONNX model architecture:
-          h : (1, 1, 128)
-          c : (1, 1, 128)
-        """
         h = np.zeros(STATE_SIZE, dtype=np.float32)
         c = np.zeros(STATE_SIZE, dtype=np.float32)
         return h, c
 
 
-# Module-level helper
-
-
 def _ensure_float32(audio: np.ndarray) -> np.ndarray:
-    """Cast audio to float32 if it is not already."""
     if audio.dtype != np.float32:
         return audio.astype(np.float32)
     return audio

@@ -1,4 +1,3 @@
-from .backend_manager import BackendRegistry, SessionManager
 from .backends import (
     FasterWhisperDriver,
     FasterWhisperSession,
@@ -15,7 +14,9 @@ from .composition import (
 )
 from .contracts import (
     BackendCapabilities,
+    BackendContract,
     BackendDriver,
+    OutputCapabilities,
     PreparedModel,
     RuntimeInfo,
     RuntimeOptions,
@@ -23,23 +24,21 @@ from .contracts import (
     TranscriptionRequest,
     TranscriptionSession,
 )
-from .engine import close_default_sessions, transcribe
+from .engine import transcribe
 from .errors import (
-    AudioTooLongWarning,
     AudioTooShortError,
     BackendLookupError,
     BackendSessionError,
     BackendUnavailableError,
-    ModelNotFoundError,
     TranscriptionError,
 )
+from .runtime import BackendRegistry, RuntimeManager
 from .types import Segment, TranscriptionResult, WordTimestamp
 
 __all__ = [
     "transcribe",
-    "close_default_sessions",
     "BackendRegistry",
-    "SessionManager",
+    "RuntimeManager",
     "InferenceCoordinator",
     "activate_model",
     "deactivate_model",
@@ -47,7 +46,9 @@ __all__ = [
     "model_is_ready",
     "prepare_model",
     "BackendCapabilities",
+    "BackendContract",
     "BackendDriver",
+    "OutputCapabilities",
     "PreparedModel",
     "RuntimeInfo",
     "RuntimeOptions",
@@ -63,8 +64,6 @@ __all__ = [
     "WordTimestamp",
     "TranscriptionError",
     "AudioTooShortError",
-    "AudioTooLongWarning",
-    "ModelNotFoundError",
     "BackendLookupError",
     "BackendUnavailableError",
     "BackendSessionError",

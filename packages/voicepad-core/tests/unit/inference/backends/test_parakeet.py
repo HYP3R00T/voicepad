@@ -183,13 +183,15 @@ def _prepared(tmp_path: Path) -> PreparedModel:
 
 
 def _request(**kwargs: Any) -> TranscriptionRequest:
-    return TranscriptionRequest(np.ones(16_000, dtype=np.float32), **kwargs)
+    sample_rate = kwargs.pop("sample_rate", 16_000)
+    return TranscriptionRequest(np.ones(16_000, dtype=np.float32), sample_rate=sample_rate, **kwargs)
 
 
 class TestParakeetOnnxDriver:
     def test_capabilities_are_honest(self) -> None:
         """Capabilities include decoder bias but exclude unsupported streaming, detection, and translation."""
-        capabilities = ParakeetOnnxDriver().capabilities
+        driver = ParakeetOnnxDriver()
+        capabilities = driver.capabilities
 
         assert (
             capabilities.streaming,
@@ -198,6 +200,7 @@ class TestParakeetOnnxDriver:
             capabilities.translation,
             capabilities.context_biasing,
         ) == (False, True, False, False, True)
+        assert driver.contract.audio.peak_normalize is True
 
     def test_prepare_accepts_handy_artifact_layout(self, tmp_path: Path) -> None:
         """A local directory containing all four Handy artifacts is accepted unchanged."""
@@ -357,7 +360,7 @@ class TestParakeetOnnxSession:
             "hello world.",
             "hello world.",
             ["hello", "world."],
-            0.0,
+            None,
             "parakeet-onnx",
             "parakeet-v3-int8",
             "onnx",
@@ -382,6 +385,36 @@ class TestParakeetOnnxSession:
         result = session.transcribe(_request(context=TranscriptionContext(proper_nouns=("VoicePad",))))
 
         assert result.text == "VoicePad"
+
+    def test_transcribe_discards_completion_beyond_audio_boundary(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Late whole-word tokens cannot turn a clipped utterance into invented prose."""
+        vocab = [" This", " is", " just", " a", " little", " bit", " more.", "<blk>"]
+        session = ParakeetOnnxSession(
+            _prepared(tmp_path),
+            cast(Any, (_Session("encoder"), _Session("decoder"), _Session("preprocessor"))),
+            vocab,
+            7,
+            RuntimeInfo("parakeet-onnx", "parakeet-v3-int8", "cpu", "int8"),
+        )
+        monkeypatch.setattr(
+            session,
+            "_infer",
+            lambda *_args: (list(range(7)), [10, 13, 16, 21, 22, 22, 22]),
+        )
+        request = TranscriptionRequest(
+            np.ones(round(1.39 * 16_000), dtype=np.float32),
+            sample_rate=16_000,
+            word_timestamps=True,
+        )
+
+        result = session.transcribe(request)
+
+        assert result.text == "This is just a"
+        assert [word.word for word in result.segments[0].words] == ["This", "is", "just", "a"]
 
     def test_transcribe_rejects_translation(
         self,

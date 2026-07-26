@@ -8,8 +8,10 @@ from typing import cast
 import numpy as np
 import pytest
 from numpy.typing import NDArray
+from voicepad_core.audio import WaveformSpec
 from voicepad_core.inference.contracts import (
     BackendCapabilities,
+    BackendContract,
     BackendDriver,
     DecodingIntent,
     PreparedModel,
@@ -20,7 +22,7 @@ from voicepad_core.inference.contracts import (
     TranscriptionSession,
 )
 from voicepad_core.inference.types import TranscriptionResult
-from voicepad_core.models import ModelSpec
+from voicepad_core.models import HuggingFaceArtifact, ModelSpec
 
 
 def _result() -> TranscriptionResult:
@@ -56,6 +58,10 @@ class _Driver:
     @property
     def capabilities(self) -> BackendCapabilities:
         return BackendCapabilities(word_timestamps=True)
+
+    @property
+    def contract(self) -> BackendContract:
+        return BackendContract(WaveformSpec(16_000), self.capabilities)
 
     def is_available(self) -> bool:
         return True
@@ -140,7 +146,7 @@ class TestTranscriptionContext:
 class TestTranscriptionRequest:
     def test_defaults_capture_decoding_intent(self) -> None:
         """A canonical request defaults to transcription with beam search."""
-        request = TranscriptionRequest(np.zeros(16_000, dtype=np.float32))
+        request = TranscriptionRequest(np.zeros(16_000, dtype=np.float32), sample_rate=16_000)
 
         assert (
             request.intent,
@@ -154,17 +160,20 @@ class TestTranscriptionRequest:
     def test_non_array_audio_is_rejected(self) -> None:
         """Backends never receive audio outside the canonical ndarray boundary."""
         with pytest.raises(TypeError, match="numpy.ndarray"):
-            TranscriptionRequest(cast(NDArray[np.float32], [0.0]))
+            TranscriptionRequest(cast(NDArray[np.float32], [0.0]), sample_rate=16_000)
 
     def test_multichannel_audio_is_rejected(self) -> None:
         """Backends receive mono audio after VoicePad preprocessing."""
         with pytest.raises(ValueError, match="mono"):
-            TranscriptionRequest(np.zeros((2, 100), dtype=np.float32))
+            TranscriptionRequest(np.zeros((2, 100), dtype=np.float32), sample_rate=16_000)
 
     def test_non_float32_audio_is_rejected(self) -> None:
         """Backends receive one consistent sample representation."""
         with pytest.raises(ValueError, match="float32"):
-            TranscriptionRequest(cast(NDArray[np.float32], np.zeros(100, dtype=np.float64)))
+            TranscriptionRequest(
+                cast(NDArray[np.float32], np.zeros(100, dtype=np.float64)),
+                sample_rate=16_000,
+            )
 
     def test_non_positive_sample_rate_is_rejected(self) -> None:
         """A request cannot describe audio with an invalid sample rate."""
@@ -174,18 +183,19 @@ class TestTranscriptionRequest:
     def test_blank_language_is_rejected(self) -> None:
         """Automatic language detection uses None rather than an empty code."""
         with pytest.raises(ValueError, match="language"):
-            TranscriptionRequest(np.zeros(100, dtype=np.float32), language=" ")
+            TranscriptionRequest(np.zeros(100, dtype=np.float32), sample_rate=16_000, language=" ")
 
     def test_non_positive_beam_size_is_rejected(self) -> None:
         """A decoding request requires at least one beam."""
         with pytest.raises(ValueError, match="beam_size"):
-            TranscriptionRequest(np.zeros(100, dtype=np.float32), beam_size=0)
+            TranscriptionRequest(np.zeros(100, dtype=np.float32), sample_rate=16_000, beam_size=0)
 
     def test_unknown_decoding_intent_is_rejected(self) -> None:
         """Only transcription and translation intents cross the driver boundary."""
         with pytest.raises(ValueError, match="decoding intent"):
             TranscriptionRequest(
                 np.zeros(100, dtype=np.float32),
+                sample_rate=16_000,
                 intent=cast(DecodingIntent, "summarize"),
             )
 
@@ -195,6 +205,7 @@ class TestTranscriptionRequest:
         with pytest.raises(ValueError, match="no_speech_threshold"):
             TranscriptionRequest(
                 np.zeros(100, dtype=np.float32),
+                sample_rate=16_000,
                 no_speech_threshold=threshold,
             )
 
@@ -203,6 +214,7 @@ class TestTranscriptionRequest:
         with pytest.raises(ValueError, match="hallucination_silence_threshold"):
             TranscriptionRequest(
                 np.zeros(100, dtype=np.float32),
+                sample_rate=16_000,
                 hallucination_silence_threshold=-0.1,
             )
 
@@ -210,7 +222,7 @@ class TestTranscriptionRequest:
 class TestPreparedModel:
     def test_prepared_model_retains_registry_identity(self) -> None:
         """Prepared artifacts remain tied to their model registry entry."""
-        spec = ModelSpec("tiny", "owner/tiny")
+        spec = ModelSpec("tiny", HuggingFaceArtifact("owner/tiny"))
 
         prepared = PreparedModel(spec, Path("model.bin"))
 

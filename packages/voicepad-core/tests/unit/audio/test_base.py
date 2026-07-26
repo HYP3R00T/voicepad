@@ -1,8 +1,6 @@
-"""Tests for AudioSource abstract base class."""
-
 import numpy as np
 import pytest
-from voicepad_core.audio.base import AudioSource
+from voicepad_core.audio import AudioSource
 
 
 def test_cannot_instantiate_abstract_class():

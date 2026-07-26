@@ -16,8 +16,8 @@ class ChunkResult:
     end_s: float = 0.0
     latency_ms: float = 0.0
     device: str = "cuda"
-    language: str = "en"
-    language_probability: float = 1.0
+    language: str | None = None
+    language_probability: float | None = None
     is_final: bool = False
 
 
