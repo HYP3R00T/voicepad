@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, Mock, patch
 import numpy as np
 import pytest
 from voicepad_core.audio.microphone import MicrophoneStream
+from voicepad_core.audio.types import RawAudio
 
 # ============================================================================
 # MicrophoneStream Tests
@@ -95,6 +96,46 @@ class TestMicrophoneStreamRecording:
         )
         mock_stream.start.assert_called_once()
         assert stream.is_recording
+
+    @patch("voicepad_core.audio.microphone.sd.InputStream")
+    @patch("voicepad_core.audio.microphone.sd.query_devices")
+    def test_start_accepts_callback_fired_by_native_start(self, mock_query: Mock, mock_stream_class: Mock) -> None:
+        """When native start invokes the callback immediately, its first frame is captured."""
+        mock_query.return_value = {"default_samplerate": 16000}
+        stream = MicrophoneStream()
+        frame = np.array([[0.1], [0.2]], dtype=np.float32)
+
+        def start_native_stream() -> None:
+            stream._callback(frame, len(frame), None, MagicMock())
+
+        mock_stream_class.return_value.start.side_effect = start_native_stream
+
+        stream.start()
+
+        np.testing.assert_array_equal(stream.get_snapshot(), frame.ravel())
+
+    @patch("voicepad_core.audio.microphone.sd.InputStream")
+    @patch("voicepad_core.audio.microphone.sd.query_devices")
+    def test_start_failure_closes_stream_and_rolls_back_state(
+        self,
+        mock_query: Mock,
+        mock_stream_class: Mock,
+    ) -> None:
+        """When native start fails, the stream is closed and capture state is reset."""
+        mock_query.return_value = {"default_samplerate": 16000}
+        native_stream = mock_stream_class.return_value
+        native_stream.start.side_effect = RuntimeError("native start failed")
+        stream = MicrophoneStream()
+
+        with pytest.raises(RuntimeError, match="native start failed"):
+            stream.start()
+
+        assert (native_stream.close.call_count, stream.is_recording, stream._stream, len(stream._frames)) == (
+            1,
+            False,
+            None,
+            0,
+        )
 
     @patch("voicepad_core.audio.microphone.sd.InputStream")
     @patch("voicepad_core.audio.microphone.sd.query_devices")
@@ -282,14 +323,29 @@ class TestMicrophoneStreamCallback:
 
         assert len(stream._frames) == 0
 
+    @patch("voicepad_core.audio.microphone.sd.query_devices")
+    def test_callback_logs_non_empty_status(self, mock_query: Mock, caplog: pytest.LogCaptureFixture) -> None:
+        """When PortAudio reports callback status, the condition is logged for diagnosis."""
+        mock_query.return_value = {"default_samplerate": 16000}
+        stream = MicrophoneStream()
+
+        stream._callback(np.zeros((1, 1), dtype=np.float32), 1, None, MagicMock(__bool__=lambda _: True))
+
+        assert "Microphone callback status:" in caplog.text
+
 
 class TestMicrophoneStreamSaveWav:
     """Test MicrophoneStream WAV saving functionality."""
 
-    @patch("voicepad_core.audio.microphone.sf.write")
+    @patch("voicepad_core.audio.microphone.write_wav_atomic")
     @patch("voicepad_core.audio.microphone.sd.query_devices")
-    def test_save_wav_writes_file(self, mock_query: Mock, mock_write: Mock, tmp_path: Path) -> None:
-        """Test save_wav() writes audio to file."""
+    def test_save_wav_delegates_raw_audio_to_atomic_writer(
+        self,
+        mock_query: Mock,
+        mock_write: Mock,
+        tmp_path: Path,
+    ) -> None:
+        """save_wav delegates captured samples and metadata to atomic persistence."""
         mock_query.return_value = {"default_samplerate": 16000}
 
         stream = MicrophoneStream()
@@ -298,26 +354,16 @@ class TestMicrophoneStreamSaveWav:
 
         stream.save_wav(audio, path)
 
-        # Verify sf.write was called correctly
-        mock_write.assert_called_once_with(str(path), audio, 16000, subtype="PCM_16")
+        persisted_audio, persisted_path = mock_write.call_args.args
+        assert (
+            isinstance(persisted_audio, RawAudio),
+            persisted_audio.samples is audio,
+            persisted_audio.sample_rate,
+            persisted_audio.channels,
+            persisted_path,
+        ) == (True, True, 16000, 1, path)
 
-    @patch("voicepad_core.audio.microphone.sf.write")
-    @patch("voicepad_core.audio.microphone.sd.query_devices")
-    def test_save_wav_creates_directory(self, mock_query: Mock, mock_write: Mock, tmp_path: Path) -> None:
-        """Test save_wav() creates parent directories."""
-        mock_query.return_value = {"default_samplerate": 16000}
-
-        stream = MicrophoneStream()
-        audio = np.array([0.1, 0.2], dtype=np.float32)
-        path = tmp_path / "subdir" / "nested" / "test.wav"
-
-        stream.save_wav(audio, path)
-
-        # Verify directory was created
-        assert path.parent.exists()
-        mock_write.assert_called_once()
-
-    @patch("voicepad_core.audio.microphone.sf.write")
+    @patch("voicepad_core.audio.microphone.write_wav_atomic")
     @patch("voicepad_core.audio.microphone.sd.query_devices")
     def test_save_wav_custom_sample_rate(self, mock_query: Mock, mock_write: Mock, tmp_path: Path) -> None:
         """Test save_wav() with custom sample rate."""
@@ -329,11 +375,9 @@ class TestMicrophoneStreamSaveWav:
 
         stream.save_wav(audio, path, sample_rate=48000)
 
-        # Verify custom sample rate was used
-        call_args = mock_write.call_args
-        assert call_args[0][2] == 48000  # sample_rate argument
+        assert mock_write.call_args.args[0].sample_rate == 48000
 
-    @patch("voicepad_core.audio.microphone.sf.write")
+    @patch("voicepad_core.audio.microphone.write_wav_atomic")
     @patch("voicepad_core.audio.microphone.sd.query_devices")
     def test_save_wav_uses_native_rate_by_default(self, mock_query: Mock, mock_write: Mock, tmp_path: Path) -> None:
         """Test save_wav() uses native sample rate by default."""
@@ -345,9 +389,7 @@ class TestMicrophoneStreamSaveWav:
 
         stream.save_wav(audio, path)
 
-        # Verify native sample rate was used
-        call_args = mock_write.call_args
-        assert call_args[0][2] == 44100
+        assert mock_write.call_args.args[0].sample_rate == 44100
 
 
 class TestMicrophoneStreamProperties:

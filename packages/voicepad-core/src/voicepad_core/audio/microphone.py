@@ -7,10 +7,11 @@ from typing import Any
 
 import numpy as np
 import sounddevice as sd
-import soundfile as sf
 
-from .constants import DEFAULT_INPUT_CHANNELS, DEFAULT_INPUT_SAMPLE_RATE, PCM_WAV_SUBTYPE
+from .constants import DEFAULT_INPUT_CHANNELS, DEFAULT_INPUT_SAMPLE_RATE
 from .errors import AudioStreamStateError
+from .persistence import write_wav_atomic
+from .types import RawAudio
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,7 @@ class MicrophoneStream:
         self._channels = DEFAULT_INPUT_CHANNELS
         self._frames: list[np.ndarray] = []
         self._lock = threading.Lock()
+        self._lifecycle_lock = threading.Lock()
         self._stream: sd.InputStream | None = None
         self._recording = False
         self._logger = logging.getLogger(__name__)
@@ -46,22 +48,41 @@ class MicrophoneStream:
     @property
     def is_recording(self) -> bool:
         """Return whether the stream is currently recording."""
-        return self._recording
+        with self._lock:
+            return self._recording
 
     def start(self) -> None:
-        if self._recording:
-            raise AudioStreamStateError("MicrophoneStream is already recording. Call stop() first.")
+        with self._lifecycle_lock:
+            with self._lock:
+                if self._recording:
+                    raise AudioStreamStateError("MicrophoneStream is already recording. Call stop() first.")
+                self._frames.clear()
+                self._recording = True
 
-        self._frames.clear()
-        self._stream = sd.InputStream(
-            samplerate=self._sample_rate,
-            channels=self._channels,
-            dtype="float32",
-            device=self._device_index,
-            callback=self._callback,
-        )
-        self._stream.start()
-        self._recording = True
+            native_stream: sd.InputStream | None = None
+            try:
+                native_stream = sd.InputStream(
+                    samplerate=self._sample_rate,
+                    channels=self._channels,
+                    dtype="float32",
+                    device=self._device_index,
+                    callback=self._callback,
+                )
+                with self._lock:
+                    self._stream = native_stream
+                native_stream.start()
+            except Exception:
+                with self._lock:
+                    self._recording = False
+                    self._stream = None
+                    self._frames.clear()
+                if native_stream is not None:
+                    try:
+                        native_stream.close()
+                    except Exception as close_error:
+                        self._logger.warning("Failed to close microphone stream after start error: %s", close_error)
+                raise
+
         self._logger.info(
             "MicrophoneStream started: device_index=%s, sample_rate=%s",
             self._device_index,
@@ -69,14 +90,19 @@ class MicrophoneStream:
         )
 
     def stop(self) -> np.ndarray:
-        if not self._recording:
-            raise AudioStreamStateError("MicrophoneStream is not recording. Call start() first.")
+        with self._lifecycle_lock:
+            with self._lock:
+                if not self._recording:
+                    raise AudioStreamStateError("MicrophoneStream is not recording. Call start() first.")
+                self._recording = False
+                native_stream = self._stream
+                self._stream = None
 
-        self._recording = False
-        if self._stream is not None:
-            self._stream.stop()
-            self._stream.close()
-            self._stream = None
+            if native_stream is not None:
+                try:
+                    native_stream.stop()
+                finally:
+                    native_stream.close()
 
         with self._lock:
             out = np.zeros(0, dtype=np.float32) if not self._frames else np.concatenate(self._frames, axis=0).ravel()
@@ -100,8 +126,10 @@ class MicrophoneStream:
 
     def save_wav(self, audio: np.ndarray, path: Path, sample_rate: int | None = None) -> None:
         rate = self._sample_rate if sample_rate is None else sample_rate
-        path.parent.mkdir(parents=True, exist_ok=True)
-        sf.write(str(path), audio, rate, subtype=PCM_WAV_SUBTYPE)
+        write_wav_atomic(
+            RawAudio(samples=audio, sample_rate=rate, channels=self._channels),
+            path,
+        )
         self._logger.info("Saved WAV: %s (%.3fs, %s samples, rate=%s)", path, len(audio) / rate, len(audio), rate)
 
     def _callback(
@@ -111,6 +139,9 @@ class MicrophoneStream:
         time: Any,
         status: sd.CallbackFlags,
     ) -> None:
-        del frames, time, status
-        if self._recording:
-            self._frames.append(indata.copy())
+        del frames, time
+        if status:
+            self._logger.warning("Microphone callback status: %s", status)
+        with self._lock:
+            if self._recording:
+                self._frames.append(indata.copy())

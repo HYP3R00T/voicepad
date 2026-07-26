@@ -10,6 +10,7 @@ from .errors import (
 )
 from .file import FileSource
 from .microphone import MicrophoneStream
+from .persistence import WavArtifact, write_wav_atomic
 from .types import AudioFormat, RawAudio
 
 __all__ = [
@@ -25,4 +26,6 @@ __all__ = [
     "FileSource",
     "SUPPORTED_FORMATS",
     "MicrophoneStream",
+    "WavArtifact",
+    "write_wav_atomic",
 ]

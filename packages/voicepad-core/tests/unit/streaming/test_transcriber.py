@@ -6,8 +6,10 @@ from typing import Any, cast
 from unittest.mock import Mock, patch
 
 import numpy as np
+import pytest
 from voicepad_core.config import Config
 from voicepad_core.inference.errors import AudioTooShortError, TranscriptionError
+from voicepad_core.inference.types import WordTimestamp
 from voicepad_core.streaming.transcriber import StreamingTranscriber, _build_prompt, _resample
 
 
@@ -35,6 +37,29 @@ class _FakeRecorder:
 
     def get_snapshot(self):
         return np.array([], dtype=np.float32)
+
+
+class _FailingRecorder:
+    sample_rate = 16_000
+
+    def get_snapshot(self):
+        raise RuntimeError("snapshot failed")
+
+
+class _ResetRequiredVAD:
+    """Stateful VAD fake that detects speech only once after each reset."""
+
+    def __init__(self) -> None:
+        self._ready = False
+
+    def reset(self) -> None:
+        self._ready = True
+
+    def detect(self, audio: np.ndarray, sample_rate: int):
+        if not self._ready:
+            return []
+        self._ready = False
+        return [SimpleNamespace(start=0.0, end=0.5)]
 
 
 def make_config() -> Config:
@@ -144,6 +169,18 @@ def test_stop_joins_thread_and_clears_it() -> None:
     assert streamer._monitor_thread is None
 
 
+def test_monitor_loop_reports_final_snapshot_failure_and_completes() -> None:
+    received = []
+    errors = []
+    streamer = StreamingTranscriber(_FailingRecorder(), received.append, errors.append, config=make_config())
+    streamer._stop_event.set()
+
+    streamer._monitor_loop()
+
+    assert errors == ["snapshot failed"]
+    assert [(chunk.is_final, chunk.text) for chunk in received] == [(True, "")]
+
+
 @patch("voicepad_core.streaming.transcriber.normalize", side_effect=lambda text: text.upper())
 @patch(
     "voicepad_core.streaming.transcriber.remove_hallucinations", side_effect=lambda text, max_repetitions: text + "!"
@@ -222,6 +259,76 @@ def test_dispatch_chunk_reports_errors(mock_transcribe: Mock) -> None:
     streamer._dispatch_chunk(np.zeros(16_000, dtype=np.float32), is_final=False, capture_rate=16_000)
 
     assert errors == ["boom"]
+
+
+@patch("voicepad_core.streaming.transcriber.AudioPreProcessor")
+@patch("voicepad_core.inference.transcribe")
+def test_dispatch_chunk_shifts_word_timestamps_to_session_time(
+    mock_transcribe: Mock,
+    mock_preprocessor: Mock,
+) -> None:
+    """Overlapped chunks expose both segment and word timestamps in absolute session time."""
+    received = []
+    config = make_config().model_copy(update={"text_postprocessing_enabled": False})
+    streamer = StreamingTranscriber(_FakeRecorder(), received.append, lambda err: None, config=config)
+    streamer._consumed_samples = 16_000
+    mock_preprocessor.return_value.process_array.side_effect = lambda audio, sample_rate: audio
+    mock_transcribe.return_value = SimpleNamespace(
+        segments=[
+            SimpleNamespace(
+                start=0.8,
+                end=1.2,
+                text="hello",
+                avg_logprob=-0.1,
+                no_speech_prob=0.1,
+                words=[WordTimestamp(word="hello", start=0.9, end=1.0, probability=0.95)],
+            )
+        ],
+        latency_ms=10.0,
+        device="cpu",
+        language="en",
+        language_probability=0.99,
+    )
+
+    streamer._dispatch_chunk(np.ones(32_000, dtype=np.float32), is_final=False, capture_rate=16_000)
+
+    segment = received[0].segments[0]
+    word = segment.words[0]
+    assert (segment.start, segment.end, word.start, word.end) == pytest.approx((1.05, 1.45, 1.15, 1.25))
+
+
+@patch("voicepad_core.streaming.transcriber.AudioPreProcessor")
+@patch("voicepad_core.inference.transcribe", side_effect=TranscriptionError("backend unavailable"))
+def test_dispatch_chunk_emits_final_marker_when_backend_fails(
+    mock_transcribe: Mock,
+    mock_preprocessor: Mock,
+) -> None:
+    """A final backend failure reports the error and still completes the result stream."""
+    received = []
+    errors = []
+    config = make_config().model_copy(update={"text_postprocessing_enabled": False})
+    streamer = StreamingTranscriber(_FakeRecorder(), received.append, errors.append, config=config)
+    streamer._vad = cast(Any, _ResetRequiredVAD())
+    mock_preprocessor.return_value.process_array.side_effect = lambda audio, sample_rate: audio
+
+    streamer._dispatch_chunk(np.ones(16_000, dtype=np.float32), is_final=True, capture_rate=16_000)
+
+    assert (errors, [(chunk.is_final, chunk.text) for chunk in received]) == (
+        ["backend unavailable"],
+        [(True, "")],
+    )
+
+
+def test_final_tail_detection_is_independent_across_repeated_checks() -> None:
+    """Each final-tail check resets VAD state so prior detection cannot suppress speech."""
+    streamer = StreamingTranscriber(_FakeRecorder(), lambda chunk: None, lambda err: None, config=make_config())
+    streamer._vad = cast(Any, _ResetRequiredVAD())
+    audio = np.ones(16_000, dtype=np.float32)
+
+    first = streamer._trim_final_audio_to_speech(audio, audio, capture_rate=16_000)
+    second = streamer._trim_final_audio_to_speech(audio, audio, capture_rate=16_000)
+
+    assert (len(first), len(second)) == (8_000, 8_000)
 
 
 @patch("voicepad_core.streaming.transcriber.AudioPreProcessor")

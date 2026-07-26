@@ -1,28 +1,3 @@
-# streaming/transcriber.py
-
-"""VAD-triggered streaming transcriber.
-
-Monitors a live MicrophoneStream buffer on a background thread, detects
-silence boundaries using Silero VAD, and dispatches audio chunks to the
-inference engine during recording. Each transcribed chunk is delivered to
-the caller via the on_chunk callback.
-
-Architecture:
-    MicrophoneStream (audio/)
-        └─ StreamingTranscriber._monitor_loop()   [background thread]
-              ├─ Silero VAD speech detection (vad/)
-              ├─ _dispatch_chunk()
-              │     ├─ inference.transcribe()      [engine.py]
-              │     ├─ postprocessing pipeline
-              │     └─ on_chunk(ChunkResult)       [caller callback]
-              └─ stop() → final chunk dispatch
-
-Public API:
-    StreamingTranscriber(recorder, on_chunk, on_error, ...)
-    .start()   → spawns monitor thread
-    .stop()    → signals stop, waits for final chunk, joins thread
-"""
-
 from __future__ import annotations
 
 import contextlib
@@ -30,15 +5,17 @@ import logging
 import threading
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 
 import numpy as np
 
 from .errors import StreamingConfigurationError
 from .types import ChunkResult
 from ..config import Config, get_config
+from ..inference.backend_manager import SessionManager
 from ..inference.constants import SAMPLE_RATE
-from ..inference.errors import AudioTooShortError, TranscriptionError
-from ..models import is_distil_model
+from ..inference.errors import AudioTooShortError
+from ..inference.types import Segment, TranscriptionResult, WordTimestamp
 from ..postprocessing import deduplicate_overlap, normalize, remove_hallucinations
 from ..preprocessing import AudioPreProcessor
 from ..vad import SileroVAD
@@ -46,6 +23,14 @@ from ..vad import SileroVAD
 logger = logging.getLogger(__name__)
 
 _session_logger: logging.Logger | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _ChunkSlice:
+    audio: np.ndarray
+    start_s: float
+    end_s: float
+    audio_offset_s: float
 
 
 def set_streaming_session_logger(session_logger: logging.Logger | None) -> None:
@@ -67,8 +52,7 @@ class StreamingTranscriber:
     inference engine and the result is delivered via on_chunk.
 
     A hard cap of max_chunk_s forces a split even without silence. This is
-    a per-chunk safety boundary, not a session-length limit, and it keeps
-    long recordings compatible with Whisper's 30s context window.
+    a per-chunk safety boundary, not a session-length limit.
 
     Each chunk includes overlap_s of audio from the previous chunk's
     tail to preserve acoustic context at boundaries. The overlap region
@@ -81,13 +65,14 @@ class StreamingTranscriber:
                                transcribed chunk, including the final one.
         on_error:              Callback invoked with an error message string if
                                a chunk fails with an unexpected exception.
-        model_name:            Whisper model to use. Defaults to DEFAULT_MODEL.
+        model_name:            Registered transcription model to use.
         device:                Inference device ('cuda' or 'cpu').
-        compute_type:          CTranslate2 precision string.
+        compute_type:          Runtime precision string.
         min_chunk_s:           Minimum audio before considering a split.
         max_chunk_s:           Per-chunk safety limit; sessions remain unbounded.
         overlap_s:             Cross-chunk audio overlap.
         silence_threshold_ms:  VAD silence duration to trigger a split.
+        session_manager:       Optional backend session manager to reuse.
     """
 
     def __init__(
@@ -105,6 +90,7 @@ class StreamingTranscriber:
         beam_size: int | None = None,
         vad_filter: bool | None = None,
         config: Config | None = None,
+        session_manager: SessionManager | None = None,
     ) -> None:
         self._config = config or get_config()
         self._recorder = recorder
@@ -122,6 +108,7 @@ class StreamingTranscriber:
         )
         self._beam_size = beam_size if beam_size is not None else self._config.beam_size
         self._vad_filter = vad_filter if vad_filter is not None else self._config.transcription_vad_filter
+        self._session_manager = session_manager
         self._poll_interval_s = self._config.stream_poll_interval_s
         self._validate_configuration()
         self._stream_context_chars = self._config.stream_context_chars
@@ -229,9 +216,6 @@ class StreamingTranscriber:
             accumulated_s = (len(audio) - self._consumed_samples) / capture_rate
 
             if accumulated_s < self._min_chunk_s:
-                if accumulated_s >= self._max_chunk_s:
-                    logger.debug(f"Hard cap reached: {accumulated_s:.1f}s >= {self._max_chunk_s}s — forcing split.")
-                    self._dispatch_chunk(audio, is_final=False, capture_rate=capture_rate)
                 continue
 
             # Run VAD on the last silence_threshold_ms of audio.
@@ -245,7 +229,13 @@ class StreamingTranscriber:
                 tail = _resample(tail, capture_rate, SAMPLE_RATE)
 
             assert self._vad is not None
-            speech_segments = self._vad.detect(tail, sample_rate=SAMPLE_RATE)
+            try:
+                self._vad.reset()
+                speech_segments = self._vad.detect(tail, sample_rate=SAMPLE_RATE)
+            except Exception as exc:
+                logger.error("StreamingTranscriber: VAD failed: %s", exc)
+                self._on_error(str(exc))
+                continue
 
             if not speech_segments:
                 logger.debug(f"VAD confirmed silence in last {tail_duration_s:.1f}s — dispatching chunk.")
@@ -258,7 +248,9 @@ class StreamingTranscriber:
 
         try:
             audio = self._recorder.get_snapshot()
-        except Exception:
+        except Exception as exc:
+            logger.error("StreamingTranscriber: failed to read final audio buffer: %s", exc)
+            self._on_error(str(exc))
             audio = np.array([], dtype=np.float32)
 
         if audio is not None and self._consumed_samples < len(audio):
@@ -320,64 +312,20 @@ class StreamingTranscriber:
             capture_rate: Native sample rate of the recorder buffer.
         """
         from ..inference import transcribe
-        from ..inference.types import Segment
 
         slog = _session_logger
-
-        overlap_samples = int(self._overlap_s * capture_rate)
-        start_sample = max(0, self._consumed_samples - overlap_samples)
-        fresh_audio = full_audio[self._consumed_samples :]
-        final_audio = full_audio
-
-        if is_final:
-            final_audio = self._trim_final_audio_to_speech(full_audio, fresh_audio, capture_rate)
-            fresh_audio = final_audio[self._consumed_samples :]
-
-        chunk_audio = final_audio[start_sample:]
-
-        chunk_start_s = self._consumed_samples / capture_rate
-        chunk_end_s = len(final_audio) / capture_rate
-        audio_offset_s = start_sample / capture_rate
-        chunk_duration_s = len(chunk_audio) / capture_rate
-
-        msg = (
-            f"Chunk {self._chunk_index + 1}: "
-            f"{chunk_start_s:.1f}s–{chunk_end_s:.1f}s "
-            f"({chunk_duration_s:.1f}s incl. {self._overlap_s}s overlap)"
-        )
-        logger.debug(msg)
-        if slog:
-            slog.info(msg)
-            slog.debug(
-                f"  start_sample={start_sample}, consumed={self._consumed_samples}, "
-                f"overlap_samples={overlap_samples}, chunk_samples={len(chunk_audio)}"
-            )
-
-        if slog and capture_rate != SAMPLE_RATE:
-            slog.debug(f"Preprocessing chunk from {capture_rate}Hz to {SAMPLE_RATE}Hz")
-
-        if is_final and len(fresh_audio) == 0:
-            if slog:
-                slog.info(f"Skipping final chunk {self._chunk_index + 1}: no fresh VAD-confirmed speech")
-            self._consumed_samples = len(full_audio)
-            self._on_chunk(
-                ChunkResult(
-                    index=self._chunk_index + 1,
-                    text="",
-                    start_s=chunk_start_s,
-                    end_s=chunk_end_s,
-                    is_final=True,
-                )
-            )
+        chunk = self._prepare_chunk(full_audio, is_final, capture_rate)
+        if chunk is None:
             return
 
-        # Keep streaming chunks on the same preprocessing path as saved WAV
-        # transcriptions so the final words are not lost to inconsistent audio prep.
-        chunk_audio = AudioPreProcessor(self._recorder).process_array(chunk_audio, sample_rate=capture_rate)
-
         try:
-            is_distil = is_distil_model(self._model_name)
-            prompt = None if is_distil else _build_prompt(self._prev_context, self._config.initial_prompt)
+            # Keep streaming chunks on the same preprocessing path as saved WAV
+            # transcriptions so final words are not lost to inconsistent audio prep.
+            chunk_audio = AudioPreProcessor(self._recorder).process_array(
+                chunk.audio,
+                sample_rate=capture_rate,
+            )
+            prompt = _build_prompt(self._prev_context, self._config.initial_prompt)
 
             if slog:
                 slog.debug(
@@ -394,6 +342,8 @@ class StreamingTranscriber:
                 initial_prompt=prompt,
                 beam_size=self._beam_size,
                 vad_filter=self._vad_filter,
+                config=self._config.model_copy(update={"text_postprocessing_enabled": False}),
+                session_manager=self._session_manager,
             )
 
             chunk_latency = (time.perf_counter() - chunk_start_time) * 1000
@@ -401,104 +351,166 @@ class StreamingTranscriber:
             if slog:
                 slog.info(f"Chunk {self._chunk_index + 1} transcribed in {chunk_latency:.0f}ms")
 
-            segments = []
-            for s in result.segments:
-                abs_start = s.start + audio_offset_s
-                abs_end = s.end + audio_offset_s
-
-                if abs_end <= chunk_start_s:
-                    continue
-
-                segments.append(
-                    Segment(
-                        start=abs_start,
-                        end=abs_end,
-                        text=s.text,
-                        avg_logprob=s.avg_logprob,
-                        no_speech_prob=s.no_speech_prob,
-                        words=s.words,
-                    )
-                )
-
-            if slog:
-                slog.debug(f"Reconstructed {len(segments)} segments with absolute timestamps")
-
-            if self._prev_chunk_text and segments:
-                if slog:
-                    slog.debug("Deduplicating overlap with previous chunk")
-                segments = deduplicate_overlap(
-                    segments,
-                    chunk_start_s,
-                    self._prev_chunk_text,
-                    prev_tail_words=self._config.dedup_prev_tail_words,
-                    full_duplicate_threshold=self._config.dedup_full_duplicate_threshold,
-                    min_overlap_words_for_partial=self._config.dedup_min_overlap_words_for_partial,
-                    partial_lead_words=self._config.dedup_partial_lead_words,
-                )
-
-            text = " ".join(s.text for s in segments if s.text).strip()
-
-            if slog:
-                slog.debug(f"Raw text before post-processing: '{text[:100]}{'...' if len(text) > 100 else ''}'")
-
-            if self._config.text_postprocessing_enabled:
-                text = remove_hallucinations(text, max_repetitions=self._config.hallucination_max_repetitions)
-                text = normalize(text)
-
-            if slog:
-                slog.info(
-                    f"Chunk {self._chunk_index + 1} final text ({len(text)} chars): '{text[:100]}{'...' if len(text) > 100 else ''}'"
-                )
-
-            if text:
-                self._prev_context = text[-self._stream_context_chars :]
-                self._prev_chunk_text = text
-
-            self._consumed_samples = len(full_audio)
-            self._chunk_index += 1
-
-            self._on_chunk(
-                ChunkResult(
-                    index=self._chunk_index,
-                    text=text,
-                    segments=segments,
-                    start_s=chunk_start_s,
-                    end_s=chunk_end_s,
-                    latency_ms=result.latency_ms,
-                    device=result.device,
-                    language=result.language,
-                    language_probability=result.language_probability,
-                    is_final=is_final,
-                )
+            self._emit_result(
+                result,
+                full_audio_length=len(full_audio),
+                chunk_start_s=chunk.start_s,
+                chunk_end_s=chunk.end_s,
+                audio_offset_s=chunk.audio_offset_s,
+                is_final=is_final,
             )
 
         except AudioTooShortError as e:
-            # emit an empty final marker if this was the last chunk
             if slog:
                 slog.warning(f"Chunk {self._chunk_index + 1} too short: {e}")
 
             self._consumed_samples = len(full_audio)
             if is_final:
-                self._on_chunk(
-                    ChunkResult(
-                        index=self._chunk_index + 1,
-                        text="",
-                        start_s=chunk_start_s,
-                        end_s=chunk_end_s,
-                        is_final=True,
-                    )
-                )
+                self._emit_empty_final(chunk.start_s, chunk.end_s)
 
-        except (TranscriptionError, Exception) as e:
+        except Exception as e:
             msg = f"Chunk {self._chunk_index + 1} failed: {e}"
             logger.error(msg)
             if slog:
                 slog.error(msg)
+            self._consumed_samples = len(full_audio)
             self._on_error(str(e))
+            if is_final:
+                self._emit_empty_final(chunk.start_s, chunk.end_s)
+
+    def _prepare_chunk(
+        self,
+        full_audio: np.ndarray,
+        is_final: bool,
+        capture_rate: int,
+    ) -> _ChunkSlice | None:
+        overlap_samples = int(self._overlap_s * capture_rate)
+        start_sample = max(0, self._consumed_samples - overlap_samples)
+        fresh_audio = full_audio[self._consumed_samples :]
+        final_audio = (
+            self._trim_final_audio_to_speech(full_audio, fresh_audio, capture_rate) if is_final else full_audio
+        )
+        fresh_audio = final_audio[self._consumed_samples :]
+        chunk_audio = final_audio[start_sample:]
+        start_s = self._consumed_samples / capture_rate
+        end_s = len(final_audio) / capture_rate
+
+        message = (
+            f"Chunk {self._chunk_index + 1}: "
+            f"{start_s:.1f}s–{end_s:.1f}s "
+            f"({len(chunk_audio) / capture_rate:.1f}s incl. {self._overlap_s}s overlap)"
+        )
+        logger.debug(message)
+        if _session_logger:
+            _session_logger.info(message)
+            _session_logger.debug(
+                "start_sample=%s consumed=%s overlap_samples=%s chunk_samples=%s",
+                start_sample,
+                self._consumed_samples,
+                overlap_samples,
+                len(chunk_audio),
+            )
+            if capture_rate != SAMPLE_RATE:
+                _session_logger.debug(
+                    "Preprocessing chunk from %sHz to %sHz",
+                    capture_rate,
+                    SAMPLE_RATE,
+                )
+
+        if is_final and len(fresh_audio) == 0:
+            if _session_logger:
+                _session_logger.info(
+                    "Skipping final chunk %s: no fresh VAD-confirmed speech",
+                    self._chunk_index + 1,
+                )
+            self._consumed_samples = len(full_audio)
+            self._emit_empty_final(start_s, end_s)
+            return None
+
+        return _ChunkSlice(
+            audio=chunk_audio,
+            start_s=start_s,
+            end_s=end_s,
+            audio_offset_s=start_sample / capture_rate,
+        )
+
+    def _emit_result(
+        self,
+        result: TranscriptionResult,
+        *,
+        full_audio_length: int,
+        chunk_start_s: float,
+        chunk_end_s: float,
+        audio_offset_s: float,
+        is_final: bool,
+    ) -> None:
+        segments = _absolute_segments(result.segments, audio_offset_s, chunk_start_s)
+        slog = _session_logger
+
+        if slog:
+            slog.debug(f"Reconstructed {len(segments)} segments with absolute timestamps")
+
+        if self._prev_chunk_text and segments:
+            if slog:
+                slog.debug("Deduplicating overlap with previous chunk")
+            segments = deduplicate_overlap(
+                segments,
+                chunk_start_s,
+                self._prev_chunk_text,
+                prev_tail_words=self._config.dedup_prev_tail_words,
+                full_duplicate_threshold=self._config.dedup_full_duplicate_threshold,
+                min_overlap_words_for_partial=self._config.dedup_min_overlap_words_for_partial,
+                partial_lead_words=self._config.dedup_partial_lead_words,
+            )
+
+        text = " ".join(segment.text for segment in segments if segment.text).strip()
+        if self._config.text_postprocessing_enabled:
+            text = remove_hallucinations(
+                text,
+                max_repetitions=self._config.hallucination_max_repetitions,
+            )
+            text = normalize(text)
+        if slog:
+            slog.info(
+                f"Chunk {self._chunk_index + 1} final text "
+                f"({len(text)} chars): '{text[:100]}{'...' if len(text) > 100 else ''}'"
+            )
+
+        if text:
+            self._prev_context = text[-self._stream_context_chars :]
+            self._prev_chunk_text = text
+
+        self._consumed_samples = full_audio_length
+        self._chunk_index += 1
+        self._on_chunk(
+            ChunkResult(
+                index=self._chunk_index,
+                text=text,
+                segments=segments,
+                start_s=chunk_start_s,
+                end_s=chunk_end_s,
+                latency_ms=result.latency_ms,
+                device=result.device,
+                language=result.language,
+                language_probability=result.language_probability,
+                is_final=is_final,
+            )
+        )
+
+    def _emit_empty_final(self, start_s: float, end_s: float) -> None:
+        self._on_chunk(
+            ChunkResult(
+                index=self._chunk_index + 1,
+                text="",
+                start_s=start_s,
+                end_s=end_s,
+                is_final=True,
+            )
+        )
 
 
 def _build_prompt(prev_context: str, initial_prompt: str) -> str:
-    """Build the Whisper initial prompt from previous context.
+    """Build transcription context from the configured seed and prior text.
 
     Args:
         prev_context: Last 200 characters from the previous chunk.
@@ -509,6 +521,41 @@ def _build_prompt(prev_context: str, initial_prompt: str) -> str:
     if prev_context:
         return (initial_prompt + " " + prev_context).strip()
     return initial_prompt
+
+
+def _absolute_segments(
+    segments: list[Segment],
+    audio_offset_s: float,
+    chunk_start_s: float,
+) -> list[Segment]:
+    absolute: list[Segment] = []
+    for segment in segments:
+        abs_start = segment.start + audio_offset_s
+        abs_end = segment.end + audio_offset_s
+        if abs_end <= chunk_start_s:
+            continue
+
+        words = [
+            WordTimestamp(
+                word=word.word,
+                start=word.start + audio_offset_s,
+                end=word.end + audio_offset_s,
+                probability=word.probability,
+            )
+            for word in segment.words
+        ]
+        absolute.append(
+            Segment(
+                start=abs_start,
+                end=abs_end,
+                text=segment.text,
+                avg_logprob=segment.avg_logprob,
+                no_speech_prob=segment.no_speech_prob,
+                words=words,
+                confidence=getattr(segment, "confidence", None),
+            )
+        )
+    return absolute
 
 
 def _resample(
