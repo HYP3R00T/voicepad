@@ -5,8 +5,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import numpy as np
 from voicepad_core import (
+    RawAudio,
     TranscriptionError,
     activate_model,
     begin_transcription_session,
@@ -78,7 +78,7 @@ class TranscriptionService:
             logger.error("Unexpected model warm failure: %s", e)
             return ModelWarmResult(device="cpu", compute_type="int8", fallback=True, error=str(e))
 
-    def transcribe_audio(self, audio: np.ndarray) -> TranscriptionResult | None:
+    def transcribe_audio(self, audio: RawAudio) -> TranscriptionResult | None:
         """Transcribe an audio buffer.
 
         Args:
@@ -101,7 +101,7 @@ class TranscriptionService:
 
         try:
             # Calculate audio duration
-            duration_s = len(audio) / 16000  # Assuming 16kHz sample rate
+            duration_s = audio.duration()
 
             # Log transcription start
             log_transcription_start(

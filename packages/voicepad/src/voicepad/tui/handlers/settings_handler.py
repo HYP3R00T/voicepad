@@ -88,7 +88,7 @@ class SettingsHandler:
     def populate_settings(self) -> None:
         """Build the settings form — only user-facing fields shown."""
         from utilityhub_config import get_config_path
-        from voicepad_core.config.settings import get_config_with_metadata
+        from voicepad_core.config import get_config_with_metadata
 
         from voicepad.cli.config import _get_input_devices
 

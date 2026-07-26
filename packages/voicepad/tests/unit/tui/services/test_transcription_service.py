@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 from voicepad.tui.services.transcription_service import TranscriptionService
-from voicepad_core import TranscriptionError
+from voicepad_core import RawAudio, TranscriptionError
 from voicepad_core.inference import AudioTooShortError
 
 
@@ -22,6 +22,10 @@ def create_mock_config() -> MagicMock:
     config.language = "en"
     config.local_agreement_file = None
     return config
+
+
+def _audio(values: list[float]) -> RawAudio:
+    return RawAudio(np.asarray(values, dtype=np.float32), 16_000, 1)
 
 
 def create_mock_transcription_result() -> MagicMock:
@@ -141,7 +145,7 @@ class TestTranscriptionService:
         mock_logger = MagicMock()
         mock_begin_session.return_value = (mock_logger, MagicMock())
 
-        audio = np.array([0.1, 0.2, 0.3])
+        audio = _audio([0.1, 0.2, 0.3])
         expected_result = create_mock_transcription_result()
         mock_transcribe.return_value = expected_result
 
@@ -162,7 +166,7 @@ class TestTranscriptionService:
         mock_logger = MagicMock()
         mock_begin_session.return_value = (mock_logger, MagicMock())
 
-        audio = np.array([0.1, 0.2])
+        audio = _audio([0.1, 0.2])
         mock_transcribe.side_effect = AudioTooShortError("Audio too short")
 
         with pytest.raises(AudioTooShortError, match="Audio too short"):
@@ -181,7 +185,7 @@ class TestTranscriptionService:
         mock_logger = MagicMock()
         mock_begin_session.return_value = (mock_logger, MagicMock())
 
-        audio = np.array([0.1, 0.2, 0.3])
+        audio = _audio([0.1, 0.2, 0.3])
         mock_transcribe.side_effect = TranscriptionError("Transcription failed")
 
         with pytest.raises(TranscriptionError, match="Transcription failed"):
@@ -200,7 +204,7 @@ class TestTranscriptionService:
         mock_logger = MagicMock()
         mock_begin_session.return_value = (mock_logger, MagicMock())
 
-        audio = np.array([0.1, 0.2, 0.3])
+        audio = _audio([0.1, 0.2, 0.3])
         mock_transcribe.side_effect = RuntimeError("Unexpected error")
 
         with pytest.raises(RuntimeError, match="Unexpected error"):

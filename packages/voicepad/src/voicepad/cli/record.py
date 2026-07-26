@@ -6,11 +6,12 @@ import threading
 import time
 from pathlib import Path
 from typing import Annotated
+from uuid import uuid4
 
 import typer
 from voicepad_core import (
-    AudioPreProcessor,
     AudioTooShortError,
+    FileSource,
     MicrophoneStream,
     TranscriptionError,
     activate_model,
@@ -24,6 +25,7 @@ from voicepad_core import (
     prepare_model,
     transcribe,
 )
+from voicepad_core.audio import AudioWindow
 from voicepad_core.inference.constants import BEAM_SIZE, COMPUTE_TYPE, DEVICE, LANGUAGE
 
 logger = logging.getLogger(__name__)
@@ -66,7 +68,7 @@ def start_recording(
     no_save: bool = typer.Option(
         False,
         "--no-save",
-        help="Do not save WAV to disk (transcribe from memory only)",
+        help="Delete the temporary WAV after capture",
     ),
 ) -> None:
     """Record audio from your microphone and transcribe it.
@@ -131,7 +133,11 @@ def start_recording(
             raise typer.Exit(1) from e
 
     # --- Start recording ---
-    recorder = MicrophoneStream(config.input_device_index)
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    recording_prefix = prefix or config.recording_prefix
+    filename = f".voicepad-{uuid4().hex}.wav" if no_save else f"{recording_prefix}_{timestamp}.wav"
+    capture_path = config.recordings_path / filename
+    recorder = MicrophoneStream(capture_path, device_index=config.input_device_index)
     try:
         recorder.start()
     except Exception as e:
@@ -164,32 +170,26 @@ def start_recording(
     # --- Stop and collect audio ---
     typer.echo()
     try:
-        raw_audio = recorder.stop()
-        processor = AudioPreProcessor(recorder)  # type: ignore
-        audio = processor.process_array(raw_audio, recorder.sample_rate)
+        artifact = recorder.stop()
+        try:
+            audio = FileSource(artifact.path).read_audio()
+        finally:
+            if no_save:
+                artifact.path.unlink(missing_ok=True)
     except Exception as e:
         typer.secho(f"[ERROR] {e}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from e
 
-    captured_s = len(audio) / 16000
+    captured_s = audio.duration()
     typer.secho(f"[OK] Captured {captured_s:.2f}s", fg=typer.colors.GREEN)
+
+    wav_path = None if no_save else artifact.path
+    if wav_path is not None:
+        typer.echo(f"      saved  : {wav_path}")
 
     if captured_s < 0.5:
         typer.secho("[SKIP] Too short to transcribe (< 0.5s)", fg=typer.colors.YELLOW)
         return
-
-    # --- Save WAV ---
-    wav_path: Path | None = None
-    if not no_save:
-        ts = time.strftime("%Y%m%d_%H%M%S")
-        p = prefix or config.recording_prefix
-        wav_path = config.recordings_path / f"{p}_{ts}.wav"
-        try:
-            recorder.save_wav(audio, wav_path, sample_rate=16000)
-            typer.echo(f"      saved  : {wav_path}")
-        except Exception as e:
-            typer.secho(f"[WARN] Could not save WAV: {e}", fg=typer.colors.YELLOW)
-            wav_path = None
 
     # --- Transcribe ---
     if no_transcribe:
@@ -197,14 +197,6 @@ def start_recording(
 
     typer.echo()
     typer.secho("[*] Transcribing...", fg=typer.colors.CYAN)
-
-    transcription_audio = audio
-    if wav_path and wav_path.exists():
-        import soundfile as sf
-
-        transcription_audio, _ = sf.read(str(wav_path), dtype="float32", always_2d=False)
-        if transcription_audio.ndim > 1:
-            transcription_audio = transcription_audio.mean(axis=1)
 
     session_id = wav_path.stem if wav_path is not None else f"cli_{time.strftime('%Y%m%d_%H%M%S')}"
     session_logger, _log_file = begin_transcription_session(
@@ -216,13 +208,13 @@ def start_recording(
     try:
         log_transcription_start(
             session_logger,
-            len(transcription_audio) / 16000,
+            audio.duration(),
             config.transcription_model,
             config.transcription_device,
             config.transcription_compute_type,
         )
         result = transcribe(
-            transcription_audio,
+            audio,
             model_name=config.transcription_model,
             device=config.transcription_device,
             compute_type=config.transcription_compute_type,
@@ -311,6 +303,14 @@ def _wait_for_quit(stop_event: threading.Event) -> None:
             break
 
 
+def _language_summary(result) -> str:
+    if result.language is None:
+        return "unavailable"
+    if result.language_probability is None:
+        return result.language
+    return f"{result.language} ({result.language_probability * 100:.1f}%)"
+
+
 def _print_result(result) -> None:
     typer.echo()
     typer.secho("┌─ Transcription " + "─" * 34, fg=typer.colors.CYAN)
@@ -318,7 +318,7 @@ def _print_result(result) -> None:
     typer.secho("└" + "─" * 50, fg=typer.colors.CYAN)
     typer.echo()
     typer.echo(f"  device   : {result.device} ({result.compute_type})")
-    typer.echo(f"  language : {result.language} ({result.language_probability * 100:.0f}% confidence)")
+    typer.echo(f"  language : {_language_summary(result)}")
     typer.echo(f"  audio    : {result.duration_s:.1f}s")
     typer.echo(f"  latency  : {result.latency_ms:.0f}ms")
     if result.fallback_to_cpu:
@@ -337,7 +337,7 @@ def _format_markdown(wav_path: Path, result, model_name: str = "") -> str:
         "transcriptions:",
         "  - n: 1",
         f"    model: {model_str}",
-        f"    language: {result.language} ({result.language_probability * 100:.1f}%)",
+        f"    language: {_language_summary(result)}",
         f"    duration: {result.duration_s:.1f}s",
         f"    latency: {result.latency_ms:.0f}ms",
     ]
@@ -425,8 +425,9 @@ def benchmark(
             self.sample_rate = 16000
             self.cursor = 0
 
-        def get_snapshot(self):
-            return self.audio_data[: self.cursor]
+        def read_window(self, start_sample: int, max_samples: int) -> AudioWindow:
+            end_sample = min(self.cursor, start_sample + max_samples)
+            return AudioWindow(self.audio_data[start_sample:end_sample], start_sample)
 
     typer.echo("Running permutations...")
 

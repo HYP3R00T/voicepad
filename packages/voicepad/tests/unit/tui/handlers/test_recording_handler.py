@@ -6,9 +6,12 @@ import threading
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-import numpy as np
 from voicepad.tui.handlers.recording_handler import RecordingHandler
-from voicepad_core import ChunkResult
+from voicepad_core import ChunkResult, WavArtifact
+
+
+def _artifact(path: Path, frame_count: int = 2, sample_rate: int = 16_000) -> WavArtifact:
+    return WavArtifact(path, sample_rate, 1, frame_count, frame_count / sample_rate)
 
 
 class TestRecordingHandlerInit:
@@ -298,7 +301,7 @@ class TestStopRecording:
         """Test that stop_recording stops recording and timer."""
         mock_app = Mock()
         mock_session = Mock()
-        mock_session.stop.return_value = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+        mock_session.stop.return_value = _artifact(Path("/tmp/recording.wav"), 3)
         mock_app._session = mock_session
 
         handler = RecordingHandler(mock_app)
@@ -329,7 +332,7 @@ class TestStopRecording:
         """Test that stop_recording sets transcribing state and delegates to app._finalize_worker."""
         mock_app = Mock()
         mock_session = Mock()
-        audio = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+        audio = _artifact(Path("/tmp/recording.wav"), 3)
         mock_session.stop.return_value = audio
         mock_app._session = mock_session
 
@@ -340,7 +343,7 @@ class TestStopRecording:
         mock_app._finalize_worker.assert_called_once()
         # Check that audio array was passed
         call_args = mock_app._finalize_worker.call_args[0]
-        np.testing.assert_array_equal(call_args[0], audio)
+        assert call_args[0] is audio
 
 
 class TestFinalizeWorker:
@@ -360,7 +363,7 @@ class TestFinalizeWorker:
         handler._session_logger = Mock()
         handler._log_file = Path("/tmp/test.log")
 
-        audio = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+        audio = _artifact(Path("/tmp/recording.wav"), 3)
         final_result = Mock()
         mock_final_pass.return_value = final_result
 
@@ -368,7 +371,7 @@ class TestFinalizeWorker:
 
         mock_app._streamer.stop.assert_called_once()
         mock_final_pass.assert_called_once()
-        np.testing.assert_array_equal(mock_final_pass.call_args[0][0], audio)
+        assert mock_final_pass.call_args[0][0] is audio
         mock_app.call_from_thread.assert_called_once_with(handler.save_recording, audio, final_result)
         mock_end_session.assert_called_once_with(include_streaming=True)
 
@@ -377,7 +380,7 @@ class TestFinalizeWorker:
         mock_app._stream_chunks = [Mock(), Mock()]
         handler = RecordingHandler(mock_app)
 
-        result = handler._transcribe_final_audio(np.array([1.0], dtype=np.float32))
+        result = handler._transcribe_final_audio(_artifact(Path("/tmp/recording.wav"), 1))
 
         assert result is None
 
@@ -509,15 +512,11 @@ class TestSaveRecording:
         mock_app.config.markdown_path = Path("/tmp/markdown")
         mock_app.config.recording_prefix = "recording"
 
-        mock_recorder = Mock()
-        mock_session = Mock()
-        mock_session._recorder = mock_recorder
-        mock_app._session = mock_session
-
         mock_button = Mock()
         mock_app.query_one.return_value = mock_button
 
-        audio = np.array([1.0, 2.0], dtype=np.float32)
+        wav_path = Path("/tmp/recordings/recording_20220101_120000.wav")
+        audio = _artifact(wav_path)
 
         handler = RecordingHandler(mock_app)
         with (
@@ -527,7 +526,6 @@ class TestSaveRecording:
         ):
             handler.save_recording(audio)
 
-        mock_recorder.save_wav.assert_called_once()
         assert mock_app._current_text == ""
         assert mock_button.disabled is True
         assert len(mock_app._entries) == 1
@@ -542,15 +540,11 @@ class TestSaveRecording:
         mock_app.config.markdown_path = Path("/tmp/markdown")
         mock_app.config.recording_prefix = "recording"
 
-        mock_recorder = Mock()
-        mock_session = Mock()
-        mock_session._recorder = mock_recorder
-        mock_app._session = mock_session
-
         mock_button = Mock()
         mock_app.query_one.return_value = mock_button
 
-        audio = np.array([1.0, 2.0], dtype=np.float32)
+        wav_path = Path("/tmp/recordings/recording_20220101_120000.wav")
+        audio = _artifact(wav_path)
 
         handler = RecordingHandler(mock_app)
         with (
@@ -560,7 +554,6 @@ class TestSaveRecording:
         ):
             handler.save_recording(audio)
 
-        mock_recorder.save_wav.assert_called_once()
         mock_format_md.assert_not_called()
         assert mock_app._current_text == ""
         assert mock_button.disabled is True
@@ -581,17 +574,13 @@ class TestSaveRecording:
         mock_app.config.markdown_path = Path("/tmp/markdown")
         mock_app.config.recording_prefix = "recording"
 
-        mock_recorder = Mock()
-        mock_session = Mock()
-        mock_session._recorder = mock_recorder
-        mock_app._session = mock_session
-
         mock_button = Mock()
         mock_app.query_one.return_value = mock_button
 
         mock_format_md.return_value = "# Markdown content"
 
-        audio = np.array([1.0, 2.0], dtype=np.float32)
+        wav_path = Path("/tmp/recordings/recording_20220101_120000.wav")
+        audio = _artifact(wav_path)
 
         handler = RecordingHandler(mock_app)
         with (
@@ -601,7 +590,6 @@ class TestSaveRecording:
         ):
             handler.save_recording(audio)
 
-        mock_recorder.save_wav.assert_called_once()
         assert mock_app._current_text == "Test text"
         assert mock_button.disabled is False
 
@@ -617,17 +605,13 @@ class TestSaveRecording:
         mock_app.config.recording_prefix = "recording"
         mock_app.config.transcription_model = "turbo"
 
-        mock_recorder = Mock()
-        mock_session = Mock()
-        mock_session._recorder = mock_recorder
-        mock_app._session = mock_session
-
         mock_button = Mock()
         mock_app.query_one.return_value = mock_button
 
         mock_format_markdown.return_value = "# Final markdown"
         final_result = Mock(text="Complete ending at the moment.", latency_ms=321.0, device="cpu")
-        audio = np.array([1.0, 2.0], dtype=np.float32)
+        wav_path = Path("/tmp/recordings/recording_20220101_120000.wav")
+        audio = _artifact(wav_path)
 
         handler = RecordingHandler(mock_app)
         with (
@@ -655,15 +639,11 @@ class TestSaveRecording:
         mock_app.config.markdown_path = Path("/tmp/markdown")
         mock_app.config.recording_prefix = "recording"
 
-        mock_recorder = Mock()
-        mock_session = Mock()
-        mock_session._recorder = mock_recorder
-        mock_app._session = mock_session
-
         mock_button = Mock()
         mock_app.query_one.return_value = mock_button
 
-        audio = np.array([1.0] * 16000, dtype=np.float32)  # 1 second of audio
+        wav_path = Path("/tmp/recordings/recording_20220101_120000.wav")
+        audio = _artifact(wav_path, 16_000)
 
         handler = RecordingHandler(mock_app)
         with (

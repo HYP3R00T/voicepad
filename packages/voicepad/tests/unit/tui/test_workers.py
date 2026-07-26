@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
 import numpy as np
@@ -10,6 +11,11 @@ from voicepad.tui.workers import (
     TranscriptionJob,
     warm_model,
 )
+from voicepad_core.audio import RawAudio, WavArtifact
+
+
+def _audio(samples: list[float]) -> RawAudio:
+    return RawAudio(np.array(samples, dtype=np.float32), 16_000, 1)
 
 
 class TestModelWarmResult:
@@ -187,66 +193,57 @@ class TestRecordingSession:
         assert session.error is None
 
     @patch("voicepad.tui.workers.MicrophoneStream")
-    def test_start_creates_and_starts_recorder(self, mock_recorder_class: Mock) -> None:
+    def test_start_creates_and_starts_recorder(self, mock_recorder_class: Mock, tmp_path: Path) -> None:
         mock_config = MagicMock()
         mock_config.input_device_index = 0
         mock_recorder = MagicMock()
         mock_recorder_class.return_value = mock_recorder
 
-        session = RecordingSession(config=mock_config)
+        recording_path = tmp_path / "recording.wav"
+        session = RecordingSession(config=mock_config, recording_path=recording_path)
         session.start()
 
-        mock_recorder_class.assert_called_once_with(0)
+        mock_recorder_class.assert_called_once_with(recording_path, device_index=0)
         mock_recorder.start.assert_called_once()
 
     @patch("voicepad.tui.workers.MicrophoneStream")
-    def test_start_handles_audio_recorder_error(self, mock_recorder_class: Mock) -> None:
+    def test_start_handles_audio_recorder_error(self, mock_recorder_class: Mock, tmp_path: Path) -> None:
         mock_config = MagicMock()
         mock_recorder = MagicMock()
         mock_recorder.start.side_effect = RuntimeError("Device busy")
         mock_recorder_class.return_value = mock_recorder
 
-        session = RecordingSession(config=mock_config)
+        session = RecordingSession(config=mock_config, recording_path=tmp_path / "recording.wav")
         with pytest.raises(RuntimeError):
             session.start()
 
         assert session.error == "Device busy"
 
-    @patch("voicepad_core.AudioPreProcessor")
     @patch("voicepad.tui.workers.MicrophoneStream")
     def test_stop_returns_audio_from_recorder(
         self,
         mock_recorder_class: Mock,
-        mock_preprocessor_class: Mock,
     ) -> None:
         mock_config = MagicMock()
         mock_config.input_device_index = 0
         mock_recorder = MagicMock()
-        expected_audio = np.array([0.1, 0.2, 0.3], dtype=np.float32)
+        expected_audio = WavArtifact(Path("recording.wav"), 16_000, 1, 3, 3 / 16_000)
         mock_recorder.stop.return_value = expected_audio
-        mock_recorder.sample_rate = 16000
         mock_recorder_class.return_value = mock_recorder
 
-        # Mock AudioPreProcessor
-        mock_processor = MagicMock()
-        mock_processor.process_array.return_value = expected_audio
-        mock_preprocessor_class.return_value = mock_processor
-
-        session = RecordingSession(config=mock_config)
+        session = RecordingSession(config=mock_config, recording_path=Path("recording.wav"))
         session.start()
         audio = session.stop()
 
-        np.testing.assert_array_equal(audio, expected_audio)
+        assert audio == expected_audio
         mock_recorder.stop.assert_called_once()
 
-    def test_stop_returns_empty_array_when_recorder_is_none(self) -> None:
+    def test_stop_before_start_is_rejected(self) -> None:
         mock_config = MagicMock()
         session = RecordingSession(config=mock_config)
-        audio = session.stop()
 
-        assert isinstance(audio, np.ndarray)
-        assert audio.dtype == np.float32
-        assert len(audio) == 0
+        with pytest.raises(RuntimeError, match="has not been started"):
+            session.stop()
 
     @patch("voicepad.tui.workers.MicrophoneStream")
     def test_stop_handles_audio_recorder_error(self, mock_recorder_class: Mock) -> None:
@@ -256,7 +253,7 @@ class TestRecordingSession:
         mock_recorder.stop.side_effect = RuntimeError("Buffer overrun")
         mock_recorder_class.return_value = mock_recorder
 
-        session = RecordingSession(config=mock_config)
+        session = RecordingSession(config=mock_config, recording_path=Path("recording.wav"))
         session.start()
 
         with pytest.raises(RuntimeError):
@@ -269,22 +266,22 @@ class TestTranscriptionJob:
     """Test TranscriptionJob dataclass."""
 
     def test_init_stores_audio_and_config(self) -> None:
-        audio = np.array([0.1, 0.2], dtype=np.float32)
+        audio = _audio([0.1, 0.2])
         mock_config = MagicMock()
         job = TranscriptionJob(audio=audio, config=mock_config)
 
-        np.testing.assert_array_equal(job.audio, audio)
+        assert job.audio is audio
         assert job.config is mock_config
 
     def test_result_is_none_initially(self) -> None:
-        audio = np.array([0.1, 0.2], dtype=np.float32)
+        audio = _audio([0.1, 0.2])
         mock_config = MagicMock()
         job = TranscriptionJob(audio=audio, config=mock_config)
 
         assert job.result is None
 
     def test_error_is_none_initially(self) -> None:
-        audio = np.array([0.1, 0.2], dtype=np.float32)
+        audio = _audio([0.1, 0.2])
         mock_config = MagicMock()
         job = TranscriptionJob(audio=audio, config=mock_config)
 
@@ -292,7 +289,7 @@ class TestTranscriptionJob:
 
     @patch("voicepad_core.transcribe")
     def test_run_transcribes_audio_successfully(self, mock_transcribe: Mock) -> None:
-        audio = np.array([0.1, 0.2], dtype=np.float32)
+        audio = _audio([0.1, 0.2])
         mock_config = MagicMock()
         mock_config.transcription_model = "base"
         mock_config.transcription_device = "cuda"
@@ -320,7 +317,7 @@ class TestTranscriptionJob:
     def test_run_handles_audio_too_short_error(self, mock_transcribe: Mock) -> None:
         from voicepad_core import AudioTooShortError
 
-        audio = np.array([0.1], dtype=np.float32)
+        audio = _audio([0.1])
         mock_config = MagicMock()
         mock_transcribe.side_effect = AudioTooShortError("Too short")
 
@@ -335,7 +332,7 @@ class TestTranscriptionJob:
     def test_run_handles_transcription_error(self, mock_transcribe: Mock) -> None:
         from voicepad_core import TranscriptionError
 
-        audio = np.array([0.1, 0.2], dtype=np.float32)
+        audio = _audio([0.1, 0.2])
         mock_config = MagicMock()
         mock_transcribe.side_effect = TranscriptionError("Model failed")
 
@@ -348,7 +345,7 @@ class TestTranscriptionJob:
 
     @patch("voicepad_core.transcribe")
     def test_run_handles_generic_exception(self, mock_transcribe: Mock) -> None:
-        audio = np.array([0.1, 0.2], dtype=np.float32)
+        audio = _audio([0.1, 0.2])
         mock_config = MagicMock()
         mock_transcribe.side_effect = RuntimeError("Unexpected error")
 

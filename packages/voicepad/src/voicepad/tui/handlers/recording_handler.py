@@ -8,12 +8,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import numpy as np
 from textual.widgets import Label, Static, TabbedContent
 from voicepad_core import (
     ChunkResult,
-    MicrophoneStream,
+    FileSource,
     StreamingTranscriber,
+    WavArtifact,
     begin_transcription_session,
     end_transcription_session,
 )
@@ -123,7 +123,11 @@ class RecordingHandler:
         try:
             audio = self.app._session.stop()
             if self._session_logger:
-                self._session_logger.info(f"Recording stopped, audio length: {len(audio)} samples")
+                self._session_logger.info(
+                    "Recording stopped: frames=%s rate=%s",
+                    audio.frame_count,
+                    audio.sample_rate,
+                )
         except Exception as e:
             if self._session_logger:
                 self._session_logger.error(f"Failed to stop recording: {e}")
@@ -137,8 +141,8 @@ class RecordingHandler:
         # Must go through the app's @work-decorated wrapper so it runs in a background thread.
         self.app._finalize_worker(audio)
 
-    def finalize_worker(self, audio: np.ndarray) -> None:
-        """Stop the streamer (transcribes tail) then save the full recording."""
+    def finalize_worker(self, audio: WavArtifact) -> None:
+        """Persist raw audio, finish transcription, then save transcript metadata."""
         if self._session_logger:
             self._session_logger.info("Finalizing transcription...")
 
@@ -161,7 +165,7 @@ class RecordingHandler:
             self._session_logger.info(f"Session complete. Log saved to: {self._log_file}")
             self._session_logger.info("=" * 80)
 
-    def _transcribe_final_audio(self, audio: np.ndarray):
+    def _transcribe_final_audio(self, audio: WavArtifact):
         """Use the fully recorded audio as the final authority for short/simple sessions."""
         if len(self.app._stream_chunks) > 1:
             return None
@@ -171,8 +175,9 @@ class RecordingHandler:
         try:
             if self._session_logger:
                 self._session_logger.info("Running final full-audio transcription pass")
+            source_audio = FileSource(audio.path).read_audio()
             return transcribe(
-                audio,
+                source_audio,
                 model_name=self.app.config.transcription_model,
                 device=self.app.config.transcription_device,
                 compute_type=self.app.config.transcription_compute_type,
@@ -229,8 +234,12 @@ class RecordingHandler:
             else:
                 self.app._overlay_set("hidden")
 
-    def save_recording(self, audio: np.ndarray, final_result: object | None = None) -> None:
-        """Save WAV + markdown and add history entry after streaming completes."""
+    def save_recording(
+        self,
+        audio: WavArtifact,
+        final_result: object | None = None,
+    ) -> None:
+        """Save transcript metadata and add history after raw persistence."""
         from voicepad.tui.models import SessionEntry
 
         final_text = getattr(final_result, "text", "") if final_result is not None else ""
@@ -239,40 +248,34 @@ class RecordingHandler:
         copy_button = self.app.query_one("#tx-copy-btn", VoiceButton)
         copy_button.disabled = not bool(full_text)
 
-        # Save WAV
-        wav_path: Path | None = None
+        wav_path = audio.path
         md_path: Path | None = None
-        recorder_ref: MicrophoneStream | None = self.app._session._recorder if self.app._session else None
-        if recorder_ref is not None:
-            ts = time.strftime("%Y%m%d_%H%M%S")
-            wav_path = self.app.config.recordings_path / f"{self.app.config.recording_prefix}_{ts}.wav"
+        if full_text:
             try:
-                recorder_ref.save_wav(audio, wav_path, sample_rate=16000)
-                if full_text:
-                    md_path = self.app.config.markdown_path / f"{wav_path.stem}.md"
-                    self.app.config.markdown_path.mkdir(parents=True, exist_ok=True)
-                    duration_s = len(audio) / 16000
-                    markdown = (
-                        _format_markdown(wav_path, final_result, self.app.config.transcription_model)
-                        if final_result is not None
-                        else _format_markdown_streaming(
-                            wav_path,
-                            full_text,
-                            duration_s,
-                            self.app._stream_chunks,
-                            self.app.config.transcription_model,
-                        )
+                md_path = self.app.config.markdown_path / f"{wav_path.stem}.md"
+                self.app.config.markdown_path.mkdir(parents=True, exist_ok=True)
+                markdown = (
+                    _format_markdown(wav_path, final_result, self.app.config.transcription_model)
+                    if final_result is not None
+                    else _format_markdown_streaming(
+                        wav_path,
+                        full_text,
+                        audio.duration(),
+                        self.app._stream_chunks,
+                        self.app.config.transcription_model,
                     )
-                    md_path.write_text(markdown, encoding="utf-8")
-            except Exception:
-                wav_path = None
+                )
+                md_path.write_text(markdown, encoding="utf-8")
+            except Exception as error:
+                if self._session_logger:
+                    self._session_logger.error("Could not persist transcript Markdown: %s", error)
                 md_path = None
 
         entry = SessionEntry(
             index=len(self.app._entries),
             wav_path=wav_path,
             md_path=md_path,
-            duration_s=len(audio) / 16000,
+            duration_s=audio.duration(),
             text=full_text,
             latency_ms=float(getattr(final_result, "latency_ms", 0.0)),
             device=str(

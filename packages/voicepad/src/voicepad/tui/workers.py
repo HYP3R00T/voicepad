@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING
 
-import numpy as np
-from voicepad_core import MicrophoneStream
+from voicepad_core import MicrophoneStream, RawAudio, WavArtifact
 
 if TYPE_CHECKING:
     from voicepad_core import TranscriptionResult
@@ -65,33 +66,30 @@ class RecordingSession:
     """Manages a live recording that can be stopped from another thread."""
 
     config: Config
+    recording_path: Path | None = None
     _recorder: MicrophoneStream | None = field(default=None, init=False, repr=False)
     _stop_event: threading.Event = field(default_factory=threading.Event, init=False)
-    _audio: np.ndarray | None = field(default=None, init=False)
     _error: str | None = field(default=None, init=False)
 
     def start(self) -> None:
         """Open the microphone. Call from a worker thread."""
         try:
-            self._recorder = MicrophoneStream(self.config.input_device_index)
+            recording_path = self.recording_path or (
+                self.config.recordings_path / f"{self.config.recording_prefix}_{time.strftime('%Y%m%d_%H%M%S')}.wav"
+            )
+            self.recording_path = recording_path
+            self._recorder = MicrophoneStream(recording_path, device_index=self.config.input_device_index)
             self._recorder.start()
         except Exception as e:
             self._error = str(e)
             raise
 
-    def stop(self) -> np.ndarray:
-        """Close the microphone and return captured audio."""
+    def stop(self) -> WavArtifact:
+        """Close the microphone and return the persisted recording."""
         if self._recorder is None:
-            return np.array([], dtype=np.float32)
+            raise RuntimeError("RecordingSession has not been started.")
         try:
-            from voicepad_core import AudioPreProcessor
-
-            raw_audio = self._recorder.stop()
-            processor = AudioPreProcessor(self._recorder)  # type: ignore
-            audio = processor.process_array(raw_audio, self._recorder.sample_rate)
-
-            self._audio = audio
-            return audio
+            return self._recorder.stop()
         except Exception as e:
             self._error = str(e)
             raise
@@ -108,9 +106,9 @@ class RecordingSession:
 
 @dataclass
 class TranscriptionJob:
-    """Transcribes a numpy audio array. Blocks until complete."""
+    """Transcribe canonical audio. Blocks until complete."""
 
-    audio: np.ndarray
+    audio: RawAudio
     config: Config
     result: TranscriptionResult | None = field(default=None, init=False)
     error: str | None = field(default=None, init=False)

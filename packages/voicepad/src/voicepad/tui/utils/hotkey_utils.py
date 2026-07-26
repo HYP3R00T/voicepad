@@ -59,7 +59,7 @@ def parse_hotkey_str(hotkey: str) -> tuple[list[str], str]:
     mods: list[str] = []
     key = "v"
     for part in hotkey.lower().split("+"):
-        part = part.strip().strip("<>")  # Strip angle brackets for backward compatibility
+        part = part.strip().strip("<>")
         if part in MOD_TO_KEYBOARD:
             mods.append(part)
         elif part:
