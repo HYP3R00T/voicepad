@@ -1,5 +1,3 @@
-"""Tests for TranscriptionService."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -44,17 +42,20 @@ class TestTranscriptionService:
         service = TranscriptionService(config)
         assert service.config == config
 
-    @patch("voicepad_core.inference.model_manager._model_cache", {})
-    @patch("voicepad.tui.services.transcription_service.model_downloaded")
-    @patch("voicepad.tui.services.transcription_service.load_model")
-    def test_warm_model_loads_model_when_cached(self, mock_load: MagicMock, mock_downloaded: MagicMock) -> None:
-        """warm_model loads the model when it's already cached."""
+    @patch("voicepad.tui.services.transcription_service.model_is_ready")
+    @patch("voicepad.tui.services.transcription_service.activate_model")
+    def test_warm_model_loads_model_when_cached(self, mock_activate: MagicMock, mock_ready: MagicMock) -> None:
+        """warm_model activates an artifact that is already ready."""
         config = create_mock_config()
         service = TranscriptionService(config)
 
-        mock_downloaded.return_value = True
-        mock_model = MagicMock()
-        mock_load.return_value = mock_model
+        mock_ready.return_value = True
+        mock_activate.return_value = MagicMock(
+            backend_id="faster-whisper",
+            device="cuda",
+            precision="float16",
+            fallback_to_cpu=False,
+        )
 
         result = service.warm_model()
 
@@ -62,61 +63,64 @@ class TestTranscriptionService:
         assert result.compute_type == "float16"
         assert result.fallback is False
         assert result.error is None
-        mock_downloaded.assert_called_once_with("turbo")
+        mock_ready.assert_called_once_with("turbo")
 
-    @patch("voicepad_core.inference.model_manager._model_cache", {})
-    @patch("voicepad.tui.services.transcription_service.model_downloaded")
-    @patch("voicepad.tui.services.transcription_service.ensure_model_downloaded")
-    @patch("voicepad.tui.services.transcription_service.load_model")
+    @patch("voicepad.tui.services.transcription_service.model_is_ready")
+    @patch("voicepad.tui.services.transcription_service.prepare_model")
+    @patch("voicepad.tui.services.transcription_service.activate_model")
     def test_warm_model_downloads_when_not_cached(
         self,
-        mock_load: MagicMock,
-        mock_ensure: MagicMock,
-        mock_downloaded: MagicMock,
+        mock_activate: MagicMock,
+        mock_prepare: MagicMock,
+        mock_ready: MagicMock,
     ) -> None:
-        """warm_model downloads the model when not cached."""
+        """warm_model prepares a missing artifact before activation."""
         config = create_mock_config()
         service = TranscriptionService(config)
 
-        mock_downloaded.return_value = False
-        mock_model = MagicMock()
-        mock_load.return_value = mock_model
+        mock_ready.return_value = False
+        mock_activate.return_value = MagicMock(
+            backend_id="faster-whisper",
+            device="cuda",
+            precision="float16",
+            fallback_to_cpu=False,
+        )
 
         result = service.warm_model()
 
-        mock_ensure.assert_called_once_with("turbo")
+        mock_prepare.assert_called_once_with("turbo")
         assert result.device == "cuda"
 
-    @patch("voicepad.tui.services.transcription_service.model_downloaded")
-    @patch("voicepad.tui.services.transcription_service.load_model")
+    @patch("voicepad.tui.services.transcription_service.model_is_ready")
+    @patch("voicepad.tui.services.transcription_service.activate_model")
     def test_warm_model_returns_fallback_on_download_error(
-        self, mock_load: MagicMock, mock_downloaded: MagicMock
+        self, mock_activate: MagicMock, mock_ready: MagicMock
     ) -> None:
-        """warm_model returns fallback result on download error."""
+        """warm_model returns an error result when activation fails."""
         config = create_mock_config()
         service = TranscriptionService(config)
 
-        mock_downloaded.return_value = True
-        mock_load.side_effect = TranscriptionError("Download failed")
+        mock_ready.return_value = True
+        mock_activate.side_effect = TranscriptionError("Activation failed")
 
         result = service.warm_model()
 
         assert result.device == "cpu"
         assert result.compute_type == "int8"
         assert result.fallback is True
-        assert result.error == "Download failed"
+        assert result.error == "Activation failed"
 
-    @patch("voicepad.tui.services.transcription_service.model_downloaded")
-    @patch("voicepad.tui.services.transcription_service.load_model")
+    @patch("voicepad.tui.services.transcription_service.model_is_ready")
+    @patch("voicepad.tui.services.transcription_service.activate_model")
     def test_warm_model_returns_fallback_on_unexpected_error(
-        self, mock_load: MagicMock, mock_downloaded: MagicMock
+        self, mock_activate: MagicMock, mock_ready: MagicMock
     ) -> None:
         """warm_model returns fallback result on unexpected error."""
         config = create_mock_config()
         service = TranscriptionService(config)
 
-        mock_downloaded.return_value = True
-        mock_load.side_effect = RuntimeError("Unexpected error")
+        mock_ready.return_value = True
+        mock_activate.side_effect = RuntimeError("Unexpected error")
 
         result = service.warm_model()
 

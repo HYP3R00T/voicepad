@@ -173,6 +173,28 @@ class TestOnUnmount:
         # Should not raise an exception
         manager.on_unmount()
 
+    def test_deactivates_model_runtime(self, mock_app: Mock) -> None:
+        """Unmounting releases the active model runtime."""
+        from voicepad.tui.managers.lifecycle_manager import LifecycleManager
+
+        manager = LifecycleManager(mock_app)
+
+        with patch("voicepad_core.deactivate_model") as mock_deactivate:
+            manager.on_unmount()
+
+        mock_deactivate.assert_called_once_with()
+
+    def test_logs_model_deactivation_failure(self, mock_app: Mock, caplog: pytest.LogCaptureFixture) -> None:
+        """A model shutdown failure is logged without blocking app shutdown."""
+        from voicepad.tui.managers.lifecycle_manager import LifecycleManager
+
+        manager = LifecycleManager(mock_app)
+
+        with patch("voicepad_core.deactivate_model", side_effect=RuntimeError("close failed")):
+            manager.on_unmount()
+
+        assert "Could not deactivate the transcription model during shutdown: close failed" in caplog.text
+
 
 class TestCheckFirstRun:
     """Tests for check_first_run method."""
@@ -195,12 +217,12 @@ class TestCheckFirstRun:
 
         with (
             patch("utilityhub_config.get_config_path") as mock_get_path,
-            patch("voicepad_core.model_downloaded") as mock_downloaded,
+            patch("voicepad_core.model_is_ready") as mock_ready,
         ):
             mock_path = Mock(spec=Path)
             mock_path.exists.return_value = False
             mock_get_path.return_value = mock_path
-            mock_downloaded.return_value = True
+            mock_ready.return_value = True
 
             manager.check_first_run()
 
@@ -215,12 +237,12 @@ class TestCheckFirstRun:
 
         with (
             patch("utilityhub_config.get_config_path") as mock_get_path,
-            patch("voicepad_core.model_downloaded") as mock_downloaded,
+            patch("voicepad_core.model_is_ready") as mock_ready,
         ):
             mock_path = Mock(spec=Path)
             mock_path.exists.return_value = True
             mock_get_path.return_value = mock_path
-            mock_downloaded.return_value = False
+            mock_ready.return_value = False
 
             manager.check_first_run()
 
@@ -235,12 +257,12 @@ class TestCheckFirstRun:
 
         with (
             patch("utilityhub_config.get_config_path") as mock_get_path,
-            patch("voicepad_core.model_downloaded") as mock_downloaded,
+            patch("voicepad_core.model_is_ready") as mock_ready,
         ):
             mock_path = Mock(spec=Path)
             mock_path.exists.return_value = True
             mock_get_path.return_value = mock_path
-            mock_downloaded.return_value = True
+            mock_ready.return_value = True
 
             manager.check_first_run()
 
@@ -255,13 +277,13 @@ class TestCheckFirstRun:
 
         with (
             patch("utilityhub_config.get_config_path") as mock_get_path,
-            patch("voicepad_core.model_downloaded") as mock_downloaded,
+            patch("voicepad_core.model_is_ready") as mock_ready,
             patch.object(manager, "on_setup_done") as mock_on_setup,
         ):
             mock_path = Mock(spec=Path)
             mock_path.exists.return_value = False
             mock_get_path.return_value = mock_path
-            mock_downloaded.return_value = True
+            mock_ready.return_value = True
 
             manager.check_first_run()
 
@@ -280,13 +302,13 @@ class TestCheckFirstRun:
 
         with (
             patch("utilityhub_config.get_config_path") as mock_get_path,
-            patch("voicepad_core.model_downloaded") as mock_downloaded,
+            patch("voicepad_core.model_is_ready") as mock_ready,
             patch.object(manager, "on_setup_done") as mock_on_setup,
         ):
             mock_path = Mock(spec=Path)
             mock_path.exists.return_value = False
             mock_get_path.return_value = mock_path
-            mock_downloaded.return_value = True
+            mock_ready.return_value = True
 
             manager.check_first_run()
 

@@ -1,5 +1,3 @@
-"""Tests for workers.py module."""
-
 from __future__ import annotations
 
 from unittest.mock import MagicMock, Mock, patch
@@ -49,25 +47,24 @@ class TestModelWarmResult:
 class TestWarmModel:
     """Test warm_model function."""
 
-    @patch("voicepad_core._model_cache")
-    @patch("voicepad_core.load_model")
-    @patch("voicepad_core.model_downloaded")
+    @patch("voicepad_core.activate_model")
+    @patch("voicepad_core.model_is_ready")
     def test_warm_model_when_already_downloaded(
         self,
-        mock_model_downloaded: Mock,
-        mock_load: Mock,
-        mock_cache: Mock,
+        mock_model_is_ready: Mock,
+        mock_activate: Mock,
     ) -> None:
+        """A ready artifact is activated without preparing it again."""
         mock_config = MagicMock()
         mock_config.transcription_model = "base"
         mock_config.transcription_device = "cuda"
         mock_config.transcription_compute_type = "float16"
-        mock_model = MagicMock()
-        mock_model_downloaded.return_value = True
-        mock_load.return_value = mock_model
-
-        # Mock the cache to return the device/compute info
-        mock_cache.items.return_value = [(("base", "cuda", "float16"), mock_model)]
+        mock_model_is_ready.return_value = True
+        mock_activate.return_value = MagicMock(
+            device="cuda",
+            precision="float16",
+            fallback_to_cpu=False,
+        )
 
         result = warm_model(mock_config)
 
@@ -75,29 +72,29 @@ class TestWarmModel:
         assert result.compute_type == "float16"
         assert result.fallback is False
         assert result.error is None
-        mock_model_downloaded.assert_called_once_with("base")
-        mock_load.assert_called_once_with("base", "cuda", "float16")
+        mock_model_is_ready.assert_called_once_with("base")
+        mock_activate.assert_called_once_with("base", "cuda", "float16")
 
-    @patch("voicepad_core._model_cache")
-    @patch("voicepad_core.ensure_model_downloaded")
-    @patch("voicepad_core.load_model")
-    @patch("voicepad_core.model_downloaded")
+    @patch("voicepad_core.prepare_model")
+    @patch("voicepad_core.activate_model")
+    @patch("voicepad_core.model_is_ready")
     def test_warm_model_downloads_when_not_cached(
         self,
-        mock_model_downloaded: Mock,
-        mock_load: Mock,
-        mock_ensure_model_downloaded: Mock,
-        mock_cache: Mock,
+        mock_model_is_ready: Mock,
+        mock_activate: Mock,
+        mock_prepare: Mock,
     ) -> None:
+        """A missing artifact is prepared before activation."""
         mock_config = MagicMock()
         mock_config.transcription_model = "large"
         mock_config.transcription_device = "cuda"
         mock_config.transcription_compute_type = "float16"
-        mock_model = MagicMock()
-        mock_model_downloaded.return_value = False
-        mock_load.return_value = mock_model
-
-        mock_cache.items.return_value = [(("large", "cuda", "float16"), mock_model)]
+        mock_model_is_ready.return_value = False
+        mock_activate.return_value = MagicMock(
+            device="cuda",
+            precision="float16",
+            fallback_to_cpu=False,
+        )
 
         result = warm_model(mock_config)
 
@@ -105,40 +102,42 @@ class TestWarmModel:
         assert result.compute_type == "float16"
         assert result.fallback is False
         assert result.error is None
-        mock_ensure_model_downloaded.assert_called_once_with("large")
+        mock_prepare.assert_called_once_with("large")
 
-    @patch("voicepad_core.load_model")
-    @patch("voicepad_core.model_downloaded")
+    @patch("voicepad_core.activate_model")
+    @patch("voicepad_core.model_is_ready")
     def test_warm_model_handles_transcription_error(
         self,
-        mock_model_downloaded: Mock,
-        mock_load: Mock,
+        mock_model_is_ready: Mock,
+        mock_activate: Mock,
     ) -> None:
+        """A transcription error from activation is returned to the UI."""
         from voicepad_core import TranscriptionError
 
         mock_config = MagicMock()
         mock_config.transcription_model = "base"
-        mock_model_downloaded.return_value = True
-        mock_load.side_effect = TranscriptionError("Model load_model failed")
+        mock_model_is_ready.return_value = True
+        mock_activate.side_effect = TranscriptionError("Model activation failed")
 
         result = warm_model(mock_config)
 
         assert result.device == "cpu"
         assert result.compute_type == "int8"
         assert result.fallback is True
-        assert result.error == "Model load_model failed"
+        assert result.error == "Model activation failed"
 
-    @patch("voicepad_core.load_model")
-    @patch("voicepad_core.model_downloaded")
+    @patch("voicepad_core.activate_model")
+    @patch("voicepad_core.model_is_ready")
     def test_warm_model_handles_generic_exception(
         self,
-        mock_model_downloaded: Mock,
-        mock_load: Mock,
+        mock_model_is_ready: Mock,
+        mock_activate: Mock,
     ) -> None:
+        """An unexpected activation failure is returned to the UI."""
         mock_config = MagicMock()
         mock_config.transcription_model = "base"
-        mock_model_downloaded.return_value = True
-        mock_load.side_effect = RuntimeError("Unexpected error")
+        mock_model_is_ready.return_value = True
+        mock_activate.side_effect = RuntimeError("Unexpected error")
 
         result = warm_model(mock_config)
 
@@ -147,25 +146,24 @@ class TestWarmModel:
         assert result.fallback is True
         assert result.error == "Unexpected error"
 
-    @patch("voicepad_core._model_cache")
-    @patch("voicepad_core.load_model")
-    @patch("voicepad_core.model_downloaded")
+    @patch("voicepad_core.activate_model")
+    @patch("voicepad_core.model_is_ready")
     def test_warm_model_with_fallback(
         self,
-        mock_model_downloaded: Mock,
-        mock_load: Mock,
-        mock_cache: Mock,
+        mock_model_is_ready: Mock,
+        mock_activate: Mock,
     ) -> None:
+        """The actual CPU fallback reported by the runtime is preserved."""
         mock_config = MagicMock()
         mock_config.transcription_model = "base"
-        mock_config.transcription_device = "cuda"  # Request CUDA
+        mock_config.transcription_device = "cuda"
         mock_config.transcription_compute_type = "float16"
-        mock_model = MagicMock()
-        mock_model_downloaded.return_value = True
-        mock_load.return_value = mock_model
-
-        # Mock cache shows it loaded on CPU despite requesting CUDA (fallback)
-        mock_cache.items.return_value = [(("base", "cpu", "int8"), mock_model)]
+        mock_model_is_ready.return_value = True
+        mock_activate.return_value = MagicMock(
+            device="cpu",
+            precision="int8",
+            fallback_to_cpu=True,
+        )
 
         result = warm_model(mock_config)
 

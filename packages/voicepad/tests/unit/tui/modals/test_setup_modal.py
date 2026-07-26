@@ -210,7 +210,7 @@ class TestSetupModal:
 
             model_select = modal.query_one("#wizard-model-select", Select)
             option_values = [opt[1] for opt in model_select._options]
-            assert option_values == ["small", "large-v3", "turbo"]
+        assert option_values == ["small", "large-v3", "turbo", "parakeet-tdt-0.6b-v3-int8"]
 
     async def test_step_1_has_download_status(self) -> None:
         """Step 1 has download status display."""

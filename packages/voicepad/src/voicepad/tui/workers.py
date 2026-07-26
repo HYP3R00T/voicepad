@@ -1,13 +1,3 @@
-"""Background workers for the VoicePad TUI.
-
-All blocking operations (model load_model, audio recording, transcription) run in
-worker threads so the Textual event loop stays responsive.
-
-Each worker is a plain dataclass that holds its result or error after run().
-The TUI calls worker.run() via app.run_worker() and reads the result in the
-on_worker_state_changed handler.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -39,37 +29,29 @@ class ModelWarmResult:
 
 
 def warm_model(config: Config) -> ModelWarmResult:
-    """Download (if needed) then load_model the model into VRAM. Blocks until complete."""
-    from voicepad_core import TranscriptionError, _model_cache, ensure_model_downloaded, load_model, model_downloaded
+    """Prepare and activate the configured model, returning its actual runtime."""
+    from voicepad_core import TranscriptionError, activate_model, model_is_ready, prepare_model
 
     try:
-        if not model_downloaded(config.transcription_model):
+        if not model_is_ready(config.transcription_model):
             logger.info(f"Model '{config.transcription_model}' not cached — downloading")
-            ensure_model_downloaded(config.transcription_model)
+            prepare_model(config.transcription_model)
 
-        model = load_model(
+        runtime = activate_model(
             config.transcription_model,
             config.transcription_device,
             config.transcription_compute_type,
         )
-
-        device = config.transcription_device
-        compute = config.transcription_compute_type
-        fallback = False
-
-        for (m, d, c), cached_model in _model_cache.items():
-            if m == config.transcription_model and cached_model is model:
-                device = d
-                compute = c
-                fallback = device == "cpu" and config.transcription_device != "cpu"
-                break
-
-        return ModelWarmResult(device=device, compute_type=compute, fallback=fallback)
+        return ModelWarmResult(
+            device=runtime.device,
+            compute_type=runtime.precision,
+            fallback=runtime.fallback_to_cpu,
+        )
     except TranscriptionError as e:
-        logger.error(f"Model download failed: {e}")
+        logger.error("Model preparation or activation failed: %s", e)
         return ModelWarmResult(device="cpu", compute_type="int8", fallback=True, error=str(e))
     except Exception as e:
-        logger.error(f"Model warm failed: {e}")
+        logger.error("Unexpected model warm failure: %s", e)
         return ModelWarmResult(device="cpu", compute_type="int8", fallback=True, error=str(e))
 
 

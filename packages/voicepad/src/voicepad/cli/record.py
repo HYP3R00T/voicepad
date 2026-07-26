@@ -1,5 +1,3 @@
-"""Recording commands for the voicepad CLI."""
-
 from __future__ import annotations
 
 import logging
@@ -15,16 +13,15 @@ from voicepad_core import (
     AudioTooShortError,
     MicrophoneStream,
     TranscriptionError,
-    _model_cache,
+    activate_model,
     begin_transcription_session,
     configure_global_logging,
     end_transcription_session,
-    ensure_model_downloaded,
     get_config,
-    load_model,
     log_transcription_end,
     log_transcription_start,
-    model_downloaded,
+    model_is_ready,
+    prepare_model,
     transcribe,
 )
 from voicepad_core.inference.constants import BEAM_SIZE, COMPUTE_TYPE, DEVICE, LANGUAGE
@@ -94,7 +91,7 @@ def start_recording(
     # On subsequent runs the cache check is instant.
     if not no_transcribe:
         model_name = config.transcription_model
-        if not model_downloaded(model_name):
+        if not model_is_ready(model_name):
             typer.echo()
             typer.secho(
                 f"[↓] Model '{model_name}' not found locally — downloading now.",
@@ -103,43 +100,34 @@ def start_recording(
             typer.echo("    This only happens once. Subsequent runs start immediately.")
             typer.echo()
             try:
-                ensure_model_downloaded(model_name)
+                prepare_model(model_name)
                 typer.secho(f"    [OK] '{model_name}' downloaded.", fg=typer.colors.GREEN)
             except TranscriptionError as e:
                 typer.secho(f"[ERROR] Download failed: {e}", fg=typer.colors.RED, err=True)
                 raise typer.Exit(1) from e
 
         # --- Step 2: Load model into VRAM ---
-        # Model is local — load_model it now so transcription is instant after recording.
+        # Model is local — activate it now so transcription is instant after recording.
         typer.echo(f"[~] Loading '{model_name}' into memory...")
         try:
-            model = load_model(
+            runtime = activate_model(
                 config.transcription_model,
                 config.transcription_device,
                 config.transcription_compute_type,
             )
-            actual_device = config.transcription_device
-            actual_compute = config.transcription_compute_type
-            fallback = False
-            for (m, d, c), cached_model in _model_cache.items():
-                if m == config.transcription_model and cached_model is model:
-                    actual_device = d
-                    actual_compute = c
-                    fallback = actual_device == "cpu" and config.transcription_device != "cpu"
-                    break
 
-            if fallback:
+            if runtime.fallback_to_cpu:
                 typer.secho(
-                    f"    [!] CUDA not available — using CPU ({actual_compute})",
+                    f"    [!] CUDA not available — using CPU ({runtime.precision})",
                     fg=typer.colors.YELLOW,
                 )
             else:
                 typer.secho(
-                    f"    [OK] Ready on {actual_device} ({actual_compute})",
+                    f"    [OK] Ready on {runtime.device} ({runtime.precision})",
                     fg=typer.colors.GREEN,
                 )
         except TranscriptionError as e:
-            typer.secho(f"[ERROR] Could not load_model model: {e}", fg=typer.colors.RED, err=True)
+            typer.secho(f"[ERROR] Could not load model: {e}", fg=typer.colors.RED, err=True)
             raise typer.Exit(1) from e
 
     # --- Start recording ---
@@ -395,18 +383,18 @@ def benchmark(
     import soundfile as sf
     from rich.console import Console
     from rich.table import Table
-    from voicepad_core import ensure_model_downloaded, load_model
+    from voicepad_core import activate_model, model_is_ready, prepare_model
     from voicepad_core.streaming import StreamingTranscriber
 
     config = get_config()
     _configure_command_logging(config)
 
-    if not model_downloaded(config.transcription_model):
+    if not model_is_ready(config.transcription_model):
         typer.secho(f"Downloading model '{config.transcription_model}'...", fg=typer.colors.CYAN)
-        ensure_model_downloaded(config.transcription_model)
+        prepare_model(config.transcription_model)
 
     typer.echo("Loading model...")
-    load_model(config.transcription_model, config.transcription_device, config.transcription_compute_type)
+    activate_model(config.transcription_model, config.transcription_device, config.transcription_compute_type)
 
     typer.echo(f"Loading {wav_path}...")
     audio, sr = sf.read(str(wav_path), dtype="float32")

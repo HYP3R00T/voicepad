@@ -202,10 +202,10 @@ class TestReloadModel:
         mock_app._recording = True
         manager = ModelManager(mock_app)
 
-        with patch("voicepad_core._model_cache") as mock_cache:
+        with patch("voicepad_core.deactivate_model") as mock_deactivate:
             manager.reload_model()
 
-            mock_cache.clear.assert_not_called()
+            mock_deactivate.assert_not_called()
 
     def test_does_not_reload_while_transcribing(self, mock_app: Mock) -> None:
         """Test that reload_model does nothing while transcribing."""
@@ -214,21 +214,21 @@ class TestReloadModel:
         mock_app._transcribing = True
         manager = ModelManager(mock_app)
 
-        with patch("voicepad_core._model_cache") as mock_cache:
+        with patch("voicepad_core.deactivate_model") as mock_deactivate:
             manager.reload_model()
 
-            mock_cache.clear.assert_not_called()
+            mock_deactivate.assert_not_called()
 
-    def test_clears_model_cache(self, mock_app: Mock) -> None:
-        """Test that reload_model clears the model cache."""
+    def test_deactivates_active_model(self, mock_app: Mock) -> None:
+        """Reloading closes the active runtime before warming a new one."""
         from voicepad.tui.managers.model_manager import ModelManager
 
         manager = ModelManager(mock_app)
 
-        with patch("voicepad_core._model_cache") as mock_cache:
+        with patch("voicepad_core.deactivate_model") as mock_deactivate:
             manager.reload_model()
 
-            mock_cache.clear.assert_called_once()
+            mock_deactivate.assert_called_once_with()
 
     def test_sets_model_ready_to_false(self, mock_app: Mock) -> None:
         """Test that reload_model sets model_ready to False."""
@@ -236,7 +236,7 @@ class TestReloadModel:
 
         manager = ModelManager(mock_app)
 
-        with patch("voicepad_core._model_cache"):
+        with patch("voicepad_core.deactivate_model"):
             manager.reload_model()
 
             assert mock_app._model_ready is False
@@ -248,7 +248,7 @@ class TestReloadModel:
         manager = ModelManager(mock_app)
 
         with (
-            patch("voicepad_core._model_cache"),
+            patch("voicepad_core.deactivate_model"),
             patch.object(manager, "set_status") as mock_set_status,
         ):
             manager.reload_model()
@@ -262,7 +262,7 @@ class TestReloadModel:
 
         manager = ModelManager(mock_app)
 
-        with patch("voicepad_core._model_cache"):
+        with patch("voicepad_core.deactivate_model"):
             manager.reload_model()
 
             mock_model_label = mock_app.query_one("#header-model", Label)
@@ -274,7 +274,7 @@ class TestReloadModel:
 
         manager = ModelManager(mock_app)
 
-        with patch("voicepad_core._model_cache"):
+        with patch("voicepad_core.deactivate_model"):
             manager.reload_model()
 
             mock_app._warm_model_worker.assert_called_once()

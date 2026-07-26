@@ -1,5 +1,3 @@
-"""Lifecycle management for VoicePad TUI application."""
-
 from __future__ import annotations
 
 import contextlib
@@ -33,6 +31,12 @@ class LifecycleManager:
         """Clean up resources when the app exits."""
         self._stop_hotkey_listener()
         self._stop_overlay()
+        try:
+            from voicepad_core import deactivate_model
+
+            deactivate_model()
+        except Exception as error:
+            logger.warning("Could not deactivate the transcription model during shutdown: %s", error)
 
     def _stop_hotkey_listener(self) -> None:
         """Stop the global hotkey listener if running."""
@@ -49,11 +53,11 @@ class LifecycleManager:
     def check_first_run(self) -> None:
         """Show setup modal if config is missing or model not downloaded."""
         from utilityhub_config import get_config_path
-        from voicepad_core import model_downloaded
+        from voicepad_core import model_is_ready
 
         config_path = get_config_path("voicepad", format="yaml")
         config_missing = not config_path.exists()
-        model_ready = model_downloaded(self.app.config.transcription_model)
+        model_ready = model_is_ready(self.app.config.transcription_model)
 
         if config_missing or not model_ready:
 

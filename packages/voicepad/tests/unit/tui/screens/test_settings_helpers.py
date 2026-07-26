@@ -141,7 +141,12 @@ class TestPopulateSettingsForm:
             # Check that valid models are in options
             option_values = [opt[1] for opt in select._options]
             assert "turbo" in option_values
-            assert option_values == ["small", "large-v3", "turbo"]
+            assert option_values == [
+                "small",
+                "large-v3",
+                "turbo",
+                "parakeet-tdt-0.6b-v3-int8",
+            ]
 
     @pytest.mark.asyncio
     @patch(PATCH_TARGET)
@@ -355,7 +360,13 @@ class TestPopulateSettingsForm:
             select = app.container.query_one("#setting-transcription_model", Select)
             assert select.value == "base.en"
             option_values = [opt[1] for opt in select._options]
-            assert option_values == ["small", "large-v3", "turbo", "base.en"]
+            assert option_values == [
+                "small",
+                "large-v3",
+                "turbo",
+                "parakeet-tdt-0.6b-v3-int8",
+                "base.en",
+            ]
 
     @pytest.mark.asyncio
     @patch(PATCH_TARGET)

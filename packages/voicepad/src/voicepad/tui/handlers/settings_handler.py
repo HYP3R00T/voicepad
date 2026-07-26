@@ -348,9 +348,9 @@ class SettingsHandler:
                 self.app._start_hotkey_listener()
 
             if model_changed and not self.app._recording and not self.app._transcribing:
-                from voicepad_core import _model_cache
+                from voicepad_core import deactivate_model
 
-                _model_cache.clear()
+                deactivate_model()
                 self.app._model_ready = False
                 self.app._set_status("transcribing", "loading model…")
                 self.app.query_one("#header-model", Label).update("[dim]M:[/] loading…")

@@ -1,5 +1,3 @@
-"""Tests for voicepad.cli.record."""
-
 from __future__ import annotations
 
 import threading
@@ -220,9 +218,9 @@ class TestStartRecording:
         mock_recorder.make_wav_path.return_value = tmp_path / "test.wav"
         with (
             patch("voicepad.cli.record.get_config", return_value=mock_config),
-            patch("voicepad.cli.record.model_downloaded", return_value=False),
+            patch("voicepad.cli.record.model_is_ready", return_value=False),
             patch(
-                "voicepad.cli.record.ensure_model_downloaded",
+                "voicepad.cli.record.prepare_model",
                 side_effect=TranscriptionError("Download failed"),
             ),
             patch("voicepad.cli.record.MicrophoneStream", return_value=mock_recorder),
@@ -236,8 +234,8 @@ class TestStartRecording:
         mock_config = Config(recordings_path=tmp_path, markdown_path=tmp_path)
         with (
             patch("voicepad.cli.record.get_config", return_value=mock_config),
-            patch("voicepad.cli.record.model_downloaded", return_value=True),
-            patch("voicepad.cli.record.load_model", side_effect=TranscriptionError("Load failed")),
+            patch("voicepad.cli.record.model_is_ready", return_value=True),
+            patch("voicepad.cli.record.activate_model", side_effect=TranscriptionError("Load failed")),
         ):
             result = runner.invoke(record_app, ["start", "--duration", "0.5"])
         assert result.exit_code == 1
@@ -248,9 +246,11 @@ class TestStartRecording:
         mock_recorder.start.side_effect = RuntimeError("Device not found")
         with (
             patch("voicepad.cli.record.get_config", return_value=mock_config),
-            patch("voicepad.cli.record.model_downloaded", return_value=True),
-            patch("voicepad.cli.record.load_model", return_value=MagicMock()),
-            patch("voicepad.cli.record._model_cache", {}),
+            patch("voicepad.cli.record.model_is_ready", return_value=True),
+            patch(
+                "voicepad.cli.record.activate_model",
+                return_value=MagicMock(device="cuda", precision="float16", fallback_to_cpu=False),
+            ),
             patch("voicepad.cli.record.MicrophoneStream", return_value=mock_recorder),
         ):
             result = runner.invoke(record_app, ["start", "--duration", "0.5"])
@@ -291,9 +291,11 @@ class TestStartRecording:
         mock_result.fallback_to_cpu = False
         with (
             patch("voicepad.cli.record.get_config", return_value=mock_config),
-            patch("voicepad.cli.record.model_downloaded", return_value=True),
-            patch("voicepad.cli.record.load_model", return_value=MagicMock()),
-            patch("voicepad.cli.record._model_cache", {}),
+            patch("voicepad.cli.record.model_is_ready", return_value=True),
+            patch(
+                "voicepad.cli.record.activate_model",
+                return_value=MagicMock(device="cuda", precision="float16", fallback_to_cpu=False),
+            ),
             patch("voicepad.cli.record.MicrophoneStream", return_value=mock_recorder),
             patch("voicepad.cli.record.AudioPreProcessor", return_value=mock_processor),
             patch("voicepad.cli.record.transcribe", return_value=mock_result),
@@ -312,9 +314,11 @@ class TestStartRecording:
         mock_processor.process_array.return_value = np.zeros(16000, dtype=np.float32)
         with (
             patch("voicepad.cli.record.get_config", return_value=mock_config),
-            patch("voicepad.cli.record.model_downloaded", return_value=True),
-            patch("voicepad.cli.record.load_model", return_value=MagicMock()),
-            patch("voicepad.cli.record._model_cache", {}),
+            patch("voicepad.cli.record.model_is_ready", return_value=True),
+            patch(
+                "voicepad.cli.record.activate_model",
+                return_value=MagicMock(device="cuda", precision="float16", fallback_to_cpu=False),
+            ),
             patch("voicepad.cli.record.MicrophoneStream", return_value=mock_recorder),
             patch("voicepad.cli.record.AudioPreProcessor", return_value=mock_processor),
             patch("voicepad.cli.record.transcribe", side_effect=AudioTooShortError("Too short")),
@@ -333,9 +337,11 @@ class TestStartRecording:
         mock_processor.process_array.return_value = np.zeros(16000, dtype=np.float32)
         with (
             patch("voicepad.cli.record.get_config", return_value=mock_config),
-            patch("voicepad.cli.record.model_downloaded", return_value=True),
-            patch("voicepad.cli.record.load_model", return_value=MagicMock()),
-            patch("voicepad.cli.record._model_cache", {}),
+            patch("voicepad.cli.record.model_is_ready", return_value=True),
+            patch(
+                "voicepad.cli.record.activate_model",
+                return_value=MagicMock(device="cuda", precision="float16", fallback_to_cpu=False),
+            ),
             patch("voicepad.cli.record.MicrophoneStream", return_value=mock_recorder),
             patch("voicepad.cli.record.AudioPreProcessor", return_value=mock_processor),
             patch("voicepad.cli.record.transcribe", side_effect=TranscriptionError("Failed")),
@@ -350,14 +356,11 @@ class TestStartRecording:
             markdown_path=tmp_path,
             transcription_device="cuda",  # Request CUDA
         )
-        mock_model = MagicMock()
-        # Simulate fallback: model cache shows it loaded on CPU despite requesting CUDA
-        mock_cache = {(mock_config.transcription_model, "cpu", "int8"): mock_model}
+        runtime = MagicMock(device="cpu", precision="int8", fallback_to_cpu=True)
         with (
             patch("voicepad.cli.record.get_config", return_value=mock_config),
-            patch("voicepad.cli.record.model_downloaded", return_value=True),
-            patch("voicepad.cli.record.load_model", return_value=mock_model),
-            patch("voicepad.cli.record._model_cache", mock_cache),
+            patch("voicepad.cli.record.model_is_ready", return_value=True),
+            patch("voicepad.cli.record.activate_model", return_value=runtime),
             patch("voicepad.cli.record.MicrophoneStream") as mock_recorder_cls,
         ):
             mock_recorder = MagicMock()

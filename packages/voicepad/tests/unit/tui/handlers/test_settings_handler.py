@@ -1,5 +1,3 @@
-"""Tests for settings handler."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -22,6 +20,7 @@ class TestOnSettingsSave:
         app._model_ready = True
         app._start_hotkey_listener = Mock()
         app._warm_model_worker = Mock()
+        app._set_status = Mock()
         app.theme = "tokyo-night"
         app.set_timer = Mock()
 
@@ -189,3 +188,30 @@ class TestOnSettingsSave:
         # Should not write config if directory creation fails
         mock_write_config.assert_not_called()
         status.update.assert_called()
+
+    def test_model_change_deactivates_runtime_before_warming(self, tmp_path: Path) -> None:
+        """Saving a different model closes the active runtime before warming the replacement."""
+        recordings_path = tmp_path / "recordings"
+        markdown_path = tmp_path / "markdown"
+        vad_model_path = tmp_path / "vad"
+        config = Config(
+            recordings_path=recordings_path,
+            markdown_path=markdown_path,
+            vad_model_path=vad_model_path,
+            transcription_model="base",
+        )
+        status = Mock()
+        selector_map = self._build_selector_map(recordings_path, markdown_path, status, vad_model_path)
+        selector_map["#header-model"] = Mock()
+        app = self._build_app(config, selector_map)
+        handler = SettingsHandler(app)
+
+        with (
+            patch("utilityhub_config.get_config_path", return_value=tmp_path / "voicepad.yaml"),
+            patch("utilityhub_config.write_config"),
+            patch("voicepad_core.deactivate_model") as mock_deactivate,
+        ):
+            handler.on_settings_save()
+
+        mock_deactivate.assert_called_once_with()
+        app._warm_model_worker.assert_called_once_with()
