@@ -127,6 +127,9 @@ class ParakeetOnnxDriver:
                 _preload_cuda_libraries(ort)
             session_options = ort.SessionOptions()
             session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+            # ORT writes graph-partition warnings directly to stderr, which corrupts
+            # Textual's display during normal CUDA session initialization.
+            session_options.log_severity_level = 3
             sessions = (
                 _create_ort_session(ort, model.artifact_path / REQUIRED_ARTIFACTS[0], session_options, providers),
                 _create_ort_session(ort, model.artifact_path / REQUIRED_ARTIFACTS[1], session_options, providers),

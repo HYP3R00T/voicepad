@@ -104,6 +104,7 @@ class _BiasDecoder:
 
 class _SessionOptions:
     graph_optimization_level: object | None = None
+    log_severity_level: int | None = None
 
 
 class _GraphOptimizationLevel:
@@ -117,6 +118,7 @@ class _Ort:
     def __init__(self, providers: list[str]) -> None:
         self._providers = providers
         self.calls: list[tuple[Path, list[str]]] = []
+        self.session_options: list[_SessionOptions] = []
         self.sessions: dict[str, _Session] = {}
         self.preloaded = False
 
@@ -139,7 +141,6 @@ class _Ort:
         sess_options: _SessionOptions,
         providers: list[str],
     ) -> _Session:
-        del sess_options
         artifact = Path(path)
         if artifact.name.startswith("encoder"):
             kind = "encoder"
@@ -149,6 +150,7 @@ class _Ort:
             kind = "preprocessor"
         session = _Session(kind, providers)
         self.calls.append((artifact, providers))
+        self.session_options.append(sess_options)
         self.sessions[kind] = session
         return session
 
@@ -254,11 +256,13 @@ class TestParakeetOnnxDriver:
             session.info.precision,
             ort.preloaded,
             [providers for _, providers in ort.calls],
+            {options.log_severity_level for options in ort.session_options},
         ) == (
             "cuda",
             "int8",
             True,
             [["CUDAExecutionProvider", "CPUExecutionProvider"]] * 3,
+            {3},
         )
 
     def test_open_rejects_silent_cuda_provider_fallback(
