@@ -11,11 +11,11 @@ from .errors import (
 from .file import FileSource
 from .microphone import MicrophoneStream
 from .persistence import WavArtifact, write_wav_atomic
-from .types import AudioFormat, RawAudio
+from .types import AudioWindow, RawAudio, WaveformSpec
 
 __all__ = [
+    "AudioWindow",
     "AudioSource",
-    "AudioFormat",
     "RawAudio",
     "AudioError",
     "AudioFileNotFoundError",
@@ -28,4 +28,5 @@ __all__ = [
     "MicrophoneStream",
     "WavArtifact",
     "write_wav_atomic",
+    "WaveformSpec",
 ]
