@@ -1,68 +1,36 @@
-"""Audio capture and transcription engine.
-
-On Windows, ctranslate2 cannot discover CUDA DLLs from site-packages.
-We pre-load them via ctypes.WinDLL so they're found by name in memory.
-"""
-
-import sys
 from pathlib import Path
 
-# Pre-load CUDA DLLs on Windows so ctranslate2 can find them.
-if sys.platform == "win32":
-    import ctypes
-    import os
-    import pathlib
-
-    _cuda_dll_dirs: set[str] = set()
-
-    # Find nvidia DLL directories from sys.path
-    for _path_entry in sys.path:
-        _nvidia_dir = pathlib.Path(_path_entry) / "nvidia"
-        if _nvidia_dir.is_dir():
-            for _dll_file in _nvidia_dir.rglob("*.dll"):
-                _cuda_dll_dirs.add(str(_dll_file.parent))
-            break
-
-    # Register directories and pre-load DLLs for ctranslate2 discovery
-    _loaded = 0
-    for _d in sorted(_cuda_dll_dirs):
-        os.add_dll_directory(_d)
-        os.environ["PATH"] = _d + os.pathsep + os.environ.get("PATH", "")
-
-    # Two passes to handle DLL dependency ordering (cudnn depends on cublas)
-    _dll_files = []
-    for _d in sorted(_cuda_dll_dirs):
-        _dll_files.extend(sorted(pathlib.Path(_d).glob("*.dll")))
-    _remaining = list(_dll_files)
-    for _pass_num in range(2):
-        _still_remaining = []
-        for _dll in _remaining:
-            try:
-                ctypes.WinDLL(str(_dll))
-                _loaded += 1
-            except OSError:
-                _still_remaining.append(_dll)
-        _remaining = _still_remaining
-        if not _remaining:
-            break
-
-from .audio import FileSource, MicrophoneStream
+from .audio import FileSource, MicrophoneStream, WavArtifact, write_wav_atomic
 from .config import VALID_TRANSCRIPTION_MODELS, Config, get_config, get_config_with_metadata
-from .inference import transcribe
+from .inference import (
+    BackendCapabilities,
+    BackendDriver,
+    BackendRegistry,
+    FasterWhisperDriver,
+    InferenceCoordinator,
+    ParakeetOnnxDriver,
+    PreparedModel,
+    RuntimeInfo,
+    RuntimeOptions,
+    SessionManager,
+    TranscriptionContext,
+    TranscriptionRequest,
+    TranscriptionSession,
+    activate_model,
+    close_default_sessions,
+    deactivate_model,
+    get_default_coordinator,
+    model_is_ready,
+    prepare_model,
+    transcribe,
+)
 from .inference.constants import COMPUTE_TYPE, DEFAULT_MODEL, DEVICE, LANGUAGE, SAMPLE_RATE
-from .inference.download import ensure_model_downloaded, model_downloaded
 from .inference.errors import (
     AudioTooLongWarning,
     AudioTooShortError,
     ModelNotFoundError,
     TranscriptionError,
 )
-from .inference.model_manager import _model_cache
-from .inference.model_manager import get as get_model
-from .inference.model_manager import is_loaded as is_model_loaded
-from .inference.model_manager import load as load_model
-from .inference.model_manager import unload as unload_model
-from .inference.model_manager import unload_all as unload_all_models
 from .inference.types import Segment, TranscriptionResult, WordTimestamp
 from .logging_utils import (
     begin_transcription_session,
@@ -105,16 +73,15 @@ def transcribe_file(
     local_agreement: bool | None = None,
     config: Config | None = None,
 ) -> TranscriptionResult:
-    """Transcribe a WAV file using the new architecture.
+    """Transcribe a WAV file through its model-selected backend.
 
-    Blueprint Part 8 implementation. Loads audio via FileSource,
-    preprocesses to 16kHz mono, and transcribes using the inference engine.
+    Audio loading and normalization remain backend-neutral.
 
     Args:
         wav_path: Path to WAV file to transcribe
-        model_name: Whisper model to use (default: 'turbo')
+        model_name: Registered model to use
         device: Inference device ('cuda' or 'cpu')
-        compute_type: CTranslate2 precision string
+        compute_type: Runtime precision string
         language: BCP-47 language code (default: 'en')
         local_agreement: Enable two-pass verification for higher accuracy
 
@@ -126,8 +93,6 @@ def transcribe_file(
         AudioTooShortError: If audio is below minimum duration
         TranscriptionError: If transcription fails
     """
-    from pathlib import Path
-
     resolved_config = config or get_config()
     model_name = model_name if model_name is not None else resolved_config.transcription_model
     device = device if device is not None else resolved_config.transcription_device
@@ -166,6 +131,8 @@ __all__ = [
     # Audio
     "MicrophoneStream",
     "FileSource",
+    "WavArtifact",
+    "write_wav_atomic",
     "AudioPreProcessor",
     "TARGET_SAMPLE_RATE",
     "SAMPLE_RATE",
@@ -187,18 +154,29 @@ __all__ = [
     # Inference
     "transcribe",
     "transcribe_file",
+    "close_default_sessions",
+    "InferenceCoordinator",
+    "activate_model",
+    "deactivate_model",
+    "get_default_coordinator",
+    "model_is_ready",
+    "prepare_model",
+    "BackendRegistry",
+    "SessionManager",
+    "BackendCapabilities",
+    "BackendDriver",
+    "PreparedModel",
+    "RuntimeInfo",
+    "RuntimeOptions",
+    "TranscriptionContext",
+    "TranscriptionRequest",
+    "TranscriptionSession",
+    "FasterWhisperDriver",
+    "ParakeetOnnxDriver",
     "DEVICE",
     "COMPUTE_TYPE",
     "DEFAULT_MODEL",
     "LANGUAGE",
-    "load_model",
-    "unload_model",
-    "unload_all_models",
-    "is_model_loaded",
-    "get_model",
-    "model_downloaded",
-    "ensure_model_downloaded",
-    "_model_cache",
     # Types
     "TranscriptionResult",
     "Segment",

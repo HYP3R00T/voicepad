@@ -1,14 +1,48 @@
 from __future__ import annotations
 
+import importlib
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import numpy as np
 import pytest
+import voicepad_core
 from voicepad_core import transcribe_file
 from voicepad_core.config import Config
 from voicepad_core.preprocessing.types import PreprocessedAudio
+
+
+def test_root_exports_owned_inference_api_only() -> None:
+    """The package exposes the coordinator API without legacy global model caches."""
+    assert all(
+        hasattr(voicepad_core, name)
+        for name in (
+            "InferenceCoordinator",
+            "activate_model",
+            "deactivate_model",
+            "model_is_ready",
+            "prepare_model",
+            "ParakeetOnnxDriver",
+        )
+    )
+    assert not any(
+        hasattr(voicepad_core, name)
+        for name in (
+            "_model_cache",
+            "ensure_model_downloaded",
+            "load_model",
+            "model_downloaded",
+        )
+    )
+
+
+def test_import_does_not_configure_windows_cuda() -> None:
+    """Reloading the package root does not configure native CUDA DLLs."""
+    with patch("voicepad_core.inference.backends.windows_cuda.configure_windows_cuda_dlls") as configure_cuda:
+        importlib.reload(voicepad_core)
+
+    configure_cuda.assert_not_called()
 
 
 def make_config(tmp_path: Path) -> Config:
