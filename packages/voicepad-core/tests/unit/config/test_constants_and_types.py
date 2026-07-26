@@ -34,7 +34,12 @@ def test_registered_models_appear_in_live_model_view() -> None:
 
 
 def test_basic_model_ids_are_curated() -> None:
-    assert list_basic_model_ids() == ("small", "large-v3", "turbo")
+    assert list_basic_model_ids() == (
+        "small",
+        "large-v3",
+        "turbo",
+        "parakeet-tdt-0.6b-v3-int8",
+    )
 
 
 def test_basic_model_options_use_friendly_labels() -> None:

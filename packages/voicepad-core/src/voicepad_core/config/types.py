@@ -45,6 +45,7 @@ class Config(BaseModel):
     local_agreement_mic: bool = Field(default=False)
     local_agreement_file: bool = Field(default=True)
     initial_prompt: str = Field(default=DEFAULT_INITIAL_PROMPT)
+    proper_nouns: tuple[str, ...] = Field(default=())
     text_postprocessing_enabled: bool = Field(default=False)
     no_speech_threshold: float = Field(default=0.6)
     hallucination_silence_threshold: float = Field(default=2.0)
@@ -78,6 +79,13 @@ class Config(BaseModel):
             valid = ", ".join(list_model_ids())
             raise UnknownTranscriptionModelError(f"Unknown transcription model '{v}'. Valid models: {valid}.")
         return v
+
+    @field_validator("proper_nouns")
+    @classmethod
+    def validate_proper_nouns(cls, terms: tuple[str, ...]) -> tuple[str, ...]:
+        if any(not term.strip() for term in terms):
+            raise ValueError("proper_nouns must not contain empty terms")
+        return terms
 
     @field_validator(
         "recordings_path", "markdown_path", "model_cache_path", "vad_model_path", "logs_path", mode="before"

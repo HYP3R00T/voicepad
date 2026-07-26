@@ -32,9 +32,10 @@ class Segment:
         start:          Segment start time in seconds.
         end:            Segment end time in seconds.
         text:           Transcribed text for this segment.
-        avg_logprob:    Average log probability (confidence; typically -inf to 0).
-        no_speech_prob: Probability that segment contains no speech (0.0–1.0).
+        avg_logprob:    Whisper average log probability (typically -inf to 0).
+        no_speech_prob: Whisper no-speech probability (0.0–1.0).
         words:          Per-word timestamps. Empty list when word_timestamps=False.
+        confidence:     Backend-neutral confidence (0.0–1.0), when available.
     """
 
     start: float
@@ -43,6 +44,13 @@ class Segment:
     avg_logprob: float = 0.0
     no_speech_prob: float = 0.0
     words: list[WordTimestamp] = field(default_factory=list)
+    confidence: float | None = None
+
+    def __post_init__(self) -> None:
+        """Validate backend-neutral fields."""
+        if self.confidence is not None and not 0.0 <= self.confidence <= 1.0:
+            msg = "confidence must be between 0.0 and 1.0"
+            raise ValueError(msg)
 
     def duration(self) -> float:
         """Length of this segment in seconds."""
@@ -65,6 +73,13 @@ class TranscriptionResult:
         fallback_to_cpu:       True if CUDA failed and CPU was used instead.
         avg_confidence:        Mean avg_logprob across all segments.
         low_confidence_count:  Number of segments with avg_logprob < -1.0.
+        backend_id:            Backend implementation that produced the result.
+        model_id:              Model identifier reported by the backend.
+        artifact_format:       Model artifact format, such as ``ct2`` or ``gguf``.
+
+    ``device`` and ``compute_type`` describe runtime execution. The optional
+    provenance fields identify which backend and model artifact produced the
+    result without requiring model-family-specific metadata.
     """
 
     text: str
@@ -78,3 +93,6 @@ class TranscriptionResult:
     fallback_to_cpu: bool = False
     avg_confidence: float = 0.0
     low_confidence_count: int = 0
+    backend_id: str | None = None
+    model_id: str | None = None
+    artifact_format: str | None = None

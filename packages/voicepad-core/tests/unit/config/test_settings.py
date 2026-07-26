@@ -18,6 +18,23 @@ def make_config(*args: Any, **kwargs: Any) -> ConfigModel:
 Config = make_config
 
 
+class TestProperNouns:
+    def test_default_proper_nouns_are_empty(self) -> None:
+        """Proper-noun biasing is opt-in."""
+        assert Config().proper_nouns == ()
+
+    def test_proper_nouns_preserve_user_spelling_and_order(self) -> None:
+        """Configured terms reach inference without rewriting their spelling or order."""
+        config = Config(proper_nouns=["VoicePad", "HYP3R00T"])
+
+        assert config.proper_nouns == ("VoicePad", "HYP3R00T")
+
+    def test_blank_proper_noun_is_rejected(self) -> None:
+        """Empty vocabulary entries are rejected before backend translation."""
+        with pytest.raises(ValueError, match="proper_nouns"):
+            Config(proper_nouns=["VoicePad", " "])
+
+
 class TestConfigExpandPaths:
     def test_expand_paths_with_absolute_path_string(self) -> None:
         """When recordings_path is an absolute path string, it becomes a Path object."""

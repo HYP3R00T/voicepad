@@ -6,6 +6,9 @@ import pytest
 from voicepad_core.inference.errors import (
     AudioTooLongWarning,
     AudioTooShortError,
+    BackendLookupError,
+    BackendSessionError,
+    BackendUnavailableError,
     ModelNotFoundError,
     TranscriptionError,
 )
@@ -67,6 +70,9 @@ def test_error_hierarchy() -> None:
         TranscriptionError("Base error"),
         AudioTooShortError("Short audio"),
         ModelNotFoundError("Missing model"),
+        BackendLookupError("Missing backend"),
+        BackendUnavailableError("Unavailable backend"),
+        BackendSessionError("Invalid session"),
     ]
 
     for error in errors:

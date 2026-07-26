@@ -15,3 +15,15 @@ class AudioTooLongWarning(UserWarning):
 
 class ModelNotFoundError(TranscriptionError):
     """Raised when model files are missing and cannot be downloaded."""
+
+
+class BackendLookupError(TranscriptionError):
+    """Raised when a requested inference backend is not registered."""
+
+
+class BackendUnavailableError(TranscriptionError):
+    """Raised when a registered inference backend cannot run."""
+
+
+class BackendSessionError(TranscriptionError):
+    """Raised when an inference backend session cannot be opened or closed safely."""

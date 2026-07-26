@@ -71,6 +71,32 @@ def test_segment_default_values() -> None:
     assert segment.avg_logprob == 0.0
     assert segment.no_speech_prob == 0.0
     assert segment.words == []
+    assert segment.confidence is None
+
+
+def test_segment_accepts_backend_neutral_confidence() -> None:
+    """Segment stores backend-neutral confidence when a backend provides it."""
+    segment = Segment(start=0.0, end=1.0, text="test", confidence=0.85)
+
+    assert segment.confidence == 0.85
+
+
+@pytest.mark.parametrize("confidence", [-0.01, 1.01])
+def test_segment_rejects_confidence_outside_probability_range(
+    confidence: float,
+) -> None:
+    """Segment rejects generic confidence values outside the probability range."""
+    with pytest.raises(ValueError, match="confidence must be between"):
+        Segment(start=0.0, end=1.0, text="test", confidence=confidence)
+
+
+def test_segment_preserves_legacy_positional_constructor() -> None:
+    """Existing positional arguments retain their original field order."""
+    words = [WordTimestamp(word="test", start=0.0, end=1.0)]
+
+    segment = Segment(0.0, 1.0, "test", -0.5, 0.1, words)
+
+    assert segment.words is words
 
 
 def test_segment_duration() -> None:
@@ -149,6 +175,51 @@ def test_transcription_result_default_values() -> None:
     assert result.fallback_to_cpu is False
     assert result.avg_confidence == 0.0
     assert result.low_confidence_count == 0
+    assert result.backend_id is None
+    assert result.model_id is None
+    assert result.artifact_format is None
+
+
+def test_transcription_result_with_provenance() -> None:
+    """TranscriptionResult records the backend and model artifact identity."""
+    result = TranscriptionResult(
+        text="test",
+        segments=[],
+        language="en",
+        language_probability=0.99,
+        duration_s=1.0,
+        latency_ms=100.0,
+        device="cuda",
+        compute_type="int8",
+        backend_id="faster-whisper",
+        model_id="large-v3",
+        artifact_format="ct2",
+    )
+
+    assert (
+        result.backend_id,
+        result.model_id,
+        result.artifact_format,
+    ) == ("faster-whisper", "large-v3", "ct2")
+
+
+def test_transcription_result_preserves_legacy_positional_constructor() -> None:
+    """Existing positional arguments retain their original field order."""
+    result = TranscriptionResult(
+        "test",
+        [],
+        "en",
+        0.99,
+        1.0,
+        100.0,
+        "cuda",
+        "int8",
+        True,
+        -0.3,
+        2,
+    )
+
+    assert result.low_confidence_count == 2
 
 
 def test_transcription_result_with_fallback() -> None:

@@ -1,21 +1,74 @@
 from __future__ import annotations
 
-import json
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
+
+ArchiveFormat = Literal["zip", "tar"]
+
+
+@dataclass(frozen=True, slots=True)
+class HuggingFaceArtifact:
+    """A pinned or floating Hugging Face repository snapshot."""
+
+    repo_id: str
+    revision: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class DirectUrlArtifact:
+    """A file or archive fetched from a direct URL."""
+
+    url: str
+    sha256: str | None = None
+    archive: ArchiveFormat | None = None
+    filename: str | None = None
+    root: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class LocalArtifact:
+    """A model artifact already present on the local filesystem."""
+
+    path: Path
+
+
+ArtifactSource = HuggingFaceArtifact | DirectUrlArtifact | LocalArtifact
+
+_DEFAULT_CTRANSLATE2_FILES = ("model.bin", "tokenizer.json", "config.json")
 
 
 @dataclass(frozen=True, slots=True)
 class ModelSpec:
-    """VoicePad-owned model registry entry."""
+    """VoicePad model identity, runtime binding, and artifact declaration."""
 
     id: str
-    repo_id: str
+    repo_id: str = ""
     revision: str | None = None
     distil: bool = False
     source: str = "official"
     description: str | None = None
+    family: str = "whisper"
+    backend_id: str = "faster-whisper"
+    artifact_format: str = "ctranslate2"
+    quantization: str | None = None
+    artifact_source: ArtifactSource | None = None
+    required_files: tuple[str, ...] = _DEFAULT_CTRANSLATE2_FILES
+
+    def __post_init__(self) -> None:
+        """Translate the legacy repository fields into an artifact source."""
+        if self.artifact_source is None and self.repo_id:
+            object.__setattr__(
+                self,
+                "artifact_source",
+                HuggingFaceArtifact(self.repo_id, self.revision),
+            )
+        elif isinstance(self.artifact_source, HuggingFaceArtifact):
+            if not self.repo_id:
+                object.__setattr__(self, "repo_id", self.artifact_source.repo_id)
+            if self.revision is None:
+                object.__setattr__(self, "revision", self.artifact_source.revision)
 
 
 _BUILTIN_MODELS: tuple[ModelSpec, ...] = (
@@ -38,6 +91,27 @@ _BUILTIN_MODELS: tuple[ModelSpec, ...] = (
     ModelSpec("distil-large-v3.5", "distil-whisper/distil-large-v3.5", distil=True),
     ModelSpec("large-v3-turbo", "mobiuslabsgmbh/faster-whisper-large-v3-turbo"),
     ModelSpec("turbo", "mobiuslabsgmbh/faster-whisper-large-v3-turbo"),
+    ModelSpec(
+        id="parakeet-tdt-0.6b-v3-int8",
+        family="parakeet",
+        backend_id="parakeet-onnx",
+        artifact_format="onnx",
+        quantization="int8",
+        source="Handy-compatible ONNX conversion",
+        description="Multilingual Parakeet TDT 0.6B v3, INT8 ONNX bundle.",
+        artifact_source=DirectUrlArtifact(
+            url="https://blob.handy.computer/parakeet-v3-int8.tar.gz",
+            sha256="43d37191602727524a7d8c6da0eef11c4ba24320f5b4730f1a2497befc2efa77",
+            archive="tar",
+            root="parakeet-tdt-0.6b-v3-int8",
+        ),
+        required_files=(
+            "decoder_joint-model.int8.onnx",
+            "encoder-model.int8.onnx",
+            "nemo128.onnx",
+            "vocab.txt",
+        ),
+    ),
 )
 
 _model_registry: dict[str, ModelSpec] = {spec.id: spec for spec in _BUILTIN_MODELS}
@@ -56,6 +130,11 @@ _MODEL_UI: dict[str, dict[str, str | bool]] = {
     "large-v3": {
         "label": "Highest Accuracy · Large v3",
         "hint": "~1.5 GB · best accuracy · slower · multilingual · ~5 GB VRAM",
+        "basic": True,
+    },
+    "parakeet-tdt-0.6b-v3-int8": {
+        "label": "NVIDIA · Parakeet v3 INT8",
+        "hint": "~480 MB · multilingual · optimized for NVIDIA GPU · proper-noun bias",
         "basic": True,
     },
     "tiny.en": {"label": "Tiny English", "hint": "~40 MB · fastest · English only · CPU"},
@@ -104,8 +183,43 @@ class _ModelIdView:
 def _validate_spec(spec: ModelSpec) -> None:
     if not spec.id.strip():
         raise ValueError("Model id must not be empty.")
-    if not spec.repo_id.strip():
-        raise ValueError(f"Model '{spec.id}' must define a repo_id.")
+    if spec.artifact_source is None:
+        raise ValueError(f"Model '{spec.id}' must define an artifact_source.")
+    if not spec.family.strip():
+        raise ValueError(f"Model '{spec.id}' must define a family.")
+    if not spec.backend_id.strip():
+        raise ValueError(f"Model '{spec.id}' must define a backend_id.")
+    if not spec.artifact_format.strip():
+        raise ValueError(f"Model '{spec.id}' must define an artifact_format.")
+    if not spec.required_files:
+        raise ValueError(f"Model '{spec.id}' must declare required_files.")
+    for required_file in spec.required_files:
+        relative_path = Path(required_file)
+        if not required_file.strip() or relative_path.is_absolute() or ".." in relative_path.parts:
+            raise ValueError(f"Model '{spec.id}' has an invalid required file path: {required_file!r}.")
+
+    artifact_source = spec.artifact_source
+    if isinstance(artifact_source, HuggingFaceArtifact):
+        if not artifact_source.repo_id.strip():
+            raise ValueError(f"Model '{spec.id}' must define a Hugging Face repo_id.")
+        if spec.repo_id and spec.repo_id != artifact_source.repo_id:
+            raise ValueError(f"Model '{spec.id}' has conflicting Hugging Face repository declarations.")
+    elif isinstance(artifact_source, DirectUrlArtifact):
+        if not artifact_source.url.strip():
+            raise ValueError(f"Model '{spec.id}' must define a direct artifact URL.")
+        if artifact_source.archive not in (None, "zip", "tar"):
+            raise ValueError(f"Model '{spec.id}' has an unsupported archive format.")
+        if artifact_source.root is not None:
+            artifact_root = Path(artifact_source.root)
+            if not artifact_source.root.strip() or artifact_root.is_absolute() or ".." in artifact_root.parts:
+                raise ValueError(f"Model '{spec.id}' has an invalid archive root.")
+        if artifact_source.sha256 is not None:
+            digest = artifact_source.sha256.lower()
+            if len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest):
+                raise ValueError(f"Model '{spec.id}' has an invalid SHA-256 digest.")
+    elif isinstance(artifact_source, LocalArtifact):
+        if not str(artifact_source.path):
+            raise ValueError(f"Model '{spec.id}' must define a local artifact path.")
 
 
 def register_model(spec: ModelSpec, *, overwrite: bool = False) -> None:
@@ -188,36 +302,37 @@ def is_distil_model(model_id: str) -> bool:
     return resolve_model_spec(model_id).distil
 
 
-def validate_model_snapshot(snapshot_path: str | Path) -> Path:
-    """Validate that a downloaded snapshot looks compatible with this pipeline."""
+def validate_model_artifact(artifact_path: str | Path, model: ModelSpec | str) -> Path:
+    """Validate an artifact using its catalogue-declared required files."""
+    artifact_dir = Path(artifact_path)
+    if not artifact_dir.is_dir():
+        raise ModelCompatibilityError(f"Model artifact directory not found: {artifact_dir}")
+
+    if isinstance(model, str):
+        model = resolve_model_spec(model)
+    missing = [name for name in model.required_files if not (artifact_dir / name).is_file()]
+    if missing:
+        missing_list = ", ".join(missing)
+        raise ModelCompatibilityError(f"Model artifact is missing required files: {missing_list}")
+    return artifact_dir
+
+
+def validate_model_snapshot(
+    snapshot_path: str | Path,
+    model: ModelSpec | str | None = None,
+) -> Path:
+    """Validate an artifact while preserving the legacy snapshot API."""
+    if model is not None:
+        return validate_model_artifact(snapshot_path, model)
+
     snapshot_dir = Path(snapshot_path)
     if not snapshot_dir.is_dir():
         raise ModelCompatibilityError(f"Model snapshot directory not found: {snapshot_dir}")
 
-    required_files = ("model.bin", "tokenizer.json", "config.json")
-    missing = [name for name in required_files if not (snapshot_dir / name).exists()]
+    missing = [name for name in _DEFAULT_CTRANSLATE2_FILES if not (snapshot_dir / name).is_file()]
     if missing:
         missing_list = ", ".join(missing)
         raise ModelCompatibilityError(f"Model snapshot is missing required files: {missing_list}")
-
-    config_path = snapshot_dir / "config.json"
-    try:
-        config = json.loads(config_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise ModelCompatibilityError(f"Model config is not valid JSON: {config_path}") from exc
-
-    model_type = str(config.get("model_type", "")).strip().lower()
-    if "whisper" in model_type:
-        return snapshot_dir
-
-    whisper_markers = ("alignment_heads", "lang_ids", "suppress_ids", "suppress_ids_begin")
-    if any(marker in config for marker in whisper_markers):
-        return snapshot_dir
-
-    if "whisper" not in model_type:
-        raise ModelCompatibilityError(
-            f"Model config at {config_path} is not Whisper-compatible (model_type={model_type!r})."
-        )
 
     return snapshot_dir
 
@@ -225,6 +340,10 @@ def validate_model_snapshot(snapshot_path: str | Path) -> Path:
 VALID_TRANSCRIPTION_MODELS: _ModelIdView = _ModelIdView()
 
 __all__ = [
+    "ArtifactSource",
+    "DirectUrlArtifact",
+    "HuggingFaceArtifact",
+    "LocalArtifact",
     "ModelCompatibilityError",
     "ModelSpec",
     "VALID_TRANSCRIPTION_MODELS",
@@ -239,5 +358,6 @@ __all__ = [
     "register_model",
     "register_models",
     "resolve_model_spec",
+    "validate_model_artifact",
     "validate_model_snapshot",
 ]
