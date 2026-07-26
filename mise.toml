@@ -3,6 +3,7 @@ git-cliff = "latest"
 prek = "latest"
 python = "3.13"
 rumdl = "latest"
+tombi = "latest"
 uv = "latest"
 
 [settings]
@@ -17,7 +18,7 @@ enter = [
 ]
 
 [env]
-_.file = '.env'       # for sensitive data
+_.file = ".env"  # for sensitive data
 UV_LINK_MODE = "copy"
 
 [tasks.docs]
