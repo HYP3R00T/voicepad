@@ -68,7 +68,7 @@ class StreamingTranscriber:
         beam_size: int | None = None,
         vad_filter: bool | None = None,
         config: Config | None = None,
-        session_manager: RuntimeManager | None = None,
+        runtime_manager: RuntimeManager | None = None,
     ) -> None:
         self._config = config or get_config()
         self._recorder = recorder
@@ -86,7 +86,7 @@ class StreamingTranscriber:
         )
         self._beam_size = beam_size if beam_size is not None else self._config.beam_size
         self._vad_filter = vad_filter if vad_filter is not None else self._config.transcription_vad_filter
-        self._session_manager = session_manager
+        self._runtime_manager = runtime_manager
         self._poll_interval_s = self._config.stream_poll_interval_s
         self._validate_configuration()
         self._stream_context_chars = self._config.stream_context_chars
@@ -300,7 +300,7 @@ class StreamingTranscriber:
                 beam_size=self._beam_size,
                 vad_filter=self._vad_filter,
                 config=self._config.model_copy(update={"text_postprocessing_enabled": False}),
-                session_manager=self._session_manager,
+                runtime_manager=self._runtime_manager,
             )
 
             chunk_latency = (time.perf_counter() - chunk_start_time) * 1000

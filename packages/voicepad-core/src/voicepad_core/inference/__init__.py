@@ -4,14 +4,6 @@ from .backends import (
     ParakeetOnnxDriver,
     ParakeetOnnxSession,
 )
-from .composition import (
-    InferenceCoordinator,
-    activate_model,
-    deactivate_model,
-    get_default_coordinator,
-    model_is_ready,
-    prepare_model,
-)
 from .contracts import (
     BackendCapabilities,
     BackendContract,
@@ -32,17 +24,22 @@ from .errors import (
     BackendUnavailableError,
     TranscriptionError,
 )
-from .runtime import BackendRegistry, RuntimeManager
+from .runtime import (
+    RuntimeManager,
+    activate_model,
+    deactivate_model,
+    get_runtime_manager,
+    model_is_ready,
+    prepare_model,
+)
 from .types import Segment, TranscriptionResult, WordTimestamp
 
 __all__ = [
     "transcribe",
-    "BackendRegistry",
     "RuntimeManager",
-    "InferenceCoordinator",
     "activate_model",
     "deactivate_model",
-    "get_default_coordinator",
+    "get_runtime_manager",
     "model_is_ready",
     "prepare_model",
     "BackendCapabilities",

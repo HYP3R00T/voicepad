@@ -7,14 +7,13 @@ from typing import cast
 
 import numpy as np
 
-from .composition import get_default_coordinator
 from .contracts import BackendCapabilities, RuntimeOptions, TranscriptionContext, TranscriptionRequest
 from .errors import AudioTooShortError, TranscriptionError
-from .runtime import RuntimeManager
+from .runtime import RuntimeManager, get_runtime_manager
 from .types import TranscriptionResult
 from ..audio import RawAudio
 from ..config import Config, get_config
-from ..models import resolve_model_spec
+from ..models import get_model
 from ..postprocessing.hallucination import remove_hallucinations
 from ..postprocessing.normalizer import normalize
 from ..preprocessing import AudioPreProcessor
@@ -41,7 +40,7 @@ def transcribe(
     beam_size: int | None = None,
     vad_filter: bool | None = None,
     config: Config | None = None,
-    session_manager: RuntimeManager | None = None,
+    runtime_manager: RuntimeManager | None = None,
 ) -> TranscriptionResult:
     """Transcribe canonical audio through the backend selected by the model."""
     resolved_config = config or get_config()
@@ -55,15 +54,12 @@ def transcribe(
     started_at = time.perf_counter()
 
     _log_request(resolved_model, resolved_device, resolved_precision)
-    model = resolve_model_spec(resolved_model)
+    model = get_model(resolved_model)
     runtime_options = RuntimeOptions(device=resolved_device, precision=resolved_precision)
-    if session_manager is not None:
-        descriptor = session_manager.describe(model)
-    else:
-        coordinator = get_default_coordinator(resolved_config.model_cache_path)
-        descriptor = coordinator.describe(model)
+    runtime = runtime_manager or get_runtime_manager(resolved_config.model_cache_path)
+    contract = runtime.contract(model)
 
-    prepared_audio = AudioPreProcessor.prepare(audio, descriptor.contract.audio)
+    prepared_audio = AudioPreProcessor.prepare(audio, contract.audio)
     canonical_audio = _trim_trailing_silence(
         prepared_audio.samples,
         rms_threshold=resolved_config.trim_trailing_silence_rms_threshold,
@@ -80,10 +76,7 @@ def transcribe(
             _session_logger.error(message)
         raise AudioTooShortError(message)
 
-    if session_manager is not None:
-        session = session_manager.open(model, runtime_options)
-    else:
-        session = coordinator.activate(model, runtime_options)
+    session = runtime.open(model, runtime_options)
 
     request, applied_options, ignored_options = _build_request(
         audio=canonical_audio,
@@ -96,7 +89,7 @@ def transcribe(
         vad_filter=resolved_vad_filter,
         no_speech_threshold=resolved_config.no_speech_threshold,
         hallucination_silence_threshold=resolved_config.hallucination_silence_threshold,
-        capabilities=descriptor.contract.decoding,
+        capabilities=contract.decoding,
     )
 
     try:
@@ -104,9 +97,7 @@ def transcribe(
     except TranscriptionError:
         raise
     except Exception as exc:
-        raise TranscriptionError(
-            f"Backend '{model.backend_id}' failed to transcribe model '{model.id}': {exc}"
-        ) from exc
+        raise TranscriptionError(f"Backend '{model.backend}' failed to transcribe model '{model.id}': {exc}") from exc
 
     text = result.text
     if resolved_config.text_postprocessing_enabled:
@@ -115,7 +106,7 @@ def transcribe(
             max_repetitions=resolved_config.hallucination_max_repetitions,
         )
         text = normalize(text)
-    output = descriptor.contract.output
+    output = contract.output
     result = replace(
         result,
         text=text,
@@ -137,7 +128,7 @@ def transcribe(
         elapsed_ms,
         result.device,
         result.compute_type,
-        result.backend_id or model.backend_id,
+        result.backend_id or model.backend,
         result.model_id or model.id,
     )
     if _session_logger:
@@ -145,7 +136,7 @@ def transcribe(
             "Transcription completed: duration_s=%.1f latency_ms=%.0f backend=%s model=%s",
             result.duration_s,
             result.latency_ms,
-            result.backend_id or model.backend_id,
+            result.backend_id or model.backend,
             result.model_id or model.id,
         )
     return result

@@ -6,7 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from utilityhub_config import expand_path
 
-from ..models import list_model_ids
+from ..models import MODELS
 
 DEFAULT_INITIAL_PROMPT = "Hello. This is a transcription with proper punctuation, capitalization, and grammar."
 DEFAULT_VAD_MODEL_FILENAME = "silero_vad_v6.onnx"
@@ -74,8 +74,8 @@ class Config(BaseModel):
     @field_validator("transcription_model")
     @classmethod
     def validate_transcription_model(cls, v: str) -> str:
-        if v not in list_model_ids():
-            valid = ", ".join(list_model_ids())
+        if v not in MODELS:
+            valid = ", ".join(MODELS)
             raise UnknownTranscriptionModelError(f"Unknown transcription model '{v}'. Valid models: {valid}.")
         return v
 

@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast
 
 from .windows_cuda import configure_windows_cuda_dlls
-from ..artifacts import prepare_artifact
 from ..constants import COMPUTE_TYPE, CPU_COMPUTE_TYPE, CUDA_ERROR_KEYWORDS, DEVICE
 from ..contracts import (
     BackendCapabilities,
@@ -20,12 +19,9 @@ from ..contracts import (
 from ..errors import TranscriptionError
 from ..types import Segment, TranscriptionResult, WordTimestamp
 from ...audio.types import WaveformSpec
-from ...config import get_config
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
-
-    from ...models import ModelSpec
 
 _CONTRACT = BackendContract(
     audio=WaveformSpec(sample_rate=16_000),
@@ -82,18 +78,11 @@ class _RawModel(Protocol):
 
 
 class FasterWhisperDriver:
-    """Prepare and open CTranslate2 Whisper models through faster-whisper."""
-
-    def __init__(self, cache_dir: Path | None = None) -> None:
-        self._cache_dir = cache_dir
+    """Open CTranslate2 Whisper models through faster-whisper."""
 
     @property
     def id(self) -> str:
         return "faster-whisper"
-
-    @property
-    def capabilities(self) -> BackendCapabilities:
-        return self.contract.decoding
 
     @property
     def contract(self) -> BackendContract:
@@ -105,24 +94,10 @@ class FasterWhisperDriver:
         except Exception:
             return False
 
-    def prepare(self, model: ModelSpec) -> PreparedModel:
-        if model.backend_id != self.id:
-            raise TranscriptionError(f"Model '{model.id}' targets backend '{model.backend_id}', not '{self.id}'.")
-
-        try:
-            artifact_path = prepare_artifact(
-                model,
-                self._cache_dir or get_config().model_cache_path,
-            )
-        except Exception as exc:
-            raise TranscriptionError(f"Could not prepare faster-whisper model '{model.id}': {exc}") from exc
-
-        return PreparedModel(spec=model, artifact_path=artifact_path)
-
     def open(self, model: PreparedModel, options: RuntimeOptions) -> FasterWhisperSession:
-        if model.spec.backend_id != self.id:
+        if model.spec.backend != self.id:
             raise TranscriptionError(
-                f"Model '{model.spec.id}' targets backend '{model.spec.backend_id}', not '{self.id}'."
+                f"Model '{model.spec.id}' targets backend '{model.spec.backend}', not '{self.id}'."
             )
 
         device, precision = _resolve_runtime(options)
@@ -216,14 +191,14 @@ class FasterWhisperSession:
             fallback_to_cpu=self._info.fallback_to_cpu,
             backend_id=self._info.backend_id,
             model_id=self._info.model_id,
-            artifact_format=self._prepared.spec.artifact_format,
+            artifact_format="ctranslate2",
         )
 
     def close(self) -> None:
         self._model = None
 
     def _build_arguments(self, request: TranscriptionRequest) -> dict[str, object]:
-        previous_text = None if self._prepared.spec.distil else request.context.previous_text
+        previous_text = request.context.previous_text if self._prepared.spec.accepts_prompt else None
         hotwords = " ".join(request.context.proper_nouns) or None
         return {
             "language": request.language,

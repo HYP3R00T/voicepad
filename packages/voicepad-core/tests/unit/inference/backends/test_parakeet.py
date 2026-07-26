@@ -14,7 +14,7 @@ from voicepad_core.inference.contracts import (
     TranscriptionRequest,
 )
 from voicepad_core.inference.errors import TranscriptionError
-from voicepad_core.models import HuggingFaceArtifact, LocalArtifact, ModelSpec
+from voicepad_core.models import Model
 
 _FILES = (
     "config.json",
@@ -77,16 +77,15 @@ class _Loader:
 def _spec(
     *,
     backend_id: str = "parakeet-onnx",
-    artifact_source: HuggingFaceArtifact | LocalArtifact | None = None,
-) -> ModelSpec:
-    return ModelSpec(
+) -> Model:
+    return Model(
         id="parakeet-tdt-0.6b-v3",
-        family="parakeet",
-        backend_id=backend_id,
-        artifact_format="onnx",
-        quantization="fp16",
-        artifact_source=artifact_source or HuggingFaceArtifact("ysdede/parakeet-tdt-0.6b-v3-onnx"),
-        required_files=_FILES,
+        repo="ysdede/parakeet-tdt-0.6b-v3-onnx",
+        backend=backend_id,
+        files=_FILES,
+        label="Parakeet",
+        hint="Test model",
+        precision="fp16",
     )
 
 
@@ -98,7 +97,7 @@ def _model_dir(path: Path) -> Path:
 
 def _prepared(path: Path) -> PreparedModel:
     model_dir = _model_dir(path)
-    return PreparedModel(_spec(artifact_source=LocalArtifact(model_dir)), model_dir)
+    return PreparedModel(_spec(), model_dir)
 
 
 def _request(**kwargs: Any) -> TranscriptionRequest:
@@ -126,27 +125,10 @@ class TestParakeetOnnxDriver:
     def test_capabilities_do_not_claim_unimplemented_features(self) -> None:
         driver = ParakeetOnnxDriver()
 
-        assert driver.capabilities.context_biasing is False
-        assert driver.capabilities.word_timestamps is False
-        assert driver.capabilities.translation is False
+        assert driver.contract.decoding.context_biasing is False
+        assert driver.contract.decoding.word_timestamps is False
+        assert driver.contract.decoding.translation is False
         assert driver.contract.audio.peak_normalize is True
-
-    def test_prepare_accepts_declared_onnx_layout(self, tmp_path: Path) -> None:
-        model_dir = _model_dir(tmp_path)
-
-        prepared = ParakeetOnnxDriver(cache_dir=tmp_path / "cache").prepare(
-            _spec(artifact_source=LocalArtifact(model_dir))
-        )
-
-        assert prepared.artifact_path == model_dir
-
-    def test_prepare_rejects_missing_files(self, tmp_path: Path) -> None:
-        with pytest.raises(TranscriptionError, match="missing required files"):
-            ParakeetOnnxDriver(cache_dir=tmp_path / "cache").prepare(_spec(artifact_source=LocalArtifact(tmp_path)))
-
-    def test_prepare_rejects_backend_mismatch(self) -> None:
-        with pytest.raises(TranscriptionError, match="not 'parakeet-onnx'"):
-            ParakeetOnnxDriver().prepare(_spec(backend_id="other"))
 
     def test_open_pins_cuda_and_verifies_cuda_sessions(
         self,

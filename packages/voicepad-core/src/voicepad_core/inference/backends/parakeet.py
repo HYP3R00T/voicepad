@@ -3,13 +3,11 @@ from __future__ import annotations
 import importlib.util
 import logging
 import time
-from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 
 import numpy as np
 
 from .windows_cuda import configure_windows_cuda_dlls
-from ..artifacts import prepare_artifact
 from ..contracts import (
     BackendCapabilities,
     BackendContract,
@@ -22,11 +20,7 @@ from ..contracts import (
 from ..errors import TranscriptionError
 from ..types import Segment, TranscriptionResult
 from ...audio.types import WaveformSpec
-from ...config import get_config
-from ...models import ModelCompatibilityError, validate_model_artifact
-
-if TYPE_CHECKING:
-    from ...models import ModelSpec
+from ...models import ModelCompatibilityError, validate_model
 
 logger = logging.getLogger(__name__)
 
@@ -44,16 +38,9 @@ _CONTRACT = BackendContract(
 class ParakeetOnnxDriver:
     """Run a Parakeet ONNX export exclusively through NVIDIA CUDA."""
 
-    def __init__(self, cache_dir: Path | None = None) -> None:
-        self._cache_dir = cache_dir
-
     @property
     def id(self) -> str:
         return BACKEND_ID
-
-    @property
-    def capabilities(self) -> BackendCapabilities:
-        return self.contract.decoding
 
     @property
     def contract(self) -> BackendContract:
@@ -68,26 +55,17 @@ class ParakeetOnnxDriver:
         except Exception:
             return False
 
-    def prepare(self, model: ModelSpec) -> PreparedModel:
-        if model.backend_id != self.id:
-            raise TranscriptionError(f"Model '{model.id}' targets backend '{model.backend_id}', not '{self.id}'.")
-        try:
-            artifact_path = prepare_artifact(model, self._cache_dir or get_config().model_cache_path)
-        except Exception as exc:
-            raise TranscriptionError(f"Could not prepare Parakeet model '{model.id}': {exc}") from exc
-        return PreparedModel(spec=model, artifact_path=artifact_path)
-
     def open(self, model: PreparedModel, options: RuntimeOptions) -> ParakeetOnnxSession:
-        if model.spec.backend_id != self.id:
+        if model.spec.backend != self.id:
             raise TranscriptionError(
-                f"Model '{model.spec.id}' targets backend '{model.spec.backend_id}', not '{self.id}'."
+                f"Model '{model.spec.id}' targets backend '{model.spec.backend}', not '{self.id}'."
             )
         try:
-            validate_model_artifact(model.artifact_path, model.spec)
+            validate_model(model.artifact_path, model.spec)
         except ModelCompatibilityError as exc:
             raise TranscriptionError(f"Could not open Parakeet model '{model.spec.id}': {exc}") from exc
 
-        _validate_options(options, model.spec.quantization)
+        _validate_options(options, model.spec.precision)
         try:
             configure_windows_cuda_dlls()
             runtime, load_model = _load_runtime()
@@ -106,7 +84,7 @@ class ParakeetOnnxDriver:
             runtime_model = load_model(
                 MODEL_TYPE,
                 model.artifact_path,
-                quantization=model.spec.quantization,
+                quantization=model.spec.precision,
                 sess_options=session_options,
                 providers=[CUDA_PROVIDER],
             )
@@ -120,7 +98,7 @@ class ParakeetOnnxDriver:
             backend_id=self.id,
             model_id=model.spec.id,
             device="cuda",
-            precision=model.spec.quantization or "float32",
+            precision=model.spec.precision or "float32",
         )
         logger.info(
             "Opened Parakeet ONNX runtime: model=%s provider=%s precision=%s",
@@ -178,7 +156,7 @@ class ParakeetOnnxSession:
             fallback_to_cpu=False,
             backend_id=self._info.backend_id,
             model_id=self._info.model_id,
-            artifact_format=self._prepared.spec.artifact_format,
+            artifact_format="onnx",
         )
 
     def close(self) -> None:

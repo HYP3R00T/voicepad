@@ -8,7 +8,7 @@ from textual import on, work
 from textual.binding import Binding
 from textual.screen import ModalScreen
 from textual.widgets import Button, DataTable, ProgressBar, Select, Static
-from voicepad_core import get_model_hint, list_basic_model_options
+from voicepad_core import get_model, model_options
 
 from voicepad.tui.components import VoiceButton
 
@@ -149,13 +149,13 @@ class SetupModal(ModalScreen[tuple[str, int | None]]):
         )
         body.mount(
             Select(
-                options=list_basic_model_options(current_model=self._chosen_model),
+                options=model_options(),
                 value=self._chosen_model,
                 id="wizard-model-select",
                 allow_blank=False,
             )
         )
-        body.mount(Static(get_model_hint(self._chosen_model), id="wizard-model-hint", classes="wizard-hint"))
+        body.mount(Static(get_model(self._chosen_model).hint, id="wizard-model-hint", classes="wizard-hint"))
         body.mount(Static("", id="wizard-download-status", classes="wizard-status"))
         # Indeterminate progress bar — no percentage, just a looping animation
         bar = ProgressBar(id="wizard-progress", show_eta=False, show_percentage=False)
@@ -167,7 +167,7 @@ class SetupModal(ModalScreen[tuple[str, int | None]]):
         if event.value is not Select.BLANK:
             self._chosen_model = str(event.value)
             with contextlib.suppress(Exception):
-                self.query_one("#wizard-model-hint", Static).update(get_model_hint(self._chosen_model))
+                self.query_one("#wizard-model-hint", Static).update(get_model(self._chosen_model).hint)
 
     def _start_download(self) -> None:
         if self._downloading:

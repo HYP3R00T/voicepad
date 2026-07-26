@@ -13,7 +13,7 @@ from ..audio.types import WaveformSpec
 
 if TYPE_CHECKING:
     from .types import TranscriptionResult
-    from ..models import ModelSpec
+    from ..models import Model
 
 DecodingIntent = Literal["transcribe", "translate"]
 OutputProvenance = Literal["unavailable", "native", "derived"]
@@ -147,7 +147,7 @@ class TranscriptionRequest:
 class PreparedModel:
     """A model artifact prepared for a backend to open."""
 
-    spec: ModelSpec
+    spec: Model
     artifact_path: Path
 
 
@@ -171,14 +171,9 @@ class BackendDriver(Protocol):
     def id(self) -> str: ...
 
     @property
-    def capabilities(self) -> BackendCapabilities: ...
-
-    @property
     def contract(self) -> BackendContract: ...
 
     def is_available(self) -> bool: ...
-
-    def prepare(self, model: ModelSpec) -> PreparedModel: ...
 
     def open(self, model: PreparedModel, options: RuntimeOptions) -> TranscriptionSession: ...
 

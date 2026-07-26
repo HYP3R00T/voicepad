@@ -17,7 +17,7 @@ from voicepad_core.inference.contracts import (
     TranscriptionRequest,
 )
 from voicepad_core.inference.errors import TranscriptionError
-from voicepad_core.models import HuggingFaceArtifact, ModelSpec
+from voicepad_core.models import Model
 
 
 @dataclass
@@ -61,13 +61,15 @@ class _Model:
         return self.segments, _Info()
 
 
-def _spec(*, distil: bool = False, backend_id: str = "faster-whisper") -> ModelSpec:
-    return ModelSpec(
+def _spec(*, distil: bool = False, backend_id: str = "faster-whisper") -> Model:
+    return Model(
         id="tiny",
-        artifact_source=HuggingFaceArtifact("owner/tiny"),
-        distil=distil,
-        backend_id=backend_id,
-        artifact_format="ctranslate2",
+        repo="owner/tiny",
+        backend=backend_id,
+        files=("model.bin",),
+        label="Tiny",
+        hint="Test model",
+        accepts_prompt=not distil,
     )
 
 
@@ -121,7 +123,7 @@ def _request(**kwargs: Any) -> TranscriptionRequest:
 class TestFasterWhisperDriver:
     def test_capabilities_are_explicit(self) -> None:
         """The driver advertises every backend feature it implements."""
-        capabilities = FasterWhisperDriver().capabilities
+        capabilities = FasterWhisperDriver().contract.decoding
 
         assert (
             capabilities.streaming,
@@ -130,50 +132,6 @@ class TestFasterWhisperDriver:
             capabilities.translation,
             capabilities.context_biasing,
         ) == (False, True, True, True, True)
-
-    def test_prepare_uses_declared_artifact_and_explicit_cache(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """Preparation delegates the complete model spec to the artifact provider."""
-        cache_dir = Path("model-cache")
-        model = _spec()
-        calls: list[tuple[ModelSpec, Path]] = []
-
-        def prepare_artifact(spec: ModelSpec, cache: Path) -> Path:
-            calls.append((spec, cache))
-            return Path("installed") / spec.id
-
-        monkeypatch.setattr(
-            "voicepad_core.inference.backends.faster_whisper.prepare_artifact",
-            prepare_artifact,
-        )
-
-        prepared = FasterWhisperDriver(cache_dir).prepare(model)
-
-        assert (prepared.artifact_path, calls) == (
-            Path("installed/tiny"),
-            [(model, cache_dir)],
-        )
-
-    def test_prepare_rejects_backend_mismatch(self) -> None:
-        """A driver cannot prepare a model assigned to another backend."""
-        with pytest.raises(TranscriptionError, match="not 'faster-whisper'"):
-            FasterWhisperDriver().prepare(_spec(backend_id="other"))
-
-    def test_prepare_wraps_artifact_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Artifact-provider failures cross the driver boundary as TranscriptionError."""
-
-        def fail(*_: object) -> Path:
-            raise OSError("offline")
-
-        monkeypatch.setattr(
-            "voicepad_core.inference.backends.faster_whisper.prepare_artifact",
-            fail,
-        )
-
-        with pytest.raises(TranscriptionError, match="offline"):
-            FasterWhisperDriver(Path("cache")).prepare(_spec())
 
     def test_open_resolves_auto_runtime_and_loads_artifact(
         self,

@@ -20,14 +20,10 @@ from .logging_utils import (
     log_transcription_start,
 )
 from .models import (
-    ModelSpec,
-    get_model_hint,
-    get_model_label,
-    list_basic_model_ids,
-    list_basic_model_options,
-    list_model_ids,
-    list_model_specs,
-    register_model,
+    MODELS,
+    Model,
+    get_model,
+    model_options,
 )
 from .preprocessing import TARGET_SAMPLE_RATE, AudioPreProcessor
 from .streaming import ChunkResult, StreamingTranscriber
@@ -87,14 +83,10 @@ __all__ = [
     "Config",
     "get_config",
     "get_config_with_metadata",
-    "get_model_hint",
-    "get_model_label",
-    "list_basic_model_ids",
-    "list_basic_model_options",
-    "ModelSpec",
-    "list_model_ids",
-    "list_model_specs",
-    "register_model",
+    "MODELS",
+    "Model",
+    "get_model",
+    "model_options",
     "transcribe",
     "transcribe_file",
     "activate_model",

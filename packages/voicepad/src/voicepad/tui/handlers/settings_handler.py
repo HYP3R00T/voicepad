@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from textual import on
 from textual.widgets import Button, Input, Label, Select, Static
-from voicepad_core import list_basic_model_options
+from voicepad_core import model_options
 from voicepad_core.config import Config as _Config
 
 from voicepad.tui.components.checkbox import VoiceCheckbox
@@ -44,9 +44,9 @@ class SettingsHandler:
         with contextlib.suppress(Exception):
             # Update model dropdown
             sel_model = self.app.query_one("#setting-transcription_model", Select)
-            model_options = list_basic_model_options(current_model=self.app.config.transcription_model)
-            sel_model.set_options(model_options)
-            valid_models = {value for _, value in model_options}
+            options = model_options()
+            sel_model.set_options(options)
+            valid_models = {value for _, value in options}
             sel_model.value = (
                 self.app.config.transcription_model if self.app.config.transcription_model in valid_models else "turbo"
             )
@@ -131,7 +131,7 @@ class SettingsHandler:
 
             if field_name == "transcription_model":
                 current_str = str(current_val) if current_val is not None else "turbo"
-                options = list_basic_model_options(current_model=current_str)
+                options = model_options()
                 valid_models = {value for _, value in options}
                 widget = Select(
                     options=options,

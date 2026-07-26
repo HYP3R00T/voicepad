@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from textual.widgets import Input, Label, Select, Static
-from voicepad_core import list_basic_model_options
+from voicepad_core import model_options
 
 from voicepad.tui.components.checkbox import VoiceCheckbox
 
@@ -65,7 +65,7 @@ def populate_settings_form(
 
         if field_name == "transcription_model":
             current_str = str(current_val) if current_val is not None else "turbo"
-            options = list_basic_model_options(current_model=current_str)
+            options = model_options()
             valid_models = {value for _, value in options}
             widget = Select(
                 options=options,

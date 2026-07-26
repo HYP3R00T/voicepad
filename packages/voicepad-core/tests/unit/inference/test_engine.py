@@ -19,9 +19,9 @@ from voicepad_core.inference.contracts import (
 )
 from voicepad_core.inference.engine import _trim_trailing_silence, transcribe
 from voicepad_core.inference.errors import AudioTooShortError, TranscriptionError
-from voicepad_core.inference.runtime import RuntimeDescriptor, RuntimeManager
+from voicepad_core.inference.runtime import RuntimeManager
 from voicepad_core.inference.types import Segment, TranscriptionResult
-from voicepad_core.models import ModelSpec
+from voicepad_core.models import Model
 
 _WHISPER_CONTRACT = BackendContract(
     WaveformSpec(16_000),
@@ -104,28 +104,14 @@ class _Session:
 class _Manager:
     def __init__(self, session: _Session, contract: BackendContract = _WHISPER_CONTRACT) -> None:
         self.session = session
-        self.contract = contract
-        self.opens: list[tuple[ModelSpec, RuntimeOptions]] = []
+        self._contract = contract
+        self.opens: list[tuple[Model, RuntimeOptions]] = []
 
-    def describe(self, model: ModelSpec) -> RuntimeDescriptor:
-        return RuntimeDescriptor(model, self.contract, True)
+    def contract(self, model: Model) -> BackendContract:
+        return self._contract
 
-    def open(self, model: ModelSpec, options: RuntimeOptions) -> _Session:
+    def open(self, model: Model, options: RuntimeOptions) -> _Session:
         self.opens.append((model, options))
-        return self.session
-
-
-class _Coordinator:
-    def __init__(self, session: _Session, contract: BackendContract = _WHISPER_CONTRACT) -> None:
-        self.session = session
-        self.contract = contract
-        self.activations: list[tuple[ModelSpec, RuntimeOptions]] = []
-
-    def describe(self, model: ModelSpec) -> RuntimeDescriptor:
-        return RuntimeDescriptor(model, self.contract, True)
-
-    def activate(self, model: ModelSpec, options: RuntimeOptions) -> _Session:
-        self.activations.append((model, options))
         return self.session
 
 
@@ -166,7 +152,7 @@ class TestTranscribe:
         result = transcribe(
             RawAudio(np.ones(8_000, dtype=np.float64), sample_rate=8_000, channels=1),
             config=_config(),
-            session_manager=_manager(session),
+            runtime_manager=_manager(session),
         )
 
         request = session.requests[0]
@@ -200,14 +186,14 @@ class TestTranscribe:
             RawAudio(np.ones(16_000, dtype=np.float32), 16_000, 1),
             word_timestamps=True,
             config=config,
-            session_manager=cast(RuntimeManager, manager),
+            runtime_manager=cast(RuntimeManager, manager),
         )
 
         model, options = manager.opens[0]
         request = session.requests[0]
         assert (
             model.id,
-            model.backend_id,
+            model.backend,
             options.device,
             options.precision,
             request.beam_size,
@@ -240,7 +226,7 @@ class TestTranscribe:
             beam_size=1,
             initial_prompt="Override",
             config=_config(),
-            session_manager=cast(RuntimeManager, manager),
+            runtime_manager=cast(RuntimeManager, manager),
         )
 
         _, options = manager.opens[0]
@@ -259,7 +245,7 @@ class TestTranscribe:
             RawAudio(np.ones(16_000, dtype=np.float32), 16_000, 1),
             language="fr",
             config=_config(beam_size=3, transcription_vad_filter=True),
-            session_manager=cast(RuntimeManager, _Manager(_Session(), _PARAKEET_CONTRACT)),
+            runtime_manager=cast(RuntimeManager, _Manager(_Session(), _PARAKEET_CONTRACT)),
         )
 
         assert set(result.ignored_options) >= {
@@ -285,7 +271,7 @@ class TestTranscribe:
             result = transcribe(
                 RawAudio(np.ones(16_000, dtype=np.float32), 16_000, 1),
                 config=_config(text_postprocessing_enabled=True),
-                session_manager=_manager(_Session()),
+                runtime_manager=_manager(_Session()),
             )
 
         assert (result.text, remove.call_count, normalize_text.call_count) == (
@@ -300,7 +286,7 @@ class TestTranscribe:
             result = transcribe(
                 RawAudio(np.ones(16_000, dtype=np.float32), 16_000, 1),
                 config=_config(text_postprocessing_enabled=False),
-                session_manager=_manager(_Session()),
+                runtime_manager=_manager(_Session()),
             )
 
         assert (result.text, normalize_text.call_count) == ("VoicePad", 0)
@@ -313,7 +299,7 @@ class TestTranscribe:
             transcribe(
                 RawAudio(np.ones(16_000, dtype=np.float32), 16_000, 1),
                 config=_config(),
-                session_manager=_manager(_Session(error=error)),
+                runtime_manager=_manager(_Session(error=error)),
             )
 
         assert exc_info.value is error
@@ -324,17 +310,17 @@ class TestTranscribe:
             transcribe(
                 RawAudio(np.ones(16_000, dtype=np.float32), 16_000, 1),
                 config=_config(),
-                session_manager=_manager(_Session(error=RuntimeError("boom"))),
+                runtime_manager=_manager(_Session(error=RuntimeError("boom"))),
             )
 
         assert isinstance(exc_info.value.__cause__, RuntimeError)
 
-    def test_default_coordinator_selects_parakeet_from_model_catalogue(self) -> None:
-        """Without an injected manager, the resolved Parakeet backend reaches the coordinator."""
-        coordinator = _Coordinator(_Session(), _PARAKEET_CONTRACT)
+    def test_default_runtime_selects_parakeet_from_model_catalogue(self) -> None:
+        """Without an injected manager, the selected Parakeet model reaches its backend."""
+        manager = _Manager(_Session(), _PARAKEET_CONTRACT)
         with patch(
-            "voicepad_core.inference.engine.get_default_coordinator",
-            return_value=coordinator,
+            "voicepad_core.inference.engine.get_runtime_manager",
+            return_value=manager,
         ):
             transcribe(
                 RawAudio(np.ones(16_000, dtype=np.float32), 16_000, 1),
@@ -344,5 +330,5 @@ class TestTranscribe:
                 ),
             )
 
-        model, options = coordinator.activations[0]
-        assert (model.backend_id, options.precision) == ("parakeet-onnx", "float16")
+        model, options = manager.opens[0]
+        assert (model.backend, options.precision) == ("parakeet-onnx", "float16")

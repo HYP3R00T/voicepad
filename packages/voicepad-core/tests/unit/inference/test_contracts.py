@@ -22,7 +22,7 @@ from voicepad_core.inference.contracts import (
     TranscriptionSession,
 )
 from voicepad_core.inference.types import TranscriptionResult
-from voicepad_core.models import HuggingFaceArtifact, ModelSpec
+from voicepad_core.models import Model
 
 
 def _result() -> TranscriptionResult:
@@ -65,9 +65,6 @@ class _Driver:
 
     def is_available(self) -> bool:
         return True
-
-    def prepare(self, model: ModelSpec) -> PreparedModel:
-        return PreparedModel(model, Path("model.bin"))
 
     def open(self, model: PreparedModel, options: RuntimeOptions) -> TranscriptionSession:
         return _Session()
@@ -222,7 +219,7 @@ class TestTranscriptionRequest:
 class TestPreparedModel:
     def test_prepared_model_retains_registry_identity(self) -> None:
         """Prepared artifacts remain tied to their model registry entry."""
-        spec = ModelSpec("tiny", HuggingFaceArtifact("owner/tiny"))
+        spec = Model("tiny", "owner/tiny", "test", ("model.bin",), "Tiny", "Test")
 
         prepared = PreparedModel(spec, Path("model.bin"))
 
