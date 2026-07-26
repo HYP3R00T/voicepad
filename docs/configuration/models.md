@@ -28,7 +28,7 @@ The default model is **turbo**, an optimized version of Whisper large-v3. It is 
 | NVIDIA GPU, less than 4 GB VRAM | `small` |
 | CPU only | `small` |
 
-`parakeet-tdt-0.6b-v3` uses a pinned FP16 conversion derived from [istupakov/parakeet-tdt-0.6b-v3-onnx](https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx). It runs through ONNX Runtime and requires CUDA for its encoder and decoder. ONNX Runtime may keep small shape operations on CPU, but VoicePad rejects silent whole-model CPU fallback.
+`parakeet-tdt-0.6b-v3` uses a pinned FP16 ONNX snapshot. It runs through ONNX Runtime and requires CUDA for its encoder and decoder. ONNX Runtime may keep small shape operations on CPU, but VoicePad rejects silent whole-model CPU fallback.
 
 ## Changing the Model
 

@@ -38,7 +38,7 @@ App starts
 
 4. **Model catalogue**
    `models.py`
-   See how a model name selects a model family and runtime.
+   See the small, fixed catalogue that binds each model to one backend.
 
 5. **Backend boundary**
    `inference/contracts.py`, `inference/types.py`
@@ -49,8 +49,8 @@ App starts
    Convert source audio into the waveform required by a backend.
 
 7. **Runtime ownership**
-   `inference/runtime.py`, `inference/composition.py`
-   Load, retain, select, and release a model runtime.
+   `inference/runtime.py`
+   Download, select, retain, and release one model runtime.
 
 8. **Backend implementations**
    `inference/backends/faster_whisper.py`, `inference/backends/parakeet.py`

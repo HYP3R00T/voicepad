@@ -10,7 +10,7 @@ This document records where model-related parameters belong.
 | How should the model runtime open? | `RuntimeOptions` | Device, precision, CPU fallback |
 | What should this inference call do? | `TranscriptionRequest` | Language, beam size, timestamps, context |
 | Which features can the backend perform? | `BackendCapabilities` | Translation, biasing, beam search, VAD |
-| What model artifact should be loaded? | `ModelSpec` | Source, format, quantization, backend |
+| What model artifact should be loaded? | `Model` | Hugging Face repository, files, backend, precision |
 | How does one runtime implement a feature? | Backend implementation | ONNX providers, decoder state, native argument names |
 
 `WaveformSpec` deliberately describes only waveform transformations.
