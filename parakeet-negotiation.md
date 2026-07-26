@@ -19,17 +19,18 @@ This file records our current agreement.
 - VoicePad owns VAD, chunking, overlap, and cleanup.
 - VoicePad owns model selection and runtime lifecycle.
 - VoicePad owns request, result, and capability contracts.
-- VoicePad owns Parakeet decoding and proper-noun bias.
-- Native runtimes only execute model graphs.
+- Backend libraries own model decoding.
 
 ## Chosen Parakeet Path
 
-- Model: [NVIDIA Parakeet TDT 0.6B v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3)
-- Artifact: [Handy-compatible INT8 ONNX bundle](https://blob.handy.computer/parakeet-v3-int8.tar.gz)
-- Runtime: ONNX Runtime with CUDA.
-- Fallback: ONNX Runtime CPU provider.
+- Base model: [NVIDIA Parakeet TDT 0.6B v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3)
+- Artifact: pinned FP16 ONNX conversion derived from [istupakov's export](https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx).
+- Runtime: ONNX Runtime CUDA through `onnx-asr`.
+- Precision: FP16.
+- Encoder and decoder must activate CUDA.
+- Small ONNX shape operations may use CPU.
+- Whole-model CPU fallback is rejected.
 - Input: mono, float32, 16 kHz audio.
-- Bundle: encoder, decoder, preprocessor, and vocabulary.
 
 ## Architecture
 
@@ -45,18 +46,16 @@ This file records our current agreement.
 
 - Proper nouns enter a semantic context object.
 - Faster Whisper receives hotwords.
-- Parakeet receives decoder-logit bias.
+- Parakeet context bias is not implemented.
 - Completed text is never rewritten.
 
 ## Validation
 
-- Bundle checksum verified.
-- CUDA provider verified with CPU fallback disabled.
-- Test audio: 24.21 seconds.
-- Load time: 4.34 seconds.
-- Inference time: 2.47 seconds.
-- Real-time factor: 0.10.
-- Measured GPU memory increase: 714 MiB.
+- Unit tests verify CUDA-only provider selection.
+- RTX 3050 resident GPU use: 2,505 MiB total.
+- GPU memory left after load: 1,458 MiB.
+- Test audio: 3.72 seconds.
+- Inference time: 1.44 seconds.
 - Fixture transcript was correct.
 - Compare against the current Faster Whisper baseline.
 

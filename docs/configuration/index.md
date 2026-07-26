@@ -77,7 +77,7 @@ local_agreement_file: true
     The hotkey works system-wide on Windows, allowing you to start/stop recording from any application.
 
 !!! note "Settings visibility"
-    Not all settings are shown in the Settings tab interface. Advanced runtime tuning such as inference thresholds, VAD behavior, overlap deduplication, text post-processing, final-chunk speech gating, model download locations, and the full advanced model list can be changed by editing the YAML file directly.
+    Not all settings are shown in the Settings tab interface. Advanced runtime tuning such as inference thresholds, VAD behavior, overlap deduplication, text post-processing, final-chunk speech gating, and model download locations can be changed by editing the YAML file directly.
 
 ## Notes on Advanced Settings
 

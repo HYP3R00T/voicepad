@@ -23,7 +23,8 @@ App starts
 ## Reading order
 
 1. **Audio vocabulary**
-   `audio/types.py` and [Core contract boundaries](voicepad-core-contracts.md)
+   `audio/types.py`, [Audio lifecycle](voicepad-core-audio-lifecycle.md), and
+   [Core contract boundaries](voicepad-core-contracts.md)
    Learn the difference between captured audio and backend requirements.
 
 2. **Audio capture and storage**
@@ -77,9 +78,9 @@ App starts
 
 ## Progress
 
-- [ ] Audio vocabulary — current
-- [ ] Audio capture and storage
-- [ ] Configuration
+- [x] Audio vocabulary
+- [x] Audio capture and storage
+- [ ] Configuration — current
 - [ ] Model catalogue
 - [ ] Backend boundary
 - [ ] Preprocessing

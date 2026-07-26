@@ -18,6 +18,12 @@ nav = [
     { "Output Paths" = "configuration/output-paths.md" },
     { "GPU Acceleration" = "configuration/gpu.md" },
   ] },
+  { Architecture = [
+    { "Audio Lifecycle" = "voicepad-core-audio-lifecycle.md" },
+    { "Core Contracts" = "voicepad-core-contracts.md" },
+    { "Live Recording" = "voicepad-core-streaming-audio.md" },
+    { "Learning Map" = "voicepad-core-learning-map.md" },
+  ] },
 ]
 
 [project.theme]

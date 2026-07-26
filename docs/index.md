@@ -42,9 +42,9 @@ Text appears while you speak, so you can see whether the recording is going in t
 
 Every session is stored as a WAV file plus a markdown transcript, which makes the output easy to archive, search, edit, and re-use.
 
-### Curated Defaults, Advanced Control
+### Curated Model Choices
 
-The interface shows a short, approachable list of recommended models. If you want more control, you can switch to advanced model IDs and lower-level runtime settings directly in `voicepad.yaml`.
+The interface offers four models with distinct purposes: the default, a lightweight option, an English-focused option, and an alternate NVIDIA backend.
 
 ### Re-Transcription
 
