@@ -3,19 +3,19 @@ name = "voicepad"
 version = "0.2.1"
 description = "Command-line interface for voice recording and GPU-accelerated transcription."
 readme = "README.md"
-authors = [{ name = "Rajesh Das", email = "rajesh@hyperoot.dev" }]
 requires-python = ">=3.13"
 license = "MIT"
+authors = [{ name = "Rajesh Das", email = "hyperoot.tech@proton.me" }]
 keywords = [
-  "cli",
-  "voice",
   "audio",
-  "transcription",
-  "recording",
-  "speech-to-text",
-  "whisper",
+  "cli",
   "command-line",
   "gpu-acceleration",
+  "recording",
+  "speech-to-text",
+  "transcription",
+  "voice",
+  "whisper",
 ]
 classifiers = [
   "Development Status :: 3 - Alpha",
@@ -25,27 +25,27 @@ classifiers = [
   "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.13",
   "Topic :: Multimedia :: Sound/Audio :: Capture/Recording",
   "Topic :: Multimedia :: Sound/Audio :: Speech",
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
   "Typing :: Typed",
 ]
 dependencies = [
-  "voicepad-core>=0.2.1",
-  "typer>=0.23.1",
+  "keyboard>=0.13.5",
+  "pyperclip>=1.9.0",
   "rich>=13.0.0",
   "textual>=8.2.4",
-  "pyperclip>=1.9.0",
-  "keyboard>=0.13.5",
+  "typer>=0.23.1",
+  "voicepad-core>=0.2.1",
 ]
 
 [project.urls]
-HomePage = "https://hyp3r00t.github.io/voicepad/"
-Repository = "https://github.com/HYP3R00T/voicepad"
-Issues = "https://github.com/HYP3R00T/voicepad/issues"
 Documentation = "https://hyp3r00t.github.io/voicepad/"
+HomePage = "https://hyp3r00t.github.io/voicepad/"
+Issues = "https://github.com/HYP3R00T/voicepad/issues"
+Repository = "https://github.com/HYP3R00T/voicepad"
 
 [project.scripts]
 voicepad = "voicepad:main"

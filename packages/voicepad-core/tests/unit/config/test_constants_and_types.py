@@ -39,23 +39,29 @@ def test_registered_models_appear_in_catalogue() -> None:
 
 def test_basic_model_ids_are_curated() -> None:
     assert list_basic_model_ids() == (
-        "small",
-        "large-v3",
         "turbo",
-        "parakeet-tdt-0.6b-v3-int8",
+        "small",
+        "distil-large-v3.5",
+        "parakeet-tdt-0.6b-v3",
     )
 
 
 def test_basic_model_options_use_friendly_labels() -> None:
     options = dict(list_basic_model_options())
     assert options["Recommended · Turbo"] == "turbo"
-    assert options["Faster · Small"] == "small"
-    assert options["Highest Accuracy · Large v3"] == "large-v3"
+    assert options["Lightweight · Small"] == "small"
+    assert options["English · Distil Large v3.5"] == "distil-large-v3.5"
 
 
 def test_basic_model_options_preserve_current_advanced_model() -> None:
-    options = dict(list_basic_model_options(current_model="base.en"))
-    assert options["Current Advanced · base.en"] == "base.en"
+    register_model(
+        ModelSpec("community-advanced", HuggingFaceArtifact("owner/community-advanced")),
+        overwrite=True,
+    )
+
+    options = dict(list_basic_model_options(current_model="community-advanced"))
+
+    assert options["Current Advanced · community-advanced"] == "community-advanced"
 
 
 def test_model_ui_helpers_return_label_and_hint() -> None:

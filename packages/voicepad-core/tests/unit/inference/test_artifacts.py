@@ -151,6 +151,35 @@ class TestPrepareArtifact:
 
         assert seen == [source]
 
+    def test_hugging_face_download_limits_snapshot_to_declared_files(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A model can exclude unrelated formats from a Hugging Face snapshot."""
+        calls: list[dict[str, object]] = []
+        source = HuggingFaceArtifact(
+            "nvidia/parakeet",
+            "commit",
+            allow_patterns=("model.safetensors", "config.json"),
+        )
+
+        monkeypatch.setattr(
+            "huggingface_hub.snapshot_download",
+            lambda **kwargs: calls.append(kwargs),
+        )
+
+        artifacts._download_hugging_face(source, tmp_path)
+
+        assert calls == [
+            {
+                "repo_id": "nvidia/parakeet",
+                "revision": "commit",
+                "local_dir": str(tmp_path),
+                "allow_patterns": ["model.safetensors", "config.json"],
+            }
+        ]
+
     def test_cached_artifact_skips_provider(
         self,
         tmp_path: Path,

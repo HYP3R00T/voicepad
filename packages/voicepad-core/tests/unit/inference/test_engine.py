@@ -57,7 +57,7 @@ def _config(**updates: object) -> Config:
         recordings_path=Path("data/recordings"),
         markdown_path=Path("data/markdown"),
         model_cache_path=Path("data/models"),
-        transcription_model="tiny",
+        transcription_model="small",
         transcription_device="cpu",
         transcription_compute_type="int8",
     ).model_copy(update=updates)
@@ -216,7 +216,7 @@ class TestTranscribe:
             request.context.proper_nouns,
             request.context.previous_text,
         ) == (
-            "tiny",
+            "small",
             "faster-whisper",
             "cpu",
             "int8",
@@ -339,10 +339,10 @@ class TestTranscribe:
             transcribe(
                 RawAudio(np.ones(16_000, dtype=np.float32), 16_000, 1),
                 config=_config(
-                    transcription_model="parakeet-tdt-0.6b-v3-int8",
-                    transcription_compute_type="int8",
+                    transcription_model="parakeet-tdt-0.6b-v3",
+                    transcription_compute_type="float16",
                 ),
             )
 
         model, options = coordinator.activations[0]
-        assert (model.backend_id, options.precision) == ("parakeet-onnx", "int8")
+        assert (model.backend_id, options.precision) == ("parakeet-onnx", "float16")

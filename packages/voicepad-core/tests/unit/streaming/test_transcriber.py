@@ -106,7 +106,7 @@ def make_config() -> Config:
     return Config(
         recordings_path=Path("data/recordings"),
         markdown_path=Path("data/markdown"),
-        transcription_model="base",
+        transcription_model="small",
         transcription_device="cpu",
         transcription_compute_type="int8",
         beam_size=3,
@@ -157,7 +157,7 @@ def test_init_uses_config_defaults(mock_get_config: Mock) -> None:
     mock_get_config.return_value = config
     streamer = StreamingTranscriber(_FakeRecorder(), lambda chunk: None, lambda err: None)
 
-    assert streamer._model_name == "base"
+    assert streamer._model_name == "small"
     assert streamer._device == "cpu"
     assert streamer._compute_type == "int8"
     assert streamer._min_chunk_s == 12.0

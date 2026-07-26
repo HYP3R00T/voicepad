@@ -13,6 +13,7 @@ class HuggingFaceArtifact:
 
     repo_id: str
     revision: str | None = None
+    allow_patterns: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,45 +58,32 @@ def _whisper(model_id: str, repo_id: str, *, distil: bool = False) -> ModelSpec:
     return ModelSpec(model_id, HuggingFaceArtifact(repo_id), distil=distil)
 
 
+_PARAKEET_FILES = (
+    "config.json",
+    "decoder_joint-model.fp16.onnx",
+    "encoder-model.fp16.onnx",
+    "nemo128.onnx",
+    "vocab.txt",
+)
+
+
 _BUILTIN_MODELS: tuple[ModelSpec, ...] = (
-    _whisper("tiny.en", "Systran/faster-whisper-tiny.en"),
-    _whisper("tiny", "Systran/faster-whisper-tiny"),
-    _whisper("base.en", "Systran/faster-whisper-base.en"),
-    _whisper("base", "Systran/faster-whisper-base"),
-    _whisper("small.en", "Systran/faster-whisper-small.en"),
-    _whisper("small", "Systran/faster-whisper-small"),
-    _whisper("medium.en", "Systran/faster-whisper-medium.en"),
-    _whisper("medium", "Systran/faster-whisper-medium"),
-    _whisper("large-v1", "Systran/faster-whisper-large-v1"),
-    _whisper("large-v2", "Systran/faster-whisper-large-v2"),
-    _whisper("large-v3", "Systran/faster-whisper-large-v3"),
-    _whisper("large", "Systran/faster-whisper-large-v3"),
-    _whisper("distil-small.en", "distil-whisper/distil-small.en", distil=True),
-    _whisper("distil-medium.en", "distil-whisper/distil-medium.en", distil=True),
-    _whisper("distil-large-v2", "distil-whisper/distil-large-v2", distil=True),
-    _whisper("distil-large-v3", "distil-whisper/distil-large-v3", distil=True),
-    _whisper("distil-large-v3.5", "distil-whisper/distil-large-v3.5", distil=True),
-    _whisper("large-v3-turbo", "mobiuslabsgmbh/faster-whisper-large-v3-turbo"),
     _whisper("turbo", "mobiuslabsgmbh/faster-whisper-large-v3-turbo"),
+    _whisper("small", "Systran/faster-whisper-small"),
+    _whisper("distil-large-v3.5", "distil-whisper/distil-large-v3.5-ct2", distil=True),
     ModelSpec(
-        "parakeet-tdt-0.6b-v3-int8",
-        DirectUrlArtifact(
-            url="https://blob.handy.computer/parakeet-v3-int8.tar.gz",
-            sha256="43d37191602727524a7d8c6da0eef11c4ba24320f5b4730f1a2497befc2efa77",
-            archive="tar",
-            root="parakeet-tdt-0.6b-v3-int8",
+        "parakeet-tdt-0.6b-v3",
+        HuggingFaceArtifact(
+            "ysdede/parakeet-tdt-0.6b-v3-onnx",
+            revision="f88260fa0777fe0868dda6df85d1a98f012a4a7a",
+            allow_patterns=_PARAKEET_FILES,
         ),
         family="parakeet",
         backend_id="parakeet-onnx",
         artifact_format="onnx",
-        quantization="int8",
-        description="Multilingual Parakeet TDT 0.6B v3, INT8 ONNX bundle.",
-        required_files=(
-            "decoder_joint-model.int8.onnx",
-            "encoder-model.int8.onnx",
-            "nemo128.onnx",
-            "vocab.txt",
-        ),
+        quantization="fp16",
+        description="FP16 ONNX conversion of NVIDIA Parakeet TDT 0.6B v3.",
+        required_files=_PARAKEET_FILES,
     ),
 )
 
@@ -108,36 +96,20 @@ _MODEL_UI: dict[str, dict[str, str | bool]] = {
         "basic": True,
     },
     "small": {
-        "label": "Faster · Small",
+        "label": "Lightweight · Small",
         "hint": "~250 MB · lighter on weaker hardware · good accuracy · multilingual · ~1 GB VRAM",
         "basic": True,
     },
-    "large-v3": {
-        "label": "Highest Accuracy · Large v3",
-        "hint": "~1.5 GB · best accuracy · slower · multilingual · ~5 GB VRAM",
+    "distil-large-v3.5": {
+        "label": "English · Distil Large v3.5",
+        "hint": "~760 MB · fast · English only · ~3 GB VRAM",
         "basic": True,
     },
-    "parakeet-tdt-0.6b-v3-int8": {
-        "label": "NVIDIA · Parakeet v3 INT8",
-        "hint": "~480 MB · multilingual · optimized for NVIDIA GPU · proper-noun bias",
+    "parakeet-tdt-0.6b-v3": {
+        "label": "NVIDIA · Parakeet v3",
+        "hint": "~1.3 GB · ONNX FP16 · multilingual · NVIDIA CUDA required",
         "basic": True,
     },
-    "tiny.en": {"label": "Tiny English", "hint": "~40 MB · fastest · English only · CPU"},
-    "tiny": {"label": "Tiny", "hint": "~40 MB · fastest · multilingual · CPU"},
-    "base.en": {"label": "Base English", "hint": "~75 MB · very fast · English only · CPU"},
-    "base": {"label": "Base", "hint": "~75 MB · very fast · multilingual · CPU"},
-    "small.en": {"label": "Small English", "hint": "~250 MB · fast · English only · ~1 GB VRAM"},
-    "medium.en": {"label": "Medium English", "hint": "~770 MB · moderate · English only · ~2 GB VRAM"},
-    "medium": {"label": "Medium", "hint": "~770 MB · moderate · multilingual · ~2 GB VRAM"},
-    "large-v1": {"label": "Large v1", "hint": "~1.5 GB · slow · multilingual · ~5 GB VRAM"},
-    "large-v2": {"label": "Large v2", "hint": "~1.5 GB · slow · multilingual · ~5 GB VRAM"},
-    "large": {"label": "Large", "hint": "~1.5 GB · slow · multilingual · ~5 GB VRAM"},
-    "large-v3-turbo": {"label": "Turbo Alias", "hint": "~800 MB · same download as turbo"},
-    "distil-small.en": {"label": "Distil Small English", "hint": "~135 MB · fast · English only · ~1 GB VRAM"},
-    "distil-medium.en": {"label": "Distil Medium English", "hint": "~395 MB · moderate · English only · ~2 GB VRAM"},
-    "distil-large-v2": {"label": "Distil Large v2", "hint": "~760 MB · fast · English only · ~3 GB VRAM"},
-    "distil-large-v3": {"label": "Distil Large v3", "hint": "~760 MB · fast · English only · ~3 GB VRAM"},
-    "distil-large-v3.5": {"label": "Distil Large v3.5", "hint": "~760 MB · fast · English only · ~3 GB VRAM"},
 }
 
 
@@ -165,6 +137,10 @@ def _validate_spec(spec: ModelSpec) -> None:
     if isinstance(artifact_source, HuggingFaceArtifact):
         if not artifact_source.repo_id.strip():
             raise ValueError(f"Model '{spec.id}' must define a Hugging Face repo_id.")
+        if artifact_source.allow_patterns is not None and (
+            not artifact_source.allow_patterns or any(not pattern.strip() for pattern in artifact_source.allow_patterns)
+        ):
+            raise ValueError(f"Model '{spec.id}' has invalid Hugging Face allow_patterns.")
     elif isinstance(artifact_source, DirectUrlArtifact):
         if not artifact_source.url.strip():
             raise ValueError(f"Model '{spec.id}' must define a direct artifact URL.")

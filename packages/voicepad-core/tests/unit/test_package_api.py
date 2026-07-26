@@ -48,7 +48,7 @@ def make_config(tmp_path: Path) -> Config:
     return Config(
         recordings_path=tmp_path / "recordings",
         markdown_path=tmp_path / "markdown",
-        transcription_model="base",
+        transcription_model="small",
         transcription_device="cpu",
         transcription_compute_type="int8",
         language="es",
@@ -76,13 +76,13 @@ def test_transcribe_file_uses_config_defaults(tmp_path: Path) -> None:
     mock_source.assert_called_once_with(wav_path)
     mock_transcribe.assert_called_once_with(
         raw_audio,
-        model_name="base",
+        model_name="small",
         device="cpu",
         compute_type="int8",
         language="es",
         config=config,
     )
-    mock_agreement.assert_called_once_with(raw_audio, result, "base", "cpu", "int8", "es")
+    mock_agreement.assert_called_once_with(raw_audio, result, "small", "cpu", "int8", "es")
     assert returned is result
 
 

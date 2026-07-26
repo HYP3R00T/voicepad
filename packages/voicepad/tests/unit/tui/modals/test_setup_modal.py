@@ -210,7 +210,12 @@ class TestSetupModal:
 
             model_select = modal.query_one("#wizard-model-select", Select)
             option_values = [opt[1] for opt in model_select._options]
-        assert option_values == ["small", "large-v3", "turbo", "parakeet-tdt-0.6b-v3-int8"]
+        assert option_values == [
+            "turbo",
+            "small",
+            "distil-large-v3.5",
+            "parakeet-tdt-0.6b-v3",
+        ]
 
     async def test_step_1_has_download_status(self) -> None:
         """Step 1 has download status display."""
@@ -409,7 +414,7 @@ class TestSetupModal:
 
     async def test_different_initial_models(self) -> None:
         """Modal correctly initializes with different models."""
-        test_models = ["tiny", "base", "small", "turbo"]
+        test_models = ["turbo", "small", "distil-large-v3.5", "parakeet-tdt-0.6b-v3"]
 
         for model in test_models:
             config = create_mock_config()

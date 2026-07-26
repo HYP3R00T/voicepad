@@ -3,20 +3,20 @@ name = "voicepad-core"
 version = "0.2.1"
 description = "Core audio processing for Voicepad."
 readme = "README.md"
-authors = [{ name = "Rajesh Das", email = "rajesh@hyperoot.dev" }]
 requires-python = ">=3.13"
 license = "MIT"
+authors = [{ name = "Rajesh Das", email = "hyperoot.tech@proton.me" }]
 keywords = [
   "audio",
+  "audio-processing",
+  "faster-whisper",
+  "gpu-acceleration",
+  "recording",
+  "speech-recognition",
+  "speech-to-text",
   "transcription",
   "voice",
   "whisper",
-  "speech-to-text",
-  "recording",
-  "faster-whisper",
-  "gpu-acceleration",
-  "speech-recognition",
-  "audio-processing",
 ]
 
 classifiers = [
@@ -26,8 +26,8 @@ classifiers = [
   "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.13",
   "Topic :: Multimedia :: Sound/Audio :: Capture/Recording",
   "Topic :: Multimedia :: Sound/Audio :: Speech",
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
@@ -36,10 +36,11 @@ classifiers = [
 
 dependencies = [
   "faster-whisper>=1.2.1",
+  "librosa>=0.11.0,<0.12.0",
   "nvidia-cublas-cu12>=12.0.0",
   "nvidia-cudnn-cu12>=9.0.0",
+  "onnx-asr[hub]>=0.11.0,<0.12.0",
   "onnxruntime-gpu[cuda,cudnn]>=1.26.0,<1.27.0; sys_platform == 'win32' and platform_machine == 'AMD64'",
-  "onnxruntime>=1.26.0,<1.27.0; sys_platform != 'win32' or platform_machine != 'AMD64'",
   "pydantic>=2.0.0",
   "scipy>=1.17.0",
   "sounddevice>=0.5.5",
@@ -49,10 +50,10 @@ dependencies = [
 ]
 
 [project.urls]
-HomePage = "https://hyp3r00t.github.io/voicepad/"
-Repository = "https://github.com/HYP3R00T/voicepad"
-Issues = "https://github.com/HYP3R00T/voicepad/issues"
 Documentation = "https://hyp3r00t.github.io/voicepad/"
+HomePage = "https://hyp3r00t.github.io/voicepad/"
+Issues = "https://github.com/HYP3R00T/voicepad/issues"
+Repository = "https://github.com/HYP3R00T/voicepad"
 
 [build-system]
 requires = ["uv_build>=0.11.8,<0.12"]

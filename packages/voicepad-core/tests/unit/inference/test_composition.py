@@ -140,11 +140,11 @@ class TestInferenceCoordinator:
         coordinator = InferenceCoordinator(tmp_path, drivers=(driver,))
 
         session = coordinator.activate(
-            "tiny",
+            "small",
             RuntimeOptions(device="cpu", precision="int8"),
         )
 
-        assert session.info == RuntimeInfo("faster-whisper", "tiny", "cpu", "int8")
+        assert session.info == RuntimeInfo("faster-whisper", "small", "cpu", "int8")
 
     def test_activate_replaces_the_only_resident_runtime(self, tmp_path: Path) -> None:
         """Activating another model closes the old session before exposing the new one."""
@@ -251,9 +251,9 @@ class TestDefaultComposition:
             lambda: coordinator,
         )
 
-        info = activate_model("tiny", device="cpu", precision="int8")
+        info = activate_model("small", device="cpu", precision="int8")
 
-        assert info == RuntimeInfo("faster-whisper", "tiny", "cpu", "int8")
+        assert info == RuntimeInfo("faster-whisper", "small", "cpu", "int8")
 
     def test_deactivate_model_discards_the_process_runtime(
         self,
@@ -263,7 +263,7 @@ class TestDefaultComposition:
         """Public deactivation closes the active session and clears the singleton."""
         driver = _Driver("faster-whisper")
         coordinator = InferenceCoordinator(tmp_path, drivers=(driver,))
-        coordinator.activate("tiny")
+        coordinator.activate("small")
         monkeypatch.setattr(composition, "_default_coordinator", coordinator)
 
         deactivate_model()

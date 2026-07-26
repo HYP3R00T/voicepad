@@ -8,6 +8,7 @@ import pytest
 from textual.app import App
 from textual.widgets import Checkbox, Input, Label, Select, Static
 from voicepad.tui.screens.settings_helpers import populate_settings_form
+from voicepad_core.models import HuggingFaceArtifact, ModelSpec, register_model
 
 # Patch target for _get_input_devices (imported inside populate_settings_form)
 PATCH_TARGET = "voicepad.cli.config._get_input_devices"
@@ -142,10 +143,10 @@ class TestPopulateSettingsForm:
             option_values = [opt[1] for opt in select._options]
             assert "turbo" in option_values
             assert option_values == [
-                "small",
-                "large-v3",
                 "turbo",
-                "parakeet-tdt-0.6b-v3-int8",
+                "small",
+                "distil-large-v3.5",
+                "parakeet-tdt-0.6b-v3",
             ]
 
     @pytest.mark.asyncio
@@ -350,22 +351,26 @@ class TestPopulateSettingsForm:
     async def test_preserves_current_advanced_model_when_configured(self, mock_get_devices: MagicMock) -> None:
         """Advanced config models remain selectable even though the default UI is curated."""
         mock_get_devices.return_value = create_mock_devices()
+        register_model(
+            ModelSpec("community-advanced", HuggingFaceArtifact("owner/community-advanced")),
+            overwrite=True,
+        )
         config = create_mock_config()
-        config.transcription_model = "base.en"
+        config.transcription_model = "community-advanced"
 
         app = SettingsTestApp(config, "/path/to/config.yaml")
         async with app.run_test():
             assert app.container is not None
 
             select = app.container.query_one("#setting-transcription_model", Select)
-            assert select.value == "base.en"
+            assert select.value == "community-advanced"
             option_values = [opt[1] for opt in select._options]
             assert option_values == [
-                "small",
-                "large-v3",
                 "turbo",
-                "parakeet-tdt-0.6b-v3-int8",
-                "base.en",
+                "small",
+                "distil-large-v3.5",
+                "parakeet-tdt-0.6b-v3",
+                "community-advanced",
             ]
 
     @pytest.mark.asyncio

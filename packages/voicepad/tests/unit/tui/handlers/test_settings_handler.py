@@ -198,7 +198,7 @@ class TestOnSettingsSave:
             recordings_path=recordings_path,
             markdown_path=markdown_path,
             vad_model_path=vad_model_path,
-            transcription_model="base",
+            transcription_model="small",
         )
         status = Mock()
         selector_map = self._build_selector_map(recordings_path, markdown_path, status, vad_model_path)

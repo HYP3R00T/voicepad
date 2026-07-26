@@ -163,9 +163,9 @@ class TestConfigExpandPaths:
         config = Config(
             recordings_path="data/recordings",
             markdown_path="data/markdown",
-            transcription_model="base",
+            transcription_model="small",
         )
-        assert config.transcription_model == "base"
+        assert config.transcription_model == "small"
 
 
 class TestGetConfig:
@@ -484,23 +484,23 @@ class TestTranscriptionModelValidation:
         )
         assert config.transcription_model == "turbo"
 
-    def test_valid_transcription_model_base(self) -> None:
-        """Valid model 'base' is accepted."""
+    def test_valid_transcription_model_small(self) -> None:
+        """Valid model 'small' is accepted."""
         config = Config(
             recordings_path="data/recordings",
             markdown_path="data/markdown",
-            transcription_model="base",
+            transcription_model="small",
         )
-        assert config.transcription_model == "base"
+        assert config.transcription_model == "small"
 
-    def test_valid_transcription_model_large_v3(self) -> None:
-        """Valid model 'large-v3' is accepted."""
+    def test_valid_transcription_model_distil_large_v3_5(self) -> None:
+        """Valid model 'distil-large-v3.5' is accepted."""
         config = Config(
             recordings_path="data/recordings",
             markdown_path="data/markdown",
-            transcription_model="large-v3",
+            transcription_model="distil-large-v3.5",
         )
-        assert config.transcription_model == "large-v3"
+        assert config.transcription_model == "distil-large-v3.5"
 
     def test_invalid_transcription_model_raises_error(self) -> None:
         """Invalid model name raises ValidationError."""

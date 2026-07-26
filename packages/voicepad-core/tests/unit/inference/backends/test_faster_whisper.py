@@ -273,7 +273,10 @@ class TestFasterWhisperDriver:
         )
 
         with pytest.raises(TranscriptionError, match="CPU fallback failed"):
-            FasterWhisperDriver().open(_prepared(), RuntimeOptions())
+            FasterWhisperDriver().open(
+                _prepared(),
+                RuntimeOptions(allow_cpu_fallback=True),
+            )
 
     def test_open_rejects_prepared_model_for_other_backend(self) -> None:
         """An artifact prepared for another backend cannot be opened."""

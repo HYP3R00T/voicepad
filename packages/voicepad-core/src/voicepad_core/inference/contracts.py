@@ -63,7 +63,7 @@ class RuntimeOptions:
 
     device: str = "auto"
     precision: str = "auto"
-    allow_cpu_fallback: bool = True
+    allow_cpu_fallback: bool = False
 
     def __post_init__(self) -> None:
         if not self.device.strip():

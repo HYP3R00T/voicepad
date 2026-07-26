@@ -115,9 +115,9 @@ class TestModelSpec:
 
         assert validated == tmp_path
 
-    def test_builtin_parakeet_declares_runtime_and_verified_archive(self) -> None:
-        """The Parakeet entry pins its ONNX layout and published archive digest."""
-        spec = resolve_model_spec("parakeet-tdt-0.6b-v3-int8")
+    def test_builtin_parakeet_uses_pinned_fp16_onnx_artifact(self) -> None:
+        """The Parakeet entry selects only the CUDA-oriented FP16 ONNX files."""
+        spec = resolve_model_spec("parakeet-tdt-0.6b-v3")
 
         assert (
             spec.backend_id,
@@ -128,24 +128,36 @@ class TestModelSpec:
         ) == (
             "parakeet-onnx",
             "onnx",
-            "int8",
+            "fp16",
             (
-                "decoder_joint-model.int8.onnx",
-                "encoder-model.int8.onnx",
+                "config.json",
+                "decoder_joint-model.fp16.onnx",
+                "encoder-model.fp16.onnx",
                 "nemo128.onnx",
                 "vocab.txt",
             ),
-            DirectUrlArtifact(
-                url="https://blob.handy.computer/parakeet-v3-int8.tar.gz",
-                sha256="43d37191602727524a7d8c6da0eef11c4ba24320f5b4730f1a2497befc2efa77",
-                archive="tar",
-                root="parakeet-tdt-0.6b-v3-int8",
+            HuggingFaceArtifact(
+                "ysdede/parakeet-tdt-0.6b-v3-onnx",
+                revision="f88260fa0777fe0868dda6df85d1a98f012a4a7a",
+                allow_patterns=(
+                    "config.json",
+                    "decoder_joint-model.fp16.onnx",
+                    "encoder-model.fp16.onnx",
+                    "nemo128.onnx",
+                    "vocab.txt",
+                ),
             ),
         )
 
+    def test_builtin_distil_model_uses_ctranslate2_artifact(self) -> None:
+        """The distilled model artifact matches the faster-whisper backend."""
+        spec = resolve_model_spec("distil-large-v3.5")
+
+        assert spec.artifact_source == HuggingFaceArtifact("distil-whisper/distil-large-v3.5-ct2")
+
     def test_builtin_parakeet_is_curated_for_basic_model_selection(self) -> None:
         """The supported Parakeet runtime appears in simple model pickers with useful metadata."""
-        model_id = "parakeet-tdt-0.6b-v3-int8"
+        model_id = "parakeet-tdt-0.6b-v3"
 
         assert (
             model_id in list_basic_model_ids(),
@@ -153,6 +165,6 @@ class TestModelSpec:
             get_model_hint(model_id),
         ) == (
             True,
-            "NVIDIA · Parakeet v3 INT8",
-            "~480 MB · multilingual · optimized for NVIDIA GPU · proper-noun bias",
+            "NVIDIA · Parakeet v3",
+            "~1.3 GB · ONNX FP16 · multilingual · NVIDIA CUDA required",
         )

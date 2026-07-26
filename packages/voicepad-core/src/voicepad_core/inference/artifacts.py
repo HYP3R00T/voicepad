@@ -130,11 +130,15 @@ def _download_hugging_face(
     destination: Path,
 ) -> None:
     from huggingface_hub import snapshot_download
+    from huggingface_hub.utils import disable_progress_bars
+
+    disable_progress_bars()
 
     snapshot_download(
         repo_id=source.repo_id,
         revision=source.revision,
         local_dir=str(destination),
+        allow_patterns=list(source.allow_patterns) if source.allow_patterns is not None else None,
     )
 
 
