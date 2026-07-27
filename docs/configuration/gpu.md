@@ -32,7 +32,7 @@ When VoicePad starts, the header bar shows the active device:
 model: turbo  device: cuda
 ```
 
-Parakeet reports an explicit error when its encoder or decoder cannot activate CUDA. ONNX Runtime may keep small shape operations on CPU, but the model cannot silently fall back to CPU. Faster Whisper can still run on CPU when the user selects CPU explicitly.
+Parakeet uses the CUDA 12/cuDNN 9 build of Sherpa-ONNX and opens its recognizer with `provider=cuda`. VoicePad stops with an explicit error when that build or the CUDA execution provider is unavailable. It does not offer a Parakeet CPU mode. Faster Whisper can still run on CPU when the user selects CPU explicitly.
 
 ## Performance
 

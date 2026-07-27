@@ -65,8 +65,6 @@ dedup_partial_lead_words: 5
 vad_threshold: 0.5
 vad_min_speech_duration_ms: 250
 vad_speech_pad_ms: 30
-vad_model_filename: silero_vad_v6.onnx
-vad_model_url: https://raw.githubusercontent.com/SYSTRAN/faster-whisper/master/faster_whisper/assets/silero_vad_v6.onnx
 vad_download_chunk_size: 8192
 
 local_agreement_file: true

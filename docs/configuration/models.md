@@ -17,7 +17,7 @@ The default model is **turbo**, an optimized version of Whisper large-v3. It is 
 | `turbo` | Recommended default | Multilingual | ~3 GB |
 | `small` | Lightweight fallback | Multilingual | ~1 GB |
 | `distil-large-v3.5` | Fast English dictation | English only | ~3 GB |
-| `parakeet-tdt-0.6b-v3` | NVIDIA architecture, community ONNX export | 25 European languages | ~1.3 GB FP16 weights, plus runtime memory |
+| `parakeet-tdt-0.6b-v3` | NVIDIA architecture, Sherpa-ONNX int8 export | 25 European languages | ~670 MB weights, plus runtime memory |
 
 ## Which Model Should I Use?
 
@@ -28,7 +28,9 @@ The default model is **turbo**, an optimized version of Whisper large-v3. It is 
 | NVIDIA GPU, less than 4 GB VRAM | `small` |
 | CPU only | `small` |
 
-`parakeet-tdt-0.6b-v3` uses a pinned FP16 ONNX snapshot. It runs through ONNX Runtime and requires CUDA for its encoder and decoder. ONNX Runtime may keep small shape operations on CPU, but VoicePad rejects silent whole-model CPU fallback.
+`parakeet-tdt-0.6b-v3` uses Sherpa's pinned int8 export. VoicePad verifies the encoder, decoder, joiner, and tokens before Sherpa runs them through CUDA.
+
+Parakeet uses greedy decoding because it is reliable on short dictation. Sherpa's modified beam decoder produced severe truncation during local testing, so `proper_nouns` currently applies only to Faster Whisper models. VoicePad does not rewrite Parakeet transcripts afterward.
 
 ## Changing the Model
 

@@ -24,12 +24,12 @@ This file records our current agreement.
 ## Chosen Parakeet Path
 
 - Base model: [NVIDIA Parakeet TDT 0.6B v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3)
-- Artifact: pinned FP16 ONNX conversion derived from [istupakov's export](https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx).
-- Runtime: ONNX Runtime CUDA through `onnx-asr`.
-- Precision: FP16.
-- Encoder and decoder must activate CUDA.
-- Small ONNX shape operations may use CPU.
-- Whole-model CPU fallback is rejected.
+- Artifact: pinned Sherpa-ONNX int8 export.
+- Runtime: Sherpa-ONNX CUDA 12 with cuDNN 9.
+- Precision: int8.
+- Decoder: greedy search.
+- Parakeet must run on CUDA.
+- CPU fallback is rejected.
 - Input: mono, float32, 16 kHz audio.
 
 ## Architecture
@@ -46,17 +46,17 @@ This file records our current agreement.
 
 - Proper nouns enter a semantic context object.
 - Faster Whisper receives hotwords.
-- Parakeet context bias is not implemented.
+- Parakeet does not claim context biasing.
+- Sherpa modified beam search is rejected until it passes real dictation tests.
 - Completed text is never rewritten.
 
 ## Validation
 
 - Unit tests verify CUDA-only provider selection.
-- RTX 3050 resident GPU use: 2,505 MiB total.
-- GPU memory left after load: 1,458 MiB.
-- Test audio: 3.72 seconds.
-- Inference time: 1.44 seconds.
-- Fixture transcript was correct.
+- The real Silero and Parakeet models load together.
+- The reference transcript is correct on the RTX 3050.
+- Short real dictation is correct with greedy search.
+- Reference inference takes about 0.66 seconds.
 - Compare against the current Faster Whisper baseline.
 
 ## Removal Rule

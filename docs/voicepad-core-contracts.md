@@ -11,7 +11,7 @@ This document records where model-related parameters belong.
 | What should this inference call do? | `TranscriptionRequest` | Language, beam size, timestamps, context |
 | Which features can the backend perform? | `BackendCapabilities` | Translation, biasing, beam search, VAD |
 | What model artifact should be loaded? | `Model` | Hugging Face repository, files, backend, precision |
-| How does one runtime implement a feature? | Backend implementation | ONNX providers, decoder state, native argument names |
+| How does one runtime implement a feature? | Backend implementation | CUDA providers, Sherpa decoding method, native argument names |
 
 `WaveformSpec` deliberately describes only waveform transformations.
 It is not a container for every model option.

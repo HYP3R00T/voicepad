@@ -53,7 +53,7 @@ App starts
    Download, select, retain, and release one model runtime.
 
 8. **Backend implementations**
-   `inference/backends/faster_whisper.py`, `inference/backends/parakeet.py`
+   `inference/backends/faster_whisper.py`, `inference/backends/sherpa.py`
    Compare two implementations of the same contract.
 
 9. **One-shot inference**
