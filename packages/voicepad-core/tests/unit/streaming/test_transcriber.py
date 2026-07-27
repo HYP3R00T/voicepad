@@ -221,6 +221,19 @@ def test_monitor_loop_reports_final_snapshot_failure_and_completes() -> None:
     assert [(chunk.is_final, chunk.text) for chunk in received] == [(True, "")]
 
 
+def test_monitor_loop_can_stop_without_transcribing_tail() -> None:
+    """Disabling tail transcription exits without reading or emitting a final chunk."""
+    received = []
+    errors = []
+    streamer = StreamingTranscriber(_FailingRecorder(), received.append, errors.append, config=make_config())
+    streamer._transcribe_tail_on_stop = False
+    streamer._stop_event.set()
+
+    streamer._monitor_loop()
+
+    assert (received, errors) == ([], [])
+
+
 @patch("voicepad_core.streaming.transcriber.normalize", side_effect=lambda text: text.upper())
 @patch(
     "voicepad_core.streaming.transcriber.remove_hallucinations", side_effect=lambda text, max_repetitions: text + "!"

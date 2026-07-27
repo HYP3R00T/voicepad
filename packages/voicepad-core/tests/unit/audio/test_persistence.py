@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+from threading import Event, Thread
 from unittest.mock import patch
 
 import numpy as np
 import pytest
 import soundfile as sf
 from voicepad_core.audio.persistence import LiveWavRecording, WavArtifact, write_wav_atomic
-from voicepad_core.audio.types import RawAudio
+from voicepad_core.audio.types import AudioWindow, RawAudio
 
 
 class TestWriteWavAtomic:
@@ -90,3 +91,40 @@ def test_live_recording_reads_sample_range_and_finalizes(tmp_path: Path) -> None
     np.testing.assert_allclose(window.samples, [0.5, 0.75])
     assert (artifact.frame_count, artifact.duration(), sample_rate, len(persisted)) == (6, 1.5, 4, 6)
     assert tuple(tmp_path.glob(".recording-live-*.wav")) == ()
+
+
+def test_live_recording_read_during_finalization_uses_finished_artifact(tmp_path: Path) -> None:
+    """A read racing with finalization completes from the persisted artifact without timing out."""
+    destination = tmp_path / "recording.wav"
+    recording = LiveWavRecording(destination, sample_rate=4, channels=1)
+    recording.start()
+    recording.append(np.array([0.0, 0.25, 0.5, 0.75], dtype=np.float32))
+    finalizing = Event()
+    continue_finalizing = Event()
+    from voicepad_core.audio.persistence import _finalize_spool
+
+    def delayed_finalize(
+        spool_path: Path,
+        final_path: Path,
+        sample_rate: int,
+        channels: int,
+        frame_count: int,
+    ) -> WavArtifact:
+        finalizing.set()
+        assert continue_finalizing.wait(timeout=1.0)
+        return _finalize_spool(spool_path, final_path, sample_rate, channels, frame_count)
+
+    finish_thread = Thread(target=recording.finish)
+    with patch("voicepad_core.audio.persistence._finalize_spool", side_effect=delayed_finalize):
+        finish_thread.start()
+        assert finalizing.wait(timeout=1.0)
+        result: list[AudioWindow] = []
+        read_thread = Thread(target=lambda: result.append(recording.read_from(1, max_samples=2)), daemon=True)
+        read_thread.start()
+        continue_finalizing.set()
+        finish_thread.join(timeout=1.0)
+        read_thread.join(timeout=1.0)
+
+    assert not finish_thread.is_alive() and not read_thread.is_alive()
+    assert len(result) == 1
+    np.testing.assert_allclose(result[0].samples, [0.25, 0.5])

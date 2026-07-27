@@ -369,20 +369,36 @@ class TestFinalizeWorker:
 
         handler.finalize_worker(audio)
 
-        mock_app._streamer.stop.assert_called_once()
+        mock_app._streamer.stop.assert_called_once_with(transcribe_tail=False)
         mock_final_pass.assert_called_once()
         assert mock_final_pass.call_args[0][0] is audio
-        mock_app.call_from_thread.assert_called_once_with(handler.save_recording, audio, final_result)
+        mock_app.call_from_thread.assert_called_once_with(handler._save_final_pass, audio, final_result)
         mock_end_session.assert_called_once_with(include_streaming=True)
 
-    def test_transcribe_final_audio_skips_when_multiple_stream_chunks_exist(self):
+    @patch("voicepad.tui.handlers.recording_handler.end_transcription_session")
+    @patch.object(RecordingHandler, "_transcribe_final_audio")
+    def test_finalize_worker_drains_tail_without_second_pass_when_streaming_has_text(
+        self,
+        mock_final_pass,
+        mock_end_session,
+    ):
+        """An existing streamed result drains its tail and skips duplicate full-audio inference."""
         mock_app = Mock()
-        mock_app._stream_chunks = [Mock(), Mock()]
+        mock_app._streamer = Mock()
+        mock_app._stream_chunks = [Mock()]
+        mock_app.call_from_thread = Mock()
+
         handler = RecordingHandler(mock_app)
+        handler._final_chunk_event = threading.Event()
+        handler._final_chunk_event.set()
+        audio = _artifact(Path("/tmp/recording.wav"), 3)
 
-        result = handler._transcribe_final_audio(_artifact(Path("/tmp/recording.wav"), 1))
+        handler.finalize_worker(audio)
 
-        assert result is None
+        mock_app._streamer.stop.assert_called_once_with(transcribe_tail=True)
+        mock_final_pass.assert_not_called()
+        mock_app.call_from_thread.assert_called_once_with(handler.save_recording, audio, None)
+        mock_end_session.assert_called_once_with(include_streaming=True)
 
 
 class TestOnStreamChunk:

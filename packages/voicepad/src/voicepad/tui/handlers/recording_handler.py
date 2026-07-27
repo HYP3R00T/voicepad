@@ -146,16 +146,18 @@ class RecordingHandler:
         if self._session_logger:
             self._session_logger.info("Finalizing transcription...")
 
+        use_final_pass = not self.app._stream_chunks
         if self.app._streamer:
-            self.app._streamer.stop()  # blocks until final chunk callback fires
+            self.app._streamer.stop(transcribe_tail=not use_final_pass)
             if self._session_logger:
                 self._session_logger.info("Streamer stopped")
 
-        if self._final_chunk_event is not None:
+        if not use_final_pass and self._final_chunk_event is not None:
             self._final_chunk_event.wait(timeout=5.0)
 
-        final_result = self._transcribe_final_audio(audio)
-        self.app.call_from_thread(self.save_recording, audio, final_result)
+        final_result = self._transcribe_final_audio(audio) if use_final_pass else None
+        callback = self._save_final_pass if use_final_pass else self.save_recording
+        self.app.call_from_thread(callback, audio, final_result)
 
         # Clear the session logger
         end_transcription_session(include_streaming=True)
@@ -166,10 +168,7 @@ class RecordingHandler:
             self._session_logger.info("=" * 80)
 
     def _transcribe_final_audio(self, audio: WavArtifact):
-        """Use the fully recorded audio as the final authority for short/simple sessions."""
-        if len(self.app._stream_chunks) > 1:
-            return None
-
+        """Transcribe a recording that produced no useful streaming chunks."""
         from voicepad_core import transcribe
 
         try:
@@ -188,6 +187,23 @@ class RecordingHandler:
             if self._session_logger:
                 self._session_logger.warning(f"Final full-audio pass failed, keeping streaming result: {e}")
             return None
+
+    def _save_final_pass(self, audio: WavArtifact, final_result: object | None) -> None:
+        text = str(getattr(final_result, "text", "")) if final_result is not None else ""
+        self._handle_stream_chunk(
+            ChunkResult(
+                index=1,
+                text=text,
+                segments=list(getattr(final_result, "segments", [])),
+                end_s=audio.duration(),
+                latency_ms=float(getattr(final_result, "latency_ms", 0.0)),
+                device=str(getattr(final_result, "device", "cuda")),
+                language=getattr(final_result, "language", None),
+                language_probability=getattr(final_result, "language_probability", None),
+                is_final=True,
+            )
+        )
+        self.save_recording(audio, final_result)
 
     def _handle_stream_chunk(self, chunk: ChunkResult) -> None:
         """Handle streamed chunks on the main thread and signal completion for the final chunk."""

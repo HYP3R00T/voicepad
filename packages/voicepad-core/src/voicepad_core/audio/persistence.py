@@ -68,7 +68,10 @@ class LiveWavRecording:
         self._channels = channels
         self._queue: queue.Queue[np.ndarray | _ReadRequest | object] = queue.Queue(max_pending_chunks)
         self._ready = threading.Event()
+        self._finished = threading.Event()
+        self._state_lock = threading.Lock()
         self._thread: threading.Thread | None = None
+        self._finishing = False
         self._spool_path: Path | None = None
         self._frame_count = 0
         self._error: Exception | None = None
@@ -107,12 +110,28 @@ class LiveWavRecording:
             raise ValueError("start_sample must not be negative")
         if max_samples is not None and max_samples <= 0:
             raise ValueError("max_samples must be positive")
-        if self._artifact is not None:
-            end_sample = None if max_samples is None else start_sample + max_samples
-            return _read_window(self._artifact.path, start_sample, end_sample)
-        self._require_active()
-        request = _ReadRequest(start_sample, max_samples, threading.Event())
-        self._queue.put(request)
+
+        with self._state_lock:
+            artifact = self._artifact
+            finishing = self._finishing
+            if artifact is None and not finishing:
+                self._require_active()
+                request = _ReadRequest(start_sample, max_samples, threading.Event())
+                self._queue.put(request)
+            else:
+                request = None
+
+        if artifact is not None:
+            return self._read_artifact(artifact, start_sample, max_samples)
+        if finishing:
+            if not self._finished.wait(timeout=60.0):
+                raise AudioStreamStateError("Timed out while waiting for live audio to finish.")
+            self._raise_if_failed()
+            if self._artifact is None:
+                raise AudioStreamStateError("Live recording did not finish successfully.")
+            return self._read_artifact(self._artifact, start_sample, max_samples)
+
+        assert request is not None
         if not request.completed.wait(timeout=10.0):
             raise AudioStreamStateError("Timed out while reading live audio.")
         if request.error is not None:
@@ -121,25 +140,34 @@ class LiveWavRecording:
         return request.result
 
     def finish(self) -> WavArtifact:
-        if self._artifact is not None:
-            return self._artifact
-        self._require_active()
-        self._queue.put(_FINISH)
-        assert self._thread is not None
-        self._thread.join(timeout=60.0)
-        if self._thread.is_alive():
-            raise AudioStreamStateError("Timed out while finishing the live audio writer.")
-        self._raise_if_failed()
-        assert self._spool_path is not None
-        self._artifact = _finalize_spool(
-            self._spool_path,
-            self._path,
-            self._sample_rate,
-            self._channels,
-            self._frame_count,
-        )
-        self._thread = None
-        return self._artifact
+        with self._state_lock:
+            if self._artifact is not None:
+                return self._artifact
+            self._require_active()
+            self._finishing = True
+            self._queue.put(_FINISH)
+            thread = self._thread
+
+        assert thread is not None
+        try:
+            thread.join(timeout=60.0)
+            if thread.is_alive():
+                raise AudioStreamStateError("Timed out while finishing the live audio writer.")
+            self._raise_if_failed()
+            assert self._spool_path is not None
+            artifact = _finalize_spool(
+                self._spool_path,
+                self._path,
+                self._sample_rate,
+                self._channels,
+                self._frame_count,
+            )
+            with self._state_lock:
+                self._artifact = artifact
+                self._thread = None
+            return artifact
+        finally:
+            self._finished.set()
 
     def abort(self) -> None:
         if self._thread is not None and self._thread.is_alive():
@@ -205,6 +233,11 @@ class LiveWavRecording:
     def _raise_if_failed(self) -> None:
         if self._error is not None:
             raise AudioStreamStateError("Live audio writer failed.") from self._error
+
+    @staticmethod
+    def _read_artifact(artifact: WavArtifact, start_sample: int, max_samples: int | None) -> AudioWindow:
+        end_sample = None if max_samples is None else start_sample + max_samples
+        return _read_window(artifact.path, start_sample, end_sample)
 
 
 def write_wav_atomic(audio: RawAudio, path: str | Path) -> WavArtifact:

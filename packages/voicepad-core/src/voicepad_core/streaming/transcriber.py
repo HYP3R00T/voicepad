@@ -92,6 +92,7 @@ class StreamingTranscriber:
         self._stream_context_chars = self._config.stream_context_chars
 
         self._stop_event = threading.Event()
+        self._transcribe_tail_on_stop = True
         self._monitor_thread: threading.Thread | None = None
 
         self._consumed_samples: int = 0
@@ -143,11 +144,12 @@ class StreamingTranscriber:
         self._monitor_thread.start()
         logger.debug("StreamingTranscriber monitor thread started.")
 
-    def stop(self) -> None:
-        """Stop monitoring after emitting the final chunk."""
+    def stop(self, *, transcribe_tail: bool = True) -> None:
+        """Stop monitoring, optionally transcribing the remaining audio."""
         if self._monitor_thread is None:
             return
 
+        self._transcribe_tail_on_stop = transcribe_tail
         self._stop_event.set()
         self._monitor_thread.join(timeout=60.0)
 
@@ -207,7 +209,8 @@ class StreamingTranscriber:
                 self._dispatch_chunk(window, is_final=False, capture_rate=capture_rate)
                 self._vad.reset()
 
-        self._drain_final_chunks(capture_rate)
+        if self._transcribe_tail_on_stop:
+            self._drain_final_chunks(capture_rate)
 
     def _drain_final_chunks(self, capture_rate: int) -> None:
         """Drain a persisted backlog without loading or inferring it all at once."""
