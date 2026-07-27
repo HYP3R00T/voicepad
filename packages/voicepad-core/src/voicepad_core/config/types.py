@@ -9,10 +9,6 @@ from utilityhub_config import expand_path
 from ..models import MODELS
 
 DEFAULT_INITIAL_PROMPT = "Hello. This is a transcription with proper punctuation, capitalization, and grammar."
-DEFAULT_VAD_MODEL_FILENAME = "silero_vad_v6.onnx"
-DEFAULT_VAD_MODEL_URL = (
-    "https://raw.githubusercontent.com/SYSTRAN/faster-whisper/master/faster_whisper/assets/silero_vad_v6.onnx"
-)
 
 
 class ConfigError(ValueError):
@@ -67,8 +63,6 @@ class Config(BaseModel):
     vad_threshold: float = 0.5
     vad_min_speech_duration_ms: int = 250
     vad_speech_pad_ms: int = 30
-    vad_model_filename: str = DEFAULT_VAD_MODEL_FILENAME
-    vad_model_url: str = DEFAULT_VAD_MODEL_URL
     vad_download_chunk_size: int = 8192
 
     @field_validator("transcription_model")
@@ -98,7 +92,5 @@ __all__ = [
     "Config",
     "ConfigError",
     "DEFAULT_INITIAL_PROMPT",
-    "DEFAULT_VAD_MODEL_FILENAME",
-    "DEFAULT_VAD_MODEL_URL",
     "UnknownTranscriptionModelError",
 ]

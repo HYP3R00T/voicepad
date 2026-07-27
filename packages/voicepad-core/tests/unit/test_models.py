@@ -13,9 +13,19 @@ def test_model_binds_artifact_to_backend() -> None:
     """Each catalogue entry contains its repository and runtime binding."""
     model = get_model("parakeet-tdt-0.6b-v3")
     assert (model.backend, model.precision, model.repo) == (
-        "parakeet-onnx",
-        "fp16",
-        "ysdede/parakeet-tdt-0.6b-v3-onnx",
+        "sherpa-onnx",
+        "int8",
+        "csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
+    )
+
+
+def test_parakeet_requires_only_its_primary_artifact() -> None:
+    """Parakeet no longer requires a companion BPE vocabulary for greedy decoding."""
+    assert get_model("parakeet-tdt-0.6b-v3").files == (
+        "decoder.int8.onnx",
+        "encoder.int8.onnx",
+        "joiner.int8.onnx",
+        "tokens.txt",
     )
 
 

@@ -6,7 +6,7 @@ from pathlib import Path
 from threading import RLock
 
 from .artifacts import ProgressCallback, locate_artifact, prepare_artifact
-from .backends import FasterWhisperDriver, ParakeetOnnxDriver
+from .backends import FasterWhisperDriver, SherpaOnnxDriver
 from .contracts import BackendContract, BackendDriver, PreparedModel, RuntimeInfo, RuntimeOptions, TranscriptionSession
 from .errors import BackendLookupError, BackendSessionError, BackendUnavailableError
 from ..config import get_config
@@ -24,7 +24,7 @@ class RuntimeManager:
         drivers: Iterable[BackendDriver] | None = None,
     ) -> None:
         self.cache_dir = cache_dir.expanduser().resolve()
-        enabled = drivers or (FasterWhisperDriver(), ParakeetOnnxDriver())
+        enabled = drivers or (FasterWhisperDriver(), SherpaOnnxDriver())
         self._drivers = {driver.id: driver for driver in enabled}
         self._identity: tuple[Model, RuntimeOptions] | None = None
         self._session: TranscriptionSession | None = None

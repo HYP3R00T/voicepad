@@ -2,16 +2,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import numpy as np
-import onnxruntime as ort
+import sherpa_onnx
 
 from .silero_download import ensure_model_exists
 from ..config import Config, get_config
 
 REQUIRED_SAMPLE_RATE = 16_000
 WINDOW_SIZE = 512
-STATE_SIZE = (1, 1, 128)
 
 
 class InvalidVADSampleRateError(ValueError):
@@ -27,7 +27,7 @@ class SpeechSegment:
 
 
 class SileroVAD:
-    """Detect speech in 16 kHz mono audio with Silero ONNX on CPU."""
+    """Detect speech with Silero through VoicePad's shared Sherpa runtime."""
 
     def __init__(
         self,
@@ -48,16 +48,13 @@ class SileroVAD:
         )
         speech_pad_ms = speech_pad_ms if speech_pad_ms is not None else self._config.vad_speech_pad_ms
 
-        self._threshold = threshold
-        self._min_speech_samples = int(min_speech_duration_ms * REQUIRED_SAMPLE_RATE / 1000)
-        self._min_silence_samples = int(min_silence_duration_ms * REQUIRED_SAMPLE_RATE / 1000)
         self._speech_pad_samples = int(speech_pad_ms * REQUIRED_SAMPLE_RATE / 1000)
         self._vad_model_dir = vad_model_dir
-
-        self._session: ort.InferenceSession = self._load_session()
-        self._h: np.ndarray
-        self._c: np.ndarray
-        self._h, self._c = self._init_states()
+        self._detector = self._load_detector(
+            threshold,
+            min_speech_duration_ms,
+            min_silence_duration_ms,
+        )
 
     def detect(
         self,
@@ -74,124 +71,48 @@ class SileroVAD:
         if len(audio) < WINDOW_SIZE:
             return []
 
-        audio = _ensure_float32(audio)
+        samples = np.ascontiguousarray(audio, dtype=np.float32)
+        if len(samples) % WINDOW_SIZE:
+            samples = np.pad(samples, (0, WINDOW_SIZE - len(samples) % WINDOW_SIZE))
 
-        speech_probs = self._score_windows(audio)
-        return self._build_segments(speech_probs, total_samples=len(audio))
-
-    def reset(self) -> None:
-        """Clear recurrent state between recordings."""
-        self._h, self._c = self._init_states()
-
-    def _score_windows(self, audio: np.ndarray) -> list[tuple[int, float]]:
-        num_samples = len(audio)
-        if num_samples % WINDOW_SIZE != 0:
-            pad_size = WINDOW_SIZE - (num_samples % WINDOW_SIZE)
-            audio = np.pad(audio, (0, pad_size), "constant")
-
-        num_chunks = len(audio) // WINDOW_SIZE
-        batched_audio = audio.reshape(num_chunks, WINDOW_SIZE)
-
-        context_size = 64
-        context = np.zeros((num_chunks, context_size), dtype=np.float32)
-        if num_chunks > 1:
-            context[1:] = batched_audio[:-1, -context_size:]
-
-        inputs_audio = np.concatenate([context, batched_audio], axis=1)
-
-        outputs = self._session.run(
-            None,
-            {
-                "input": inputs_audio,
-                "h": self._h,
-                "c": self._c,
-            },
-        )
-
-        probs = np.asarray(outputs[0], dtype=np.float32).reshape(-1)
-        self._h = np.asarray(outputs[1], dtype=np.float32)
-        self._c = np.asarray(outputs[2], dtype=np.float32)
-
-        results = [(i * WINDOW_SIZE, float(probs[i])) for i in range(num_chunks)]
-        return results
-
-    def _build_segments(
-        self,
-        speech_probs: list[tuple[int, float]],
-        total_samples: int,
-    ) -> list[SpeechSegment]:
-        if not speech_probs:
-            return []
-
-        raw: list[tuple[int, int]] = []  # (start_sample, end_sample)
-        in_speech = False
-        seg_start = 0
-
-        for start, prob in speech_probs:
-            end = start + WINDOW_SIZE
-            if prob >= self._threshold:
-                if not in_speech:
-                    seg_start = start
-                    in_speech = True
-                seg_end = end
-            else:
-                if in_speech:
-                    raw.append((seg_start, seg_end))  # type: ignore[possibly-undefined]
-                    in_speech = False
-
-        if in_speech:
-            raw.append((seg_start, speech_probs[-1][0] + WINDOW_SIZE))
-
-        if not raw:
-            return []
-
-        merged: list[tuple[int, int]] = [raw[0]]
-        for curr_start, curr_end in raw[1:]:
-            prev_start, prev_end = merged[-1]
-            if curr_start - prev_end < self._min_silence_samples:
-                merged[-1] = (prev_start, curr_end)
-            else:
-                merged.append((curr_start, curr_end))
+        for start in range(0, len(samples), WINDOW_SIZE):
+            self._detector.accept_waveform(samples[start : start + WINDOW_SIZE])
+        self._detector.flush()
 
         segments: list[SpeechSegment] = []
-
-        for start_s, end_s in merged:
-            if end_s - start_s < self._min_speech_samples:
-                continue
-
-            padded_start = max(0, start_s - self._speech_pad_samples)
-            padded_end = min(total_samples, end_s + self._speech_pad_samples)
-
-            segments.append(
-                SpeechSegment(
-                    start=padded_start / REQUIRED_SAMPLE_RATE,
-                    end=padded_end / REQUIRED_SAMPLE_RATE,
-                )
-            )
-
+        while not self._detector.empty():
+            segment = self._detector.front
+            start = max(0, int(segment.start) - self._speech_pad_samples)
+            end = min(len(audio), int(segment.start) + len(segment.samples) + self._speech_pad_samples)
+            segments.append(SpeechSegment(start / REQUIRED_SAMPLE_RATE, end / REQUIRED_SAMPLE_RATE))
+            self._detector.pop()
         return segments
 
-    def _load_session(self) -> ort.InferenceSession:
+    def reset(self) -> None:
+        """Clear detector state between recordings."""
+        self._detector.reset()
+
+    def _load_detector(
+        self,
+        threshold: float,
+        min_speech_duration_ms: int,
+        min_silence_duration_ms: int,
+    ) -> Any:
         model_path = ensure_model_exists(vad_model_dir=self._vad_model_dir, verbose=True, config=self._config)
-
-        session_options = ort.SessionOptions()
-        session_options.log_severity_level = 3  # suppress onnxruntime INFO logs
-
-        session = ort.InferenceSession(
-            str(model_path),
-            sess_options=session_options,
-            providers=["CPUExecutionProvider"],
+        max_speech_duration = max(60.0, self._config.max_chunk_s)
+        model = sherpa_onnx.SileroVadModelConfig(
+            model=str(model_path),
+            threshold=threshold,
+            min_silence_duration=min_silence_duration_ms / 1000,
+            min_speech_duration=min_speech_duration_ms / 1000,
+            window_size=WINDOW_SIZE,
+            max_speech_duration=max_speech_duration,
         )
-        return session
-
-    @staticmethod
-    def _init_states() -> tuple[np.ndarray, np.ndarray]:
-        h = np.zeros(STATE_SIZE, dtype=np.float32)
-        c = np.zeros(STATE_SIZE, dtype=np.float32)
-        return h, c
-
-
-def _ensure_float32(audio: np.ndarray) -> np.ndarray:
-    if audio.dtype != np.float32:
-        return audio.astype(np.float32)
-    return audio
+        config = sherpa_onnx.VadModelConfig(
+            silero_vad=model,
+            sample_rate=REQUIRED_SAMPLE_RATE,
+            num_threads=1,
+            provider="cpu",
+            debug=False,
+        )
+        return sherpa_onnx.VoiceActivityDetector(config, buffer_size_in_seconds=max_speech_duration + 1)

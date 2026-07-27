@@ -1,9 +1,9 @@
 from .faster_whisper import FasterWhisperDriver, FasterWhisperSession
-from .parakeet import ParakeetOnnxDriver, ParakeetOnnxSession
+from .sherpa import SherpaOnnxDriver, SherpaOnnxSession
 
 __all__ = [
     "FasterWhisperDriver",
     "FasterWhisperSession",
-    "ParakeetOnnxDriver",
-    "ParakeetOnnxSession",
+    "SherpaOnnxDriver",
+    "SherpaOnnxSession",
 ]

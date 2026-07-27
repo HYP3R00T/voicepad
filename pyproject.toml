@@ -14,6 +14,7 @@ voicepad = { workspace = true }
 voicepad-core = { workspace = true }
 
 [tool.uv]
+find-links = ["https://k2-fsa.github.io/sherpa/onnx/cuda.html"]
 # Keep Faster-Whisper's transitive CPU runtime off Windows, where VoicePad
 # installs the CUDA-enabled distribution instead.
 override-dependencies = [

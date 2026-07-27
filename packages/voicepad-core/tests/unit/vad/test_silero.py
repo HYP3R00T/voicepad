@@ -1,22 +1,47 @@
-"""Tests for silero.py - SileroVAD class."""
+"""Tests for Sherpa-backed Silero VAD."""
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
-from voicepad_core.vad.silero import SileroVAD
+from voicepad_core.vad.silero import SileroVAD, SpeechSegment
+
+
+class _Detector:
+    def __init__(self, segments: list[object] | None = None) -> None:
+        self.segments = list(segments or [])
+        self.accepted: list[np.ndarray] = []
+        self.flush_calls = 0
+        self.reset_calls = 0
+
+    def accept_waveform(self, samples: np.ndarray) -> None:
+        self.accepted.append(samples)
+
+    def flush(self) -> None:
+        self.flush_calls += 1
+
+    def empty(self) -> bool:
+        return not self.segments
+
+    @property
+    def front(self) -> object:
+        return self.segments[0]
+
+    def pop(self) -> None:
+        self.segments.pop(0)
+
+    def reset(self) -> None:
+        self.reset_calls += 1
 
 
 class TestSileroVAD:
-    """Test SileroVAD initialization and speech detection."""
-
-    @patch("voicepad_core.vad.silero.SileroVAD._load_session")
-    def test_initialization(self, mock_load_session: MagicMock) -> None:
-        """Test SileroVAD initializes state correctly."""
-        mock_session = MagicMock()
-        mock_load_session.return_value = mock_session
+    @patch("voicepad_core.vad.silero.SileroVAD._load_detector")
+    def test_initialization(self, load_detector: MagicMock) -> None:
+        detector = _Detector()
+        load_detector.return_value = detector
 
         vad = SileroVAD(
             threshold=0.6,
@@ -25,78 +50,62 @@ class TestSileroVAD:
             speech_pad_ms=30,
         )
 
-        assert vad._threshold == 0.6
-        assert vad._session == mock_session
-        assert vad._h.shape == (1, 1, 128)
-        assert vad._c.shape == (1, 1, 128)
-        assert np.all(vad._h == 0)
-        assert np.all(vad._c == 0)
+        assert vad._detector is detector
+        load_detector.assert_called_once_with(0.6, 250, 100)
 
-    @patch("voicepad_core.vad.silero.SileroVAD._load_session")
-    def test_detect_invalid_sample_rate(self, mock_load_session: MagicMock) -> None:
-        """Test detect raises ValueError if sample rate is not 16000."""
-        mock_load_session.return_value = MagicMock()
+    @patch("voicepad_core.vad.silero.SileroVAD._load_detector")
+    def test_detect_rejects_wrong_sample_rate(self, load_detector: MagicMock) -> None:
+        load_detector.return_value = _Detector()
         vad = SileroVAD()
 
         with pytest.raises(ValueError, match="SileroVAD requires audio at 16000Hz"):
-            vad.detect(np.zeros(16000, dtype=np.float32), sample_rate=48000)
+            vad.detect(np.zeros(16_000, dtype=np.float32), sample_rate=48_000)
 
-    @patch("voicepad_core.vad.silero.SileroVAD._load_session")
-    def test_detect_too_short(self, mock_load_session: MagicMock) -> None:
-        """Test detect returns empty list if audio is too short (< 512 samples)."""
-        mock_load_session.return_value = MagicMock()
+    @patch("voicepad_core.vad.silero.SileroVAD._load_detector")
+    def test_detect_ignores_audio_shorter_than_one_window(self, load_detector: MagicMock) -> None:
+        load_detector.return_value = _Detector()
+
+        assert SileroVAD().detect(np.zeros(500, dtype=np.float32)) == []
+
+    @patch("voicepad_core.vad.silero.SileroVAD._load_detector")
+    def test_detect_feeds_windows_and_returns_padded_segments(self, load_detector: MagicMock) -> None:
+        detector = _Detector([
+            SimpleNamespace(start=512, samples=np.zeros(1536, dtype=np.float32)),
+            SimpleNamespace(start=3584, samples=np.zeros(1024, dtype=np.float32)),
+        ])
+        load_detector.return_value = detector
+        vad = SileroVAD(speech_pad_ms=10)
+
+        segments = vad.detect(np.zeros(11 * 512, dtype=np.float64))
+
+        assert len(detector.accepted) == 11
+        assert all(window.shape == (512,) and window.dtype == np.float32 for window in detector.accepted)
+        assert detector.flush_calls == 1
+        assert segments == [
+            SpeechSegment(start=352 / 16_000, end=2208 / 16_000),
+            SpeechSegment(start=3424 / 16_000, end=4768 / 16_000),
+        ]
+
+    @patch("voicepad_core.vad.silero.SileroVAD._load_detector")
+    def test_detect_pads_partial_window_without_extending_segment_boundary(
+        self,
+        load_detector: MagicMock,
+    ) -> None:
+        detector = _Detector([SimpleNamespace(start=512, samples=np.zeros(512, dtype=np.float32))])
+        load_detector.return_value = detector
+        vad = SileroVAD(speech_pad_ms=30)
+
+        segments = vad.detect(np.zeros(600, dtype=np.float32))
+
+        assert len(detector.accepted) == 2
+        assert segments[0].end == 600 / 16_000
+
+    @patch("voicepad_core.vad.silero.SileroVAD._load_detector")
+    def test_reset_delegates_to_sherpa(self, load_detector: MagicMock) -> None:
+        detector = _Detector()
+        load_detector.return_value = detector
         vad = SileroVAD()
-
-        segments = vad.detect(np.zeros(500, dtype=np.float32))
-        assert segments == []
-
-    @patch("voicepad_core.vad.silero.SileroVAD._load_session")
-    def test_detect_speech(self, mock_load_session: MagicMock) -> None:
-        """Test detect processes audio and returns speech segments."""
-        mock_session = MagicMock()
-        # Mock InferenceSession.run to return:
-        # - outputs[0]: speech probability (probs array)
-        # - outputs[1]: hn
-        # - outputs[2]: cn
-        probs = np.array([0.1, 0.9, 0.9, 0.9, 0.1, 0.1, 0.1, 0.9, 0.9, 0.9, 0.1], dtype=np.float32)
-        hn = np.ones((1, 1, 128), dtype=np.float32) * 0.5
-        cn = np.ones((1, 1, 128), dtype=np.float32) * 0.5
-        mock_session.run.return_value = [probs, hn, cn]
-        mock_load_session.return_value = mock_session
-
-        # Minimum speech samples = 50ms * 16 = 800 samples.
-        # Window size is 512 samples.
-        # Probs length 11 -> audio length 11 * 512 = 5632 samples.
-        vad = SileroVAD(
-            threshold=0.5,
-            min_speech_duration_ms=50,
-            min_silence_duration_ms=50,
-            speech_pad_ms=10,
-        )
-
-        audio = np.zeros(11 * 512, dtype=np.float32)
-        segments = vad.detect(audio)
-
-        # Let's inspect mock_session.run arguments
-        mock_session.run.assert_called_once()
-        args, _ = mock_session.run.call_args
-        inputs = args[1]
-        assert "input" in inputs
-        assert inputs["input"].shape == (11, 576)  # shape (num_chunks, 512 + 64)
-        assert np.allclose(vad._h, hn)
-        assert np.allclose(vad._c, cn)
-        assert len(segments) == 2
-
-    @patch("voicepad_core.vad.silero.SileroVAD._load_session")
-    def test_reset(self, mock_load_session: MagicMock) -> None:
-        """Test reset restores LSTM states to zeros."""
-        mock_load_session.return_value = MagicMock()
-        vad = SileroVAD()
-
-        vad._h = np.ones((1, 1, 128), dtype=np.float32)
-        vad._c = np.ones((1, 1, 128), dtype=np.float32)
 
         vad.reset()
 
-        assert np.all(vad._h == 0)
-        assert np.all(vad._c == 0)
+        assert detector.reset_calls == 1

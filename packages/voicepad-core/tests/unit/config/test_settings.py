@@ -866,7 +866,6 @@ class TestAdvancedRuntimeParameters:
         assert config.vad_threshold == 0.5
         assert config.vad_min_speech_duration_ms == 250
         assert config.vad_speech_pad_ms == 30
-        assert config.vad_model_filename == "silero_vad_v6.onnx"
         assert config.vad_download_chunk_size == 8192
 
     def test_custom_runtime_tuning_fields(self) -> None:
@@ -889,8 +888,6 @@ class TestAdvancedRuntimeParameters:
             vad_threshold=0.6,
             vad_min_speech_duration_ms=300,
             vad_speech_pad_ms=45,
-            vad_model_filename="custom_vad.onnx",
-            vad_model_url="https://example.com/custom_vad.onnx",
             vad_download_chunk_size=4096,
         )
 
@@ -910,6 +907,4 @@ class TestAdvancedRuntimeParameters:
         assert config.vad_threshold == 0.6
         assert config.vad_min_speech_duration_ms == 300
         assert config.vad_speech_pad_ms == 45
-        assert config.vad_model_filename == "custom_vad.onnx"
-        assert config.vad_model_url == "https://example.com/custom_vad.onnx"
         assert config.vad_download_chunk_size == 4096

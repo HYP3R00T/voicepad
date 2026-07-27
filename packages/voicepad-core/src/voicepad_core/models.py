@@ -3,11 +3,10 @@ from pathlib import Path
 
 _WHISPER_FILES = ("model.bin", "tokenizer.json", "config.json")
 _PARAKEET_FILES = (
-    "config.json",
-    "decoder_joint-model.fp16.onnx",
-    "encoder-model.fp16.onnx",
-    "nemo128.onnx",
-    "vocab.txt",
+    "decoder.int8.onnx",
+    "encoder.int8.onnx",
+    "joiner.int8.onnx",
+    "tokens.txt",
 )
 
 
@@ -56,13 +55,13 @@ MODELS: dict[str, Model] = {
         ),
         Model(
             id="parakeet-tdt-0.6b-v3",
-            repo="ysdede/parakeet-tdt-0.6b-v3-onnx",
-            backend="parakeet-onnx",
+            repo="csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
+            backend="sherpa-onnx",
             files=_PARAKEET_FILES,
-            revision="f88260fa0777fe0868dda6df85d1a98f012a4a7a",
-            precision="fp16",
+            revision="2bda32ec70b097a55adaa07d9a7173915b43cc78",
+            precision="int8",
             label="NVIDIA · Parakeet v3",
-            hint="~1.3 GB · ONNX FP16 · multilingual · NVIDIA CUDA required",
+            hint="~670 MB · Sherpa int8 · multilingual · NVIDIA CUDA",
         ),
     )
 }

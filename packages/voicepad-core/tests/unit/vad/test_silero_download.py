@@ -28,21 +28,19 @@ def make_config(tmp_path: Path) -> Config:
         recordings_path=tmp_path / "recordings",
         markdown_path=tmp_path / "markdown",
         vad_model_path=tmp_path / "vad",
-        vad_model_filename="custom_vad.onnx",
-        vad_model_url="https://example.com/custom_vad.onnx",
         vad_download_chunk_size=4,
     )
 
 
-def test_get_model_path_uses_config_filename(tmp_path: Path) -> None:
+def test_get_model_path_uses_sherpa_model_filename(tmp_path: Path) -> None:
     config = make_config(tmp_path)
     result = silero_download.get_model_path(config=config)
-    assert result == config.vad_model_path / "custom_vad.onnx"
+    assert result == config.vad_model_path / silero_download.MODEL_FILENAME
 
 
 def test_ensure_model_exists_returns_existing_file(tmp_path: Path) -> None:
     config = make_config(tmp_path)
-    model_path = config.vad_model_path / config.vad_model_filename
+    model_path = config.vad_model_path / silero_download.MODEL_FILENAME
     model_path.parent.mkdir(parents=True)
     model_path.write_bytes(b"data")
 
@@ -53,16 +51,16 @@ def test_ensure_model_exists_returns_existing_file(tmp_path: Path) -> None:
     mock_download.assert_not_called()
 
 
-def test_ensure_model_exists_uses_configured_download_values(tmp_path: Path) -> None:
+def test_ensure_model_exists_uses_sherpa_download_values(tmp_path: Path) -> None:
     config = make_config(tmp_path)
 
     with patch("voicepad_core.vad.silero_download._download") as mock_download, patch("builtins.print"):
         result = silero_download.ensure_model_exists(config=config, verbose=False)
 
-    assert result == config.vad_model_path / config.vad_model_filename
+    assert result == config.vad_model_path / silero_download.MODEL_FILENAME
     mock_download.assert_called_once_with(
         result,
-        download_url="https://example.com/custom_vad.onnx",
+        download_url=silero_download.MODEL_URL,
         chunk_size=4,
         verbose=False,
     )

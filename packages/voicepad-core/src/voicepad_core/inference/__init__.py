@@ -1,8 +1,8 @@
 from .backends import (
     FasterWhisperDriver,
     FasterWhisperSession,
-    ParakeetOnnxDriver,
-    ParakeetOnnxSession,
+    SherpaOnnxDriver,
+    SherpaOnnxSession,
 )
 from .contracts import (
     BackendCapabilities,
@@ -54,8 +54,8 @@ __all__ = [
     "TranscriptionSession",
     "FasterWhisperDriver",
     "FasterWhisperSession",
-    "ParakeetOnnxDriver",
-    "ParakeetOnnxSession",
+    "SherpaOnnxDriver",
+    "SherpaOnnxSession",
     "TranscriptionResult",
     "Segment",
     "WordTimestamp",

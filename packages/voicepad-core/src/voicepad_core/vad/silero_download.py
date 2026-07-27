@@ -7,6 +7,8 @@ from pathlib import Path
 from ..config import Config, get_config
 
 logger = logging.getLogger(__name__)
+MODEL_FILENAME = "silero_vad.onnx"
+MODEL_URL = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx"
 
 
 class VADModelDownloadError(RuntimeError):
@@ -18,7 +20,7 @@ def get_model_path(vad_model_dir: Path | None = None, config: Config | None = No
     resolved_config = config or get_config()
     if vad_model_dir is None:
         vad_model_dir = resolved_config.vad_model_path
-    return vad_model_dir / resolved_config.vad_model_filename
+    return vad_model_dir / MODEL_FILENAME
 
 
 def ensure_model_exists(
@@ -37,12 +39,12 @@ def ensure_model_exists(
 
     if verbose:
         logger.info("[VAD] Silero ONNX model not found. Downloading...")
-        logger.info("Silero VAD source: %s", resolved_config.vad_model_url)
+        logger.info("Silero VAD source: %s", MODEL_URL)
         logger.info("Silero VAD target: %s", model_path)
 
     _download(
         model_path,
-        download_url=resolved_config.vad_model_url,
+        download_url=MODEL_URL,
         chunk_size=resolved_config.vad_download_chunk_size,
         verbose=verbose,
     )

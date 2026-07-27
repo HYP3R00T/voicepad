@@ -331,4 +331,4 @@ class TestTranscribe:
             )
 
         model, options = manager.opens[0]
-        assert (model.backend, options.precision) == ("parakeet-onnx", "float16")
+        assert (model.backend, options.precision) == ("sherpa-onnx", "float16")
