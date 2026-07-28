@@ -40,7 +40,7 @@ def test_configure_is_idempotent_on_windows(monkeypatch: pytest.MonkeyPatch) -> 
         "_find_nvidia_dll_directories",
         lambda: [directory],
     )
-    monkeypatch.setattr(windows_cuda.os, "add_dll_directory", add_directory)
+    monkeypatch.setattr(windows_cuda.os, "add_dll_directory", add_directory, raising=False)
 
     windows_cuda.configure_windows_cuda_dlls()
     windows_cuda.configure_windows_cuda_dlls()

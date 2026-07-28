@@ -50,6 +50,11 @@ class _Driver:
         return session
 
 
+class _FailingDriver(_Driver):
+    def open(self, model: PreparedModel, options: RuntimeOptions) -> _Session:
+        raise RuntimeError("native provider is missing")
+
+
 def _model(model_id: str = "tiny", backend: str = "test") -> Model:
     return Model(model_id, f"owner/{model_id}", backend, ("model.bin",), model_id, "test")
 
@@ -98,6 +103,14 @@ def test_unavailable_backend_fails_before_download(tmp_path: Path) -> None:
     """Unavailable native dependencies produce an explicit error."""
     manager = RuntimeManager(tmp_path, [_Driver(available=False)])
     with pytest.raises(BackendUnavailableError):
+        manager.open(_model())
+
+
+def test_open_preserves_backend_failure_detail(tmp_path: Path, prepared: Path) -> None:
+    """A backend startup failure retains its actionable native error for callers."""
+    manager = RuntimeManager(tmp_path, [_FailingDriver()])
+
+    with pytest.raises(BackendSessionError, match="native provider is missing"):
         manager.open(_model())
 
 

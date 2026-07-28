@@ -78,7 +78,7 @@ class RuntimeManager:
             try:
                 session = driver.open(prepared, requested)
             except Exception as exc:
-                raise BackendSessionError(f"Backend '{driver.id}' could not open model '{selected.id}'.") from exc
+                raise BackendSessionError(f"Backend '{driver.id}' could not open model '{selected.id}': {exc}") from exc
 
             info = session.info
             if info.backend_id != selected.backend or info.model_id != selected.id:

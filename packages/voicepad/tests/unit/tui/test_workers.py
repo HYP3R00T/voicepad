@@ -112,12 +112,13 @@ class TestWarmModel:
 
     @patch("voicepad_core.activate_model")
     @patch("voicepad_core.model_is_ready")
-    def test_warm_model_handles_transcription_error(
+    def test_warm_model_logs_transcription_error_traceback(
         self,
         mock_model_is_ready: Mock,
         mock_activate: Mock,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """A transcription error from activation is returned to the UI."""
+        """A handled activation error is returned to the UI and logged with its traceback."""
         from voicepad_core import TranscriptionError
 
         mock_config = MagicMock()
@@ -131,6 +132,7 @@ class TestWarmModel:
         assert result.compute_type == "int8"
         assert result.fallback is True
         assert result.error == "Model activation failed"
+        assert caplog.records[-1].exc_info is not None
 
     @patch("voicepad_core.activate_model")
     @patch("voicepad_core.model_is_ready")

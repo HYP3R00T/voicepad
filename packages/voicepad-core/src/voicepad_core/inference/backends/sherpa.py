@@ -7,6 +7,7 @@ from typing import Any
 
 import numpy as np
 
+from .linux_cuda import configure_linux_cuda_libraries
 from .windows_cuda import configure_windows_cuda_dlls
 from ..contracts import (
     BackendCapabilities,
@@ -65,6 +66,7 @@ class SherpaOnnxDriver:
         _validate_options(options, model.spec.precision)
         try:
             configure_windows_cuda_dlls()
+            configure_linux_cuda_libraries()
             sherpa = _load_runtime()
             if not _is_cuda_build(sherpa):
                 raise TranscriptionError("Parakeet requires the CUDA 12/cuDNN 9 build of Sherpa-ONNX.")

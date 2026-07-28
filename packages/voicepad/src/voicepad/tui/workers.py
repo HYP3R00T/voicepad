@@ -49,10 +49,10 @@ def warm_model(config: Config) -> ModelWarmResult:
             fallback=runtime.fallback_to_cpu,
         )
     except TranscriptionError as e:
-        logger.error("Model preparation or activation failed: %s", e)
+        logger.error("Model preparation or activation failed: %s", e, exc_info=True)
         return ModelWarmResult(device="cpu", compute_type="int8", fallback=True, error=str(e))
     except Exception as e:
-        logger.error("Unexpected model warm failure: %s", e)
+        logger.error("Unexpected model warm failure: %s", e, exc_info=True)
         return ModelWarmResult(device="cpu", compute_type="int8", fallback=True, error=str(e))
 
 
