@@ -585,9 +585,9 @@ class TestGlobalHotkeyField:
     """Tests for global_hotkey field."""
 
     def test_default_global_hotkey(self) -> None:
-        """Default global hotkey is '<ctrl>+<alt>+v'."""
+        """Default global hotkey uses the keyboard package's natural format."""
         config = Config(recordings_path="data/recordings", markdown_path="data/markdown")
-        assert config.global_hotkey == "<ctrl>+<alt>+v"
+        assert config.global_hotkey == "ctrl+alt+v"
 
     def test_custom_global_hotkey(self) -> None:
         """Custom global hotkey is accepted."""

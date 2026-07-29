@@ -20,6 +20,7 @@ def mock_app() -> Mock:
             "tui_config",
             "_overlay",
             "_hotkey_listener",
+            "_recording_handler",
             "_recording",
             "_transcribing",
             "_model_ready",
@@ -34,6 +35,7 @@ def mock_app() -> Mock:
     app.tui_config.theme = "tokyo-night"
     app._overlay = None
     app._hotkey_listener = None
+    app._recording_handler = Mock()
     app._recording = False
     app._transcribing = False
     app._model_ready = True
@@ -56,16 +58,30 @@ class TestStartHotkeyListener:
     """Test start_hotkey_listener method."""
 
     def test_returns_early_when_no_hotkey_configured(self, mock_app: Mock) -> None:
-        """Test that start_hotkey_listener returns early when no hotkey is configured."""
+        """Windows returns early when no native hotkey is configured."""
         from voicepad.tui.handlers.hotkey_handler import HotkeyHandler
 
         mock_app.config.global_hotkey = ""
         handler = HotkeyHandler(mock_app)
 
-        handler.start_hotkey_listener()
+        with patch("voicepad.tui.handlers.hotkey_handler.platform.system", return_value="Windows"):
+            handler.start_hotkey_listener()
 
         assert mock_app._overlay is None
         assert mock_app._hotkey_listener is None
+
+    @patch("voicepad.tui.overlay.StatusOverlay")
+    def test_linux_empty_windows_hotkey_still_starts_overlay(self, mock_overlay_class: Mock, mock_app: Mock) -> None:
+        """Linux control requests keep status feedback when the Windows setting is empty."""
+        from voicepad.tui.handlers.hotkey_handler import HotkeyHandler
+
+        mock_app.config.global_hotkey = ""
+        handler = HotkeyHandler(mock_app)
+
+        with patch("voicepad.tui.handlers.hotkey_handler.platform.system", return_value="Linux"):
+            handler.start_hotkey_listener()
+
+        mock_overlay_class.return_value.start.assert_called_once_with()
 
     @patch("voicepad.tui.hotkey.GlobalHotkeyListener")
     @patch("voicepad.tui.overlay.StatusOverlay")
@@ -99,15 +115,46 @@ class TestStartHotkeyListener:
         mock_listener_class.return_value = mock_listener
 
         handler = HotkeyHandler(mock_app)
-        handler.start_hotkey_listener()
+        with patch("voicepad.tui.handlers.hotkey_handler.platform.system", return_value="Windows"):
+            handler.start_hotkey_listener()
 
         mock_listener_class.assert_called_once_with(
             hotkey="ctrl+shift+r",
-            on_start=handler.hotkey_on_start,
-            on_stop=handler.hotkey_on_stop,
+            on_toggle=handler.hotkey_on_toggle,
         )
         mock_listener.start.assert_called_once()
         assert mock_app._hotkey_listener is mock_listener
+
+    @patch("voicepad.tui.hotkey.GlobalHotkeyListener")
+    @patch("voicepad.tui.overlay.StatusOverlay")
+    def test_linux_uses_desktop_shortcut_without_native_listener(
+        self, mock_overlay_class: Mock, mock_listener_class: Mock, mock_app: Mock
+    ) -> None:
+        """Linux starts the overlay but leaves global registration to the desktop."""
+        from voicepad.tui.handlers.hotkey_handler import HotkeyHandler
+
+        handler = HotkeyHandler(mock_app)
+        with patch("voicepad.tui.handlers.hotkey_handler.platform.system", return_value="Linux"):
+            handler.start_hotkey_listener()
+
+        mock_listener_class.assert_not_called()
+        assert mock_app._hotkey_listener is None
+
+    @patch("voicepad.tui.hotkey.GlobalHotkeyListener")
+    @patch("voicepad.tui.overlay.StatusOverlay")
+    def test_registration_failure_does_not_mark_listener_active(
+        self, mock_overlay_class: Mock, mock_listener_class: Mock, mock_app: Mock
+    ) -> None:
+        """A Windows registration error leaves the app listener state inactive."""
+        from voicepad.tui.handlers.hotkey_handler import HotkeyHandler
+
+        mock_listener_class.return_value.start.side_effect = PermissionError("denied")
+        handler = HotkeyHandler(mock_app)
+
+        with patch("voicepad.tui.handlers.hotkey_handler.platform.system", return_value="Windows"):
+            handler.start_hotkey_listener()
+
+        assert mock_app._hotkey_listener is None
 
     @patch("voicepad.tui.hotkey.GlobalHotkeyListener")
     @patch("voicepad.tui.overlay.StatusOverlay")
@@ -124,30 +171,40 @@ class TestStartHotkeyListener:
         handler.start_hotkey_listener()
 
 
-class TestHotkeyOnStart:
-    """Test hotkey_on_start method."""
+class TestHotkeyOnToggle:
+    """Test hotkey_on_toggle and hotkey_toggle_recording methods."""
 
-    def test_calls_hotkey_start_recording_from_thread(self, mock_app: Mock) -> None:
-        """Test that hotkey_on_start calls hotkey_start_recording from thread."""
+    def test_dispatches_toggle_to_textual_thread(self, mock_app: Mock) -> None:
+        """A request from a listener thread is dispatched through Textual."""
         from voicepad.tui.handlers.hotkey_handler import HotkeyHandler
 
         handler = HotkeyHandler(mock_app)
-        handler.hotkey_on_start()
+        handler.hotkey_on_toggle()
 
-        mock_app.call_from_thread.assert_called_once_with(handler.hotkey_start_recording)
+        mock_app.call_from_thread.assert_called_once_with(handler.hotkey_toggle_recording)
 
-
-class TestHotkeyOnStop:
-    """Test hotkey_on_stop method."""
-
-    def test_calls_hotkey_stop_recording_from_thread(self, mock_app: Mock) -> None:
-        """Test that hotkey_on_stop calls hotkey_stop_recording from thread."""
+    def test_toggle_starts_when_idle(self, mock_app: Mock) -> None:
+        """An idle app starts recording when toggled."""
         from voicepad.tui.handlers.hotkey_handler import HotkeyHandler
 
         handler = HotkeyHandler(mock_app)
-        handler.hotkey_on_stop()
 
-        mock_app.call_from_thread.assert_called_once_with(handler.hotkey_stop_recording)
+        with patch.object(handler, "hotkey_start_recording") as start_recording:
+            handler.hotkey_toggle_recording()
+
+        start_recording.assert_called_once_with()
+
+    def test_toggle_stops_when_recording(self, mock_app: Mock) -> None:
+        """An active recording stops when toggled."""
+        from voicepad.tui.handlers.hotkey_handler import HotkeyHandler
+
+        mock_app._recording = True
+        handler = HotkeyHandler(mock_app)
+
+        with patch.object(handler, "hotkey_stop_recording") as stop_recording:
+            handler.hotkey_toggle_recording()
+
+        stop_recording.assert_called_once_with()
 
 
 class TestHotkeyStartRecording:
@@ -186,8 +243,7 @@ class TestHotkeyStartRecording:
             handler.hotkey_start_recording()
             mock_overlay_set.assert_called_once_with("error")
 
-    @patch("voicepad.tui.handlers.recording_handler.RecordingHandler")
-    def test_switches_to_record_tab(self, mock_recording_handler_class: Mock, mock_app: Mock) -> None:
+    def test_switches_to_record_tab(self, mock_app: Mock) -> None:
         """Test that hotkey_start_recording switches to record tab."""
         from voicepad.tui.handlers.hotkey_handler import HotkeyHandler
 
@@ -200,8 +256,7 @@ class TestHotkeyStartRecording:
         mock_app.query_one.assert_called_once_with("#tabs", ANY)
         assert mock_tabs.active == "tab-record"
 
-    @patch("voicepad.tui.handlers.recording_handler.RecordingHandler")
-    def test_sets_recording_overlay(self, mock_recording_handler_class: Mock, mock_app: Mock) -> None:
+    def test_sets_recording_overlay(self, mock_app: Mock) -> None:
         """Test that hotkey_start_recording sets recording overlay."""
         from voicepad.tui.handlers.hotkey_handler import HotkeyHandler
 
@@ -211,22 +266,16 @@ class TestHotkeyStartRecording:
             handler.hotkey_start_recording()
             mock_overlay_set.assert_called_once_with("recording")
 
-    @patch("voicepad.tui.handlers.recording_handler.RecordingHandler")
-    def test_delegates_to_recording_handler(self, mock_recording_handler_class: Mock, mock_app: Mock) -> None:
-        """Test that hotkey_start_recording delegates to recording handler."""
+    def test_uses_tui_recording_handler(self, mock_app: Mock) -> None:
+        """A desktop start request uses the TUI's shared recording handler."""
         from voicepad.tui.handlers.hotkey_handler import HotkeyHandler
-
-        mock_recording_handler = Mock()
-        mock_recording_handler_class.return_value = mock_recording_handler
 
         handler = HotkeyHandler(mock_app)
         handler.hotkey_start_recording()
 
-        mock_recording_handler_class.assert_called_once_with(mock_app)
-        mock_recording_handler.start_recording.assert_called_once()
+        mock_app._recording_handler.start_recording.assert_called_once_with()
 
-    @patch("voicepad.tui.handlers.recording_handler.RecordingHandler")
-    def test_handles_tab_switch_exception(self, mock_recording_handler_class: Mock, mock_app: Mock) -> None:
+    def test_handles_tab_switch_exception(self, mock_app: Mock) -> None:
         """Test that hotkey_start_recording handles tab switch exceptions."""
         from voicepad.tui.handlers.hotkey_handler import HotkeyHandler
 
@@ -251,8 +300,7 @@ class TestHotkeyStopRecording:
             handler.hotkey_stop_recording()
             mock_overlay_set.assert_not_called()
 
-    @patch("voicepad.tui.handlers.recording_handler.RecordingHandler")
-    def test_sets_hotkey_pending_copy_flag(self, mock_recording_handler_class: Mock, mock_app: Mock) -> None:
+    def test_sets_hotkey_pending_copy_flag(self, mock_app: Mock) -> None:
         """Test that hotkey_stop_recording sets hotkey pending copy flag."""
         from voicepad.tui.handlers.hotkey_handler import HotkeyHandler
 
@@ -263,8 +311,7 @@ class TestHotkeyStopRecording:
 
         assert mock_app._hotkey_pending_copy is True
 
-    @patch("voicepad.tui.handlers.recording_handler.RecordingHandler")
-    def test_sets_transcribing_overlay(self, mock_recording_handler_class: Mock, mock_app: Mock) -> None:
+    def test_sets_transcribing_overlay(self, mock_app: Mock) -> None:
         """Test that hotkey_stop_recording sets transcribing overlay."""
         from voicepad.tui.handlers.hotkey_handler import HotkeyHandler
 
@@ -275,20 +322,16 @@ class TestHotkeyStopRecording:
             handler.hotkey_stop_recording()
             mock_overlay_set.assert_called_once_with("transcribing")
 
-    @patch("voicepad.tui.handlers.recording_handler.RecordingHandler")
-    def test_delegates_to_recording_handler(self, mock_recording_handler_class: Mock, mock_app: Mock) -> None:
-        """Test that hotkey_stop_recording delegates to recording handler."""
+    def test_uses_tui_recording_handler(self, mock_app: Mock) -> None:
+        """A desktop stop request uses the TUI's shared recording handler."""
         from voicepad.tui.handlers.hotkey_handler import HotkeyHandler
 
         mock_app._recording = True
-        mock_recording_handler = Mock()
-        mock_recording_handler_class.return_value = mock_recording_handler
 
         handler = HotkeyHandler(mock_app)
         handler.hotkey_stop_recording()
 
-        mock_recording_handler_class.assert_called_once_with(mock_app)
-        mock_recording_handler.stop_recording.assert_called_once()
+        mock_app._recording_handler.stop_recording.assert_called_once_with()
 
 
 class TestOverlaySet:

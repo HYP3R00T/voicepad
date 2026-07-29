@@ -25,11 +25,13 @@ class LifecycleManager:
 
         self.app._load_history_from_disk()
         self.app._populate_settings()
+        self._start_control_server()
         self.check_first_run()
 
     def on_unmount(self) -> None:
         """Clean up resources when the app exits."""
         self._stop_hotkey_listener()
+        self._stop_control_server()
         self._stop_overlay()
         try:
             from voicepad_core import deactivate_model
@@ -43,6 +45,18 @@ class LifecycleManager:
         if self.app._hotkey_listener is not None:
             with contextlib.suppress(Exception):
                 self.app._hotkey_listener.stop()
+
+    def _start_control_server(self) -> None:
+        try:
+            self.app._control_server.start()
+        except Exception as error:
+            logger.warning("Could not start the VoicePad control socket: %s", error)
+
+    def _stop_control_server(self) -> None:
+        try:
+            self.app._control_server.stop()
+        except Exception as error:
+            logger.warning("Could not stop the VoicePad control socket: %s", error)
 
     def _stop_overlay(self) -> None:
         """Stop the status overlay if running."""

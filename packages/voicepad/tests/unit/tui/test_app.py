@@ -169,29 +169,6 @@ class TestHotkeyDelegation:
     @patch("voicepad.tui.handlers.recording_handler.RecordingHandler")
     @patch("voicepad.tui.handlers.history_handler.HistoryHandler")
     @patch("voicepad.tui.handlers.hotkey_handler.HotkeyHandler")
-    def test_hotkey_on_start_delegates(
-        self,
-        mock_hotkey_handler_class: Mock,
-        mock_history_handler: Mock,
-        mock_recording_handler: Mock,
-        mock_settings_handler: Mock,
-        mock_config: Mock,
-    ) -> None:
-        """Test that _hotkey_on_start delegates to handler."""
-        from voicepad.tui.app import VoicePadApp
-
-        mock_handler = Mock()
-        mock_hotkey_handler_class.return_value = mock_handler
-        app = VoicePadApp(mock_config)
-
-        app._hotkey_on_start()
-
-        mock_handler.hotkey_on_start.assert_called_once()
-
-    @patch("voicepad.tui.handlers.settings_handler.SettingsHandler")
-    @patch("voicepad.tui.handlers.recording_handler.RecordingHandler")
-    @patch("voicepad.tui.handlers.history_handler.HistoryHandler")
-    @patch("voicepad.tui.handlers.hotkey_handler.HotkeyHandler")
     def test_overlay_set_delegates(
         self,
         mock_hotkey_handler_class: Mock,

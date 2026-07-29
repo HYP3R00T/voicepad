@@ -41,6 +41,7 @@ from voicepad_core.config import Config
 
 from voicepad.tui.components import VoiceButton
 from voicepad.tui.config import TUIConfig, load_tui_config, save_tui_config
+from voicepad.tui.control import ControlServer
 from voicepad.tui.managers import (
     LayoutBuilder,
     LifecycleManager,
@@ -170,6 +171,7 @@ class VoicePadApp(App[None]):
         self._recording_handler = RecordingHandler(self)
         self._history_handler = HistoryHandler(self)
         self._hotkey_handler = HotkeyHandler(self)
+        self._control_server = ControlServer(on_toggle=self._hotkey_handler.hotkey_on_toggle)
 
     # ------------------------------------------------------------------
     # Layout
@@ -203,22 +205,6 @@ class VoicePadApp(App[None]):
         """Start the system-wide hotkey listener and status overlay."""
         self._hotkey_handler.start_hotkey_listener()
 
-    def _hotkey_on_start(self) -> None:
-        """Called from the hotkey thread when the hotkey is pressed to start."""
-        self._hotkey_handler.hotkey_on_start()
-
-    def _hotkey_on_stop(self) -> None:
-        """Called from the hotkey thread when the hotkey is pressed to stop."""
-        self._hotkey_handler.hotkey_on_stop()
-
-    def _hotkey_start_recording(self) -> None:
-        """Start recording triggered by global hotkey (runs on main thread)."""
-        self._hotkey_handler.hotkey_start_recording()
-
-    def _hotkey_stop_recording(self) -> None:
-        """Stop recording triggered by global hotkey (runs on main thread)."""
-        self._hotkey_handler.hotkey_stop_recording()
-
     def _overlay_set(self, state: str) -> None:
         """Update the floating overlay state if it exists."""
         self._hotkey_handler.overlay_set(state)
@@ -232,7 +218,7 @@ class VoicePadApp(App[None]):
         self._settings_handler.populate_settings()
 
     def _get_hotkey_from_picker(self) -> str:
-        """Read modifier checkboxes + key dropdown and return pynput hotkey string."""
+        """Return the Windows hotkey selected in the settings picker."""
         return self._settings_handler.get_hotkey_from_picker()
 
     def _refresh_settings_values(self) -> None:

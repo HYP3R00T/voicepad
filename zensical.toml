@@ -15,6 +15,7 @@ nav = [
     { "Overview" = "configuration/index.md" },
     { "Transcription Models" = "configuration/models.md" },
     { "Input Device" = "configuration/input-device.md" },
+    { "Global Hotkey" = "configuration/global-hotkey.md" },
     { "Output Paths" = "configuration/output-paths.md" },
     { "GPU Acceleration" = "configuration/gpu.md" },
   ] },

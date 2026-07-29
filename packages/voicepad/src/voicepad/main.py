@@ -24,6 +24,16 @@ app.add_typer(config_app, name="config", help="Configuration management")
 app.add_typer(record_app, name="record", help="Recording commands (CLI mode)")
 
 
+@app.command("toggle")
+def toggle_recording() -> None:
+    """Toggle recording in a running VoicePad TUI."""
+    from voicepad.tui.control import run_toggle_command
+
+    exit_code = run_toggle_command()
+    if exit_code:
+        raise typer.Exit(code=exit_code)
+
+
 @app.callback()
 def main(ctx: typer.Context) -> None:
     """Launch the TUI when called with no subcommand."""

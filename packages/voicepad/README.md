@@ -27,6 +27,12 @@ That's it. On first run, the interactive TUI opens an onboarding flow so you can
 | `Tab` | Switch tabs (Record / History / Settings) |
 | `q` | Quit |
 
+On Windows, configure the global shortcut in the Settings tab. On Linux, bind a desktop shortcut such as `Super+Space` to:
+
+```bash
+voicepad toggle
+```
+
 ## Configuration
 
 Settings are stored at `~/.config/voicepad/voicepad.yaml` and can be changed from the **Settings** tab inside the app. Some advanced options remain config-only.

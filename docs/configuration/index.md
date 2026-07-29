@@ -72,7 +72,8 @@ local_agreement_file: true
 
 !!! tip "Global Hotkey Format"
     The `global_hotkey` setting uses natural hotkey strings like `ctrl+shift+space`, `alt+v`, or `f9`.
-    The hotkey works system-wide on Windows, allowing you to start/stop recording from any application.
+    VoicePad registers this value directly on Windows. Linux users configure their desktop to run `voicepad toggle`.
+    See [Global Hotkey](global-hotkey.md) for setup instructions.
 
 !!! note "Settings visibility"
     Not all settings are shown in the Settings tab interface. Advanced runtime tuning such as inference thresholds, VAD behavior, overlap deduplication, text post-processing, final-chunk speech gating, and model download locations can be changed by editing the YAML file directly.
@@ -88,6 +89,7 @@ For details on individual settings, see:
 
 - [Whisper Models](models.md): choose the right model for your hardware
 - [Input Device](input-device.md): select which microphone to use
+- [Global Hotkey](global-hotkey.md): configure system-wide record and stop shortcuts
 - [Output Paths](output-paths.md): change where recordings and transcriptions are saved
 - [GPU Acceleration](gpu.md): NVIDIA GPU requirements and performance
 

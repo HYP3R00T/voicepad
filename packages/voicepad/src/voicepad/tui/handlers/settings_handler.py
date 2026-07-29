@@ -185,7 +185,7 @@ class SettingsHandler:
 
         # ── Hotkey picker ──────────────────────────────────────────────
         hotkey_label = Label(
-            "[bold]global_hotkey[/]  [dim]—  System-wide record/stop shortcut[/]",
+            "[bold]global_hotkey[/]  [dim]—  Windows shortcut; Linux uses voicepad toggle[/]",
             classes="settings-key",
         )
         hotkey_row = Static(classes="settings-row", id="hotkey-row")
@@ -229,7 +229,7 @@ class SettingsHandler:
         )
 
     def get_hotkey_from_picker(self) -> str:
-        """Read modifier checkboxes + key dropdown and return pynput hotkey string."""
+        """Return the Windows hotkey selected in the settings picker."""
         mods: list[str] = []
         for mod_id in ("ctrl", "alt", "shift", "cmd"):
             with contextlib.suppress(Exception):

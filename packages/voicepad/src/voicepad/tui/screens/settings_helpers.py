@@ -123,7 +123,7 @@ def _mount_hotkey_picker(container: Static, config: Config) -> None:
     )
 
     hotkey_label = Label(
-        "[bold]global_hotkey[/]  [dim]—  System-wide record/stop shortcut[/]",
+        "[bold]global_hotkey[/]  [dim]—  Windows shortcut; Linux uses voicepad toggle[/]",
         classes="settings-key",
     )
     hotkey_row = Static(classes="settings-row", id="hotkey-row")

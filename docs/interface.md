@@ -98,7 +98,7 @@ Configure VoicePad without editing any files. Changes are saved to your global c
 | Transcription model | Whisper model to use |
 | Input device | Microphone to record from |
 | Theme | UI color theme |
-| Global hotkey | System-wide keyboard shortcut for recording |
+| Global hotkey | Native Windows shortcut; Linux uses the `voicepad toggle` desktop command |
 
 **Quick actions:**
 
@@ -109,6 +109,7 @@ Configure VoicePad without editing any files. Changes are saved to your global c
     The Settings tab intentionally shows a simpler model list than the full config file. Advanced model IDs and lower-level transcription behavior can still be changed by editing `voicepad.yaml` directly.
 
 See [Configuration](configuration/index.md) for more details on each setting.
+See [Global Hotkey](configuration/global-hotkey.md) to configure a system-wide shortcut on Windows or Linux.
 
 ## Info Panel
 

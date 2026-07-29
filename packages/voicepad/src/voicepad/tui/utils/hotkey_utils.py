@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import platform
+
 # Keys available in the hotkey picker
 HOTKEY_KEYS: list[str] = [
     *"abcdefghijklmnopqrstuvwxyz",
@@ -50,6 +52,8 @@ MOD_TO_DISPLAY: dict[str, str] = {
     "cmd": "win",  # Display as "win" for Windows key
 }
 
+_SUPER_ALIASES = {"cmd", "super", "win", "windows"}
+
 
 def parse_hotkey_str(hotkey: str) -> tuple[list[str], str]:
     """Parse 'ctrl+alt+v' → (['ctrl', 'alt'], 'v').
@@ -60,7 +64,9 @@ def parse_hotkey_str(hotkey: str) -> tuple[list[str], str]:
     key = "v"
     for part in hotkey.lower().split("+"):
         part = part.strip().strip("<>")
-        if part in MOD_TO_KEYBOARD:
+        if part in _SUPER_ALIASES:
+            mods.append("cmd")
+        elif part in MOD_TO_KEYBOARD:
             mods.append(part)
         elif part:
             key = part
@@ -89,6 +95,9 @@ def build_hotkey_display_str(mods: list[str], key: str) -> str:
     """
     if not key:
         return ""
-    parts = [MOD_TO_DISPLAY[m] for m in mods if m in MOD_TO_DISPLAY]
+    display_mapping = dict(MOD_TO_DISPLAY)
+    if platform.system() != "Windows":
+        display_mapping["cmd"] = "super"
+    parts = [display_mapping[m] for m in mods if m in display_mapping]
     parts.append(key)
     return "+".join(parts)

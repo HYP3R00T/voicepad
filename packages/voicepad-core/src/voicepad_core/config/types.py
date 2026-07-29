@@ -35,7 +35,7 @@ class Config(BaseModel):
     transcription_model: str = "turbo"
     transcription_device: Literal["auto", "cuda", "cpu"] = "auto"
     transcription_compute_type: Literal["auto", "float16", "int8", "float32", "int8_float16"] = "auto"
-    global_hotkey: str = "<ctrl>+<alt>+v"
+    global_hotkey: str = "ctrl+alt+v"
     language: str = "en"
     beam_size: int = 5
     transcription_vad_filter: bool = False

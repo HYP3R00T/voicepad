@@ -32,6 +32,7 @@ class TestOnMount:
         app.tui_config.theme = "tokyo-night"
         app._load_history_from_disk = Mock()
         app._populate_settings = Mock()
+        app._control_server = Mock()
         return app
 
     def test_registers_theme(self, mock_app: Mock) -> None:
@@ -93,6 +94,17 @@ class TestOnMount:
 
             mock_check.assert_called_once()
 
+    def test_starts_control_server(self, mock_app: Mock) -> None:
+        """Mounting starts the local desktop-shortcut control channel."""
+        from voicepad.tui.managers.lifecycle_manager import LifecycleManager
+
+        manager = LifecycleManager(mock_app)
+
+        with patch.object(manager, "check_first_run"):
+            manager.on_mount()
+
+        mock_app._control_server.start.assert_called_once_with()
+
 
 class TestOnUnmount:
     """Tests for on_unmount method."""
@@ -103,6 +115,7 @@ class TestOnUnmount:
         app = Mock()
         app._hotkey_listener = None
         app._overlay = None
+        app._control_server = Mock()
         return app
 
     def test_stops_hotkey_listener_if_running(self, mock_app: Mock) -> None:
@@ -138,6 +151,16 @@ class TestOnUnmount:
         manager.on_unmount()
 
         mock_overlay.stop.assert_called_once()
+
+    def test_stops_control_server(self, mock_app: Mock) -> None:
+        """Unmounting stops the local desktop-shortcut control channel."""
+        from voicepad.tui.managers.lifecycle_manager import LifecycleManager
+
+        manager = LifecycleManager(mock_app)
+
+        manager.on_unmount()
+
+        mock_app._control_server.stop.assert_called_once_with()
 
     def test_does_not_stop_overlay_if_not_running(self, mock_app: Mock) -> None:
         """Test that on_unmount handles None overlay."""
