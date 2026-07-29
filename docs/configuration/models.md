@@ -30,7 +30,10 @@ The default model is **turbo**, an optimized version of Whisper large-v3. It is 
 
 `parakeet-tdt-0.6b-v3` uses Sherpa's pinned int8 export. VoicePad verifies the encoder, decoder, joiner, and tokens before Sherpa runs them through CUDA.
 
-Parakeet uses greedy decoding because it is reliable on short dictation. Sherpa's modified beam decoder produced severe truncation during local testing, so `proper_nouns` currently applies only to Faster Whisper models. VoicePad does not rewrite Parakeet transcripts afterward.
+Parakeet uses Sherpa's modified beam decoder so configured `proper_nouns` can influence recognition. VoicePad
+tokenizes each hint with NVIDIA's pinned Parakeet tokenizer and applies a moderate contextual-biasing score. This
+keeps several candidate token paths alive long enough for rare names such as `Mise` to win when the audio supports
+them. VoicePad does not rewrite Parakeet transcripts afterward.
 
 ## Changing the Model
 

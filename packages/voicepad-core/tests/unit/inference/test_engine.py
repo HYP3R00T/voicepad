@@ -244,7 +244,11 @@ class TestTranscribe:
         result = transcribe(
             RawAudio(np.ones(16_000, dtype=np.float32), 16_000, 1),
             language="fr",
-            config=_config(beam_size=3, transcription_vad_filter=True),
+            config=_config(
+                beam_size=3,
+                transcription_vad_filter=True,
+                proper_nouns=("Mise",),
+            ),
             runtime_manager=cast(RuntimeManager, _Manager(_Session(), _PARAKEET_CONTRACT)),
         )
 
@@ -255,6 +259,7 @@ class TestTranscribe:
             "no_speech_threshold",
             "hallucination_silence_threshold",
         }
+        assert "proper_nouns" in result.applied_options
 
     def test_applies_voicepad_text_postprocessing_once(self) -> None:
         """Enabled text cleanup changes result text after backend inference."""

@@ -53,6 +53,9 @@ class TestOnSettingsSave:
         theme_select = Mock()
         theme_select.value = "tokyo-night"
 
+        proper_nouns_input = Mock()
+        proper_nouns_input.text = ""
+
         ctrl_checkbox = Mock()
         ctrl_checkbox.value = False
         alt_checkbox = Mock()
@@ -72,6 +75,7 @@ class TestOnSettingsSave:
             "#setting-vad_model_path": vad_input,
             "#setting-transcription_model": model_select,
             "#setting-input_device_index": device_select,
+            "#setting-proper_nouns": proper_nouns_input,
             "#setting-theme": theme_select,
             "#hotkey-mod-ctrl": ctrl_checkbox,
             "#hotkey-mod-alt": alt_checkbox,
@@ -160,6 +164,33 @@ class TestOnSettingsSave:
         mock_write_config.assert_called_once()
         saved_config = mock_write_config.call_args[0][0]
         assert saved_config.vad_model_path == vad_model_path
+
+    def test_proper_nouns_are_trimmed_deduplicated_and_saved(self, tmp_path: Path) -> None:
+        """Saving vocabulary hints trims entries and removes case-insensitive duplicates."""
+        recordings_path = tmp_path / "recordings"
+        markdown_path = tmp_path / "markdown"
+        vad_model_path = tmp_path / "vad"
+        config = Config(
+            recordings_path=recordings_path,
+            markdown_path=markdown_path,
+            vad_model_path=vad_model_path,
+        )
+        status = Mock()
+        selector_map = self._build_selector_map(recordings_path, markdown_path, status, vad_model_path)
+        proper_nouns_input = Mock()
+        proper_nouns_input.text = " Mise \nVoicePad\nmise\n\nZensical "
+        selector_map["#setting-proper_nouns"] = proper_nouns_input
+        app = self._build_app(config, selector_map)
+        handler = SettingsHandler(app)
+
+        with (
+            patch("utilityhub_config.get_config_path", return_value=tmp_path / "voicepad.yaml"),
+            patch("utilityhub_config.write_config") as mock_write_config,
+        ):
+            handler.on_settings_save()
+
+        saved_config = mock_write_config.call_args.args[0]
+        assert saved_config.proper_nouns == ("Mise", "VoicePad", "Zensical")
 
     def test_vad_model_path_directory_creation_fails_gracefully(self, tmp_path: Path) -> None:
         """Saving settings handles vad_model_path directory creation failure."""

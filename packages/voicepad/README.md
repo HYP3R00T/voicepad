@@ -54,6 +54,9 @@ min_fresh_speech_duration_s: 0.25
 
 # Inference cleanup / prompting
 initial_prompt: "Hello. This is a transcription with proper punctuation, capitalization, and grammar."
+proper_nouns:
+  - Mise
+  - VoicePad
 text_postprocessing_enabled: false
 no_speech_threshold: 0.6
 hallucination_max_repetitions: 3

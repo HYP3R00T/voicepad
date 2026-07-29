@@ -97,6 +97,7 @@ Configure VoicePad without editing any files. Changes are saved to your global c
 | VAD model path | Where Voice Activity Detection model is stored |
 | Transcription model | Whisper model to use |
 | Input device | Microphone to record from |
+| Vocabulary hints | Names and terms to prioritize during recognition, one per line |
 | Theme | UI color theme |
 | Global hotkey | Native Windows shortcut; Linux uses the `voicepad toggle` desktop command |
 

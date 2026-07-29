@@ -47,6 +47,7 @@ dependencies = [
   "scipy>=1.17.0",
   "sounddevice>=0.5.5",
   "soundfile>=0.13.1",
+  "tokenizers>=0.22.2",
   "utilityhub-config>=0.2.2",
   "utilityhub-logging>=0.1.0",
 ]

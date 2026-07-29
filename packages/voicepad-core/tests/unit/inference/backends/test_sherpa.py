@@ -11,6 +11,7 @@ from voicepad_core.inference.contracts import (
     PreparedModel,
     RuntimeInfo,
     RuntimeOptions,
+    TranscriptionContext,
     TranscriptionRequest,
 )
 from voicepad_core.inference.errors import TranscriptionError
@@ -20,6 +21,7 @@ _FILES = (
     "decoder.int8.onnx",
     "encoder.int8.onnx",
     "joiner.int8.onnx",
+    "tokenizer.json",
     "tokens.txt",
 )
 
@@ -38,10 +40,12 @@ class _Recognizer:
         self.text = text
         self.streams: list[_Stream] = []
         self.decoded: list[_Stream] = []
+        self.hotwords: list[str | None] = []
 
-    def create_stream(self) -> _Stream:
+    def create_stream(self, hotwords: str | None = None) -> _Stream:
         stream = _Stream(self.text)
         self.streams.append(stream)
+        self.hotwords.append(hotwords)
         return stream
 
     def decode_stream(self, stream: _Stream) -> None:
@@ -62,6 +66,17 @@ class _Sherpa:
     def __init__(self, recognizer: _Recognizer, version: str = "1.13.3+cuda12.cudnn9") -> None:
         self.__version__ = version
         self.OfflineRecognizer = _OfflineRecognizer(recognizer)
+
+
+class _Tokenizer:
+    _TOKENS = {
+        "Mise": ["▁M", "ise"],
+        "VoicePad": ["▁Vo", "ice", "P", "ad"],
+    }
+
+    def encode(self, text: str, *, add_special_tokens: bool) -> SimpleNamespace:
+        assert add_special_tokens is False
+        return SimpleNamespace(tokens=self._TOKENS[text])
 
 
 def _spec(*, backend_id: str = "sherpa-onnx") -> Model:
@@ -101,6 +116,10 @@ def _patch_runtime(
         "voicepad_core.inference.backends.sherpa._load_runtime",
         lambda: sherpa,
     )
+    monkeypatch.setattr(
+        "voicepad_core.inference.backends.sherpa._load_tokenizer",
+        lambda _: _Tokenizer(),
+    )
     return sherpa, recognizer
 
 
@@ -109,7 +128,7 @@ class TestSherpaOnnxDriver:
         """The driver advertises implemented decoding features and its waveform requirement."""
         contract = SherpaOnnxDriver().contract
 
-        assert contract.decoding.context_biasing is False
+        assert contract.decoding.context_biasing is True
         assert contract.decoding.word_timestamps is False
         assert contract.decoding.translation is False
         assert contract.audio.peak_normalize is True
@@ -119,7 +138,7 @@ class TestSherpaOnnxDriver:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """A complete artifact opens with Sherpa's reliable CUDA greedy decoder."""
+        """A complete artifact opens with Sherpa's contextual modified-beam decoder."""
         sherpa, _ = _patch_runtime(monkeypatch)
 
         session = SherpaOnnxDriver().open(
@@ -134,7 +153,9 @@ class TestSherpaOnnxDriver:
             "decoder": str(tmp_path / "decoder.int8.onnx"),
             "joiner": str(tmp_path / "joiner.int8.onnx"),
             "tokens": str(tmp_path / "tokens.txt"),
-            "decoding_method": "greedy_search",
+            "decoding_method": "modified_beam_search",
+            "hotwords_score": 4.0,
+            "max_active_paths": 16,
             "provider": "cuda",
             "model_type": "nemo_transducer",
         }
@@ -184,12 +205,12 @@ class TestSherpaOnnxDriver:
 
 
 class TestSherpaOnnxSession:
-    def test_transcribe_uses_unbiased_greedy_stream(
+    def test_transcribe_without_vocabulary_uses_unbiased_stream(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Parakeet decodes through the reliable stream without contextual biasing."""
+        """Parakeet omits per-stream hotwords when no vocabulary was configured."""
         _, recognizer = _patch_runtime(monkeypatch)
         session = SherpaOnnxDriver().open(_prepared(tmp_path), RuntimeOptions())
 
@@ -207,6 +228,24 @@ class TestSherpaOnnxSession:
         assert stream.calls[0][0] == 16_000
         assert stream.calls[0][1].dtype == np.float32
         assert recognizer.decoded == [stream]
+        assert recognizer.hotwords == [None]
+
+    def test_transcribe_tokenizes_and_biases_proper_nouns(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Configured terms become exact Parakeet tokens separated as Sherpa hotword phrases."""
+        _, recognizer = _patch_runtime(monkeypatch)
+        session = SherpaOnnxDriver().open(_prepared(tmp_path), RuntimeOptions())
+
+        session.transcribe(
+            _request(
+                context=TranscriptionContext(proper_nouns=("Mise", "VoicePad")),
+            )
+        )
+
+        assert recognizer.hotwords == ["▁M ise/▁Vo ice P ad"]
 
     def test_transcribe_rejects_translation(
         self,

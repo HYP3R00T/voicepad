@@ -19,13 +19,18 @@ def test_model_binds_artifact_to_backend() -> None:
     )
 
 
-def test_parakeet_requires_only_its_primary_artifact() -> None:
-    """Parakeet no longer requires a companion BPE vocabulary for greedy decoding."""
-    assert get_model("parakeet-tdt-0.6b-v3").files == (
-        "decoder.int8.onnx",
-        "encoder.int8.onnx",
-        "joiner.int8.onnx",
-        "tokens.txt",
+def test_parakeet_requires_its_official_tokenizer() -> None:
+    """Parakeet binds its converted runtime files to NVIDIA's pinned tokenizer."""
+    model = get_model("parakeet-tdt-0.6b-v3")
+
+    assert (
+        model.auxiliary_artifacts[0].repo,
+        model.auxiliary_artifacts[0].filename,
+        model.auxiliary_artifacts[0].revision,
+    ) == (
+        "nvidia/parakeet-tdt-0.6b-v3",
+        "tokenizer.json",
+        "7c35754d166cca382ad1e53e68b01e7c575f3a1d",
     )
 
 

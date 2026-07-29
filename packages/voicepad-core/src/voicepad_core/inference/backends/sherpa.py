@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import logging
 import time
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -27,9 +28,11 @@ logger = logging.getLogger(__name__)
 
 BACKEND_ID = "sherpa-onnx"
 SAMPLE_RATE = 16_000
+HOTWORDS_SCORE = 4.0
+MAX_ACTIVE_PATHS = 16
 _CONTRACT = BackendContract(
     audio=WaveformSpec(sample_rate=SAMPLE_RATE, peak_normalize=True),
-    decoding=BackendCapabilities(),
+    decoding=BackendCapabilities(context_biasing=True),
     output=OutputCapabilities(),
 )
 
@@ -76,10 +79,13 @@ class SherpaOnnxDriver:
                 decoder=str(model.artifact_path / "decoder.int8.onnx"),
                 joiner=str(model.artifact_path / "joiner.int8.onnx"),
                 tokens=str(model.artifact_path / "tokens.txt"),
-                decoding_method="greedy_search",
+                decoding_method="modified_beam_search",
+                max_active_paths=MAX_ACTIVE_PATHS,
+                hotwords_score=HOTWORDS_SCORE,
                 provider="cuda",
                 model_type="nemo_transducer",
             )
+            tokenizer = _load_tokenizer(model.artifact_path / "tokenizer.json")
         except TranscriptionError:
             raise
         except Exception as exc:
@@ -92,19 +98,20 @@ class SherpaOnnxDriver:
             precision=model.spec.precision or "float32",
         )
         logger.info(
-            "Opened Sherpa-ONNX runtime: model=%s provider=%s precision=%s decoder=greedy_search",
+            "Opened Sherpa-ONNX runtime: model=%s provider=%s precision=%s decoder=modified_beam_search",
             model.spec.id,
             "cuda",
             info.precision,
         )
-        return SherpaOnnxSession(recognizer, info)
+        return SherpaOnnxSession(recognizer, tokenizer, info)
 
 
 class SherpaOnnxSession:
     """Adapt Sherpa-ONNX recognition to VoicePad's result contract."""
 
-    def __init__(self, recognizer: Any, info: RuntimeInfo) -> None:
+    def __init__(self, recognizer: Any, tokenizer: Any, info: RuntimeInfo) -> None:
         self._recognizer: Any | None = recognizer
+        self._tokenizer = tokenizer
         self._info = info
 
     @property
@@ -122,7 +129,8 @@ class SherpaOnnxSession:
 
         started_at = time.perf_counter()
         try:
-            stream = recognizer.create_stream()
+            hotwords = _encode_hotwords(self._tokenizer, request.context.proper_nouns)
+            stream = recognizer.create_stream(hotwords=hotwords or None)
             stream.accept_waveform(
                 request.sample_rate,
                 np.ascontiguousarray(request.audio, dtype=np.float32),
@@ -161,6 +169,28 @@ def _load_runtime() -> Any:
     except ImportError as exc:
         raise TranscriptionError("Parakeet requires the CUDA 12/cuDNN 9 build of 'sherpa-onnx'.") from exc
     return sherpa_onnx
+
+
+def _load_tokenizer(path: Path) -> Any:
+    try:
+        from tokenizers import Tokenizer
+    except ImportError as exc:
+        raise TranscriptionError("Parakeet vocabulary hints require the 'tokenizers' package.") from exc
+    try:
+        return Tokenizer.from_file(str(path))
+    except Exception as exc:
+        raise TranscriptionError(f"Could not load Parakeet tokenizer '{path}': {exc}") from exc
+
+
+def _encode_hotwords(tokenizer: Any, proper_nouns: tuple[str, ...]) -> str:
+    phrases: list[str] = []
+    for term in proper_nouns:
+        encoding = tokenizer.encode(term, add_special_tokens=False)
+        tokens = tuple(str(token) for token in encoding.tokens)
+        if not tokens or "<unk>" in tokens:
+            raise TranscriptionError(f"Parakeet tokenizer cannot encode vocabulary hint '{term}'.")
+        phrases.append(" ".join(tokens))
+    return "/".join(phrases)
 
 
 def _is_cuda_build(sherpa: Any) -> bool:

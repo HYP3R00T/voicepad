@@ -36,7 +36,7 @@ def prepare_artifact(
 
     target.mkdir(parents=True, exist_ok=True)
     try:
-        from huggingface_hub import snapshot_download
+        from huggingface_hub import hf_hub_download, snapshot_download
         from huggingface_hub.utils import disable_progress_bars
 
         disable_progress_bars()
@@ -46,6 +46,13 @@ def prepare_artifact(
             local_dir=str(target),
             allow_patterns=list(model.files),
         )
+        for artifact in model.auxiliary_artifacts:
+            hf_hub_download(
+                repo_id=artifact.repo,
+                filename=artifact.filename,
+                revision=artifact.revision,
+                local_dir=str(target),
+            )
         result = validate_model(target, model)
     except Exception as exc:
         raise ArtifactError(f"Could not prepare model '{model.id}': {exc}") from exc

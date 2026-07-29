@@ -1779,6 +1779,7 @@ dependencies = [
     { name = "sherpa-onnx" },
     { name = "sounddevice" },
     { name = "soundfile" },
+    { name = "tokenizers" },
     { name = "utilityhub-config" },
     { name = "utilityhub-logging" },
 ]
@@ -1797,6 +1798,7 @@ requires-dist = [
     { name = "sherpa-onnx", specifier = "==1.13.3+cuda12.cudnn9" },
     { name = "sounddevice", specifier = ">=0.5.5" },
     { name = "soundfile", specifier = ">=0.13.1" },
+    { name = "tokenizers", specifier = ">=0.22.2" },
     { name = "utilityhub-config", specifier = ">=0.2.2" },
     { name = "utilityhub-logging", specifier = ">=0.1.0" },
 ]

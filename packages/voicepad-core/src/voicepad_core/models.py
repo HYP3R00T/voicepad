@@ -11,6 +11,15 @@ _PARAKEET_FILES = (
 
 
 @dataclass(frozen=True, slots=True)
+class AuxiliaryArtifact:
+    """A required model file hosted outside the model's primary repository."""
+
+    repo: str
+    filename: str
+    revision: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class Model:
     """One supported model and the backend that can run it."""
 
@@ -23,6 +32,12 @@ class Model:
     revision: str | None = None
     precision: str | None = None
     accepts_prompt: bool = True
+    auxiliary_artifacts: tuple[AuxiliaryArtifact, ...] = ()
+
+    @property
+    def required_files(self) -> tuple[str, ...]:
+        """Return every file required in the prepared local artifact."""
+        return (*self.files, *(artifact.filename for artifact in self.auxiliary_artifacts))
 
 
 MODELS: dict[str, Model] = {
@@ -62,6 +77,13 @@ MODELS: dict[str, Model] = {
             precision="int8",
             label="NVIDIA · Parakeet v3",
             hint="~670 MB · Sherpa int8 · multilingual · NVIDIA CUDA",
+            auxiliary_artifacts=(
+                AuxiliaryArtifact(
+                    repo="nvidia/parakeet-tdt-0.6b-v3",
+                    filename="tokenizer.json",
+                    revision="7c35754d166cca382ad1e53e68b01e7c575f3a1d",
+                ),
+            ),
         ),
     )
 }
@@ -87,11 +109,19 @@ def model_options() -> tuple[tuple[str, str], ...]:
 def validate_model(path: str | Path, model: Model) -> Path:
     """Return the model directory when every required file exists."""
     directory = Path(path)
-    missing = [name for name in model.files if not (directory / name).is_file()]
+    missing = [name for name in model.required_files if not (directory / name).is_file()]
     if not directory.is_dir() or missing:
         detail = ", ".join(missing) if missing else str(directory)
         raise ModelCompatibilityError(f"Model '{model.id}' is incomplete: {detail}")
     return directory
 
 
-__all__ = ["MODELS", "Model", "ModelCompatibilityError", "get_model", "model_options", "validate_model"]
+__all__ = [
+    "MODELS",
+    "AuxiliaryArtifact",
+    "Model",
+    "ModelCompatibilityError",
+    "get_model",
+    "model_options",
+    "validate_model",
+]

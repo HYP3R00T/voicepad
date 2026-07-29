@@ -442,6 +442,7 @@ class VoicePadApp(App[None]):
                 compute_type=self.config.transcription_compute_type,
                 language=self.config.language,
                 word_timestamps=False,
+                config=self.config,
             )
             log_transcription_end(
                 session_logger,

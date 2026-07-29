@@ -6,7 +6,7 @@ import contextlib
 from typing import TYPE_CHECKING
 
 from textual import on
-from textual.widgets import Button, Input, Label, Select, Static
+from textual.widgets import Button, Input, Label, Select, Static, TextArea
 from voicepad_core import model_options
 from voicepad_core.config import Config as _Config
 
@@ -63,6 +63,9 @@ class SettingsHandler:
             self.app.query_one("#setting-vad_model_path", _Input).value = str(self.app.config.vad_model_path)
 
         with contextlib.suppress(Exception):
+            self.app.query_one("#setting-proper_nouns", TextArea).text = "\n".join(self.app.config.proper_nouns)
+
+        with contextlib.suppress(Exception):
             # Sync hotkey picker from config
             mods, key = _parse_hotkey_str(self.app.config.global_hotkey)
             for mod_id in ("ctrl", "alt", "shift", "cmd"):
@@ -96,6 +99,7 @@ class SettingsHandler:
             "vad_model_path": "Where VAD (Voice Activity Detection) model is stored",
             "transcription_model": "Simple model choices for the UI. Edit voicepad.yaml for advanced models.",
             "input_device_index": "Microphone to record from",
+            "proper_nouns": "Vocabulary hints to prioritize during recognition, one term per line",
         }
 
         # Build device options once — reused for the Select widget
@@ -125,7 +129,15 @@ class SettingsHandler:
                 classes="settings-key",
             )
 
-            if field_name == "transcription_model":
+            if field_name == "proper_nouns":
+                widget = TextArea(
+                    "\n".join(current_val),
+                    placeholder="Mise\nVoicePad\nZensical",
+                    id="setting-proper_nouns",
+                    classes="settings-input",
+                    show_line_numbers=False,
+                )
+            elif field_name == "transcription_model":
                 current_str = str(current_val) if current_val is not None else "turbo"
                 options = model_options()
                 valid_models = {value for _, value in options}
@@ -272,6 +284,7 @@ class SettingsHandler:
             "vad_model_path",
             "transcription_model",
             "input_device_index",
+            "proper_nouns",
         ]
 
         status = self.app.query_one("#settings-status", Label)
@@ -288,7 +301,10 @@ class SettingsHandler:
             if field_info is None:
                 continue
             with contextlib.suppress(Exception):
-                if field_name == "transcription_model":
+                if field_name == "proper_nouns":
+                    text_area = self.app.query_one("#setting-proper_nouns", TextArea)
+                    raw[field_name] = _parse_proper_nouns(text_area.text)
+                elif field_name == "transcription_model":
                     sel = self.app.query_one("#setting-transcription_model", Select)
                     raw[field_name] = str(sel.value) if sel.value is not Select.BLANK else raw[field_name]
                 elif field_name == "input_device_index":
@@ -364,3 +380,16 @@ class SettingsHandler:
             self.app.set_timer(3.0, lambda: status.update(""))
         except Exception as e:
             status.update(f"[red]\U000f0156  {e}[/]")
+
+
+def _parse_proper_nouns(text: str) -> tuple[str, ...]:
+    """Return unique, non-empty vocabulary hints while preserving user spelling."""
+    terms: list[str] = []
+    seen: set[str] = set()
+    for line in text.splitlines():
+        term = line.strip()
+        key = term.casefold()
+        if term and key not in seen:
+            terms.append(term)
+            seen.add(key)
+    return tuple(terms)

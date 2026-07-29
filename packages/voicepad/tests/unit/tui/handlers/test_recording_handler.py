@@ -252,6 +252,7 @@ class TestStartRecording:
         assert call_kwargs["max_chunk_s"] == 30.0
         assert call_kwargs["overlap_s"] == 2.0
         assert call_kwargs["silence_threshold_ms"] == 500
+        assert call_kwargs["config"] is mock_app.config
         assert callable(call_kwargs["on_chunk"])
         assert callable(call_kwargs["on_error"])
         mock_transcriber.start.assert_called_once()

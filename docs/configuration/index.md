@@ -41,6 +41,9 @@ language: en
 beam_size: 1
 transcription_vad_filter: false
 initial_prompt: "Hello. This is a transcription with proper punctuation, capitalization, and grammar."
+proper_nouns:
+  - Mise
+  - VoicePad
 text_postprocessing_enabled: false
 no_speech_threshold: 0.6
 hallucination_silence_threshold: 2.0
@@ -86,6 +89,11 @@ local_agreement_file: true
 
 ## Notes on Advanced Settings
 
+- `proper_nouns`
+  Adds vocabulary hints for names, tools, and other terms that the selected model may otherwise mishear. Enter one
+  term per line in the Settings tab. Faster Whisper passes them as native hotwords. Parakeet tokenizes them with its
+  official tokenizer and applies contextual biasing during modified beam search. The hints bias recognition but do
+  not rewrite the transcript or guarantee a match.
 - `text_postprocessing_enabled`
   Keeps raw model text by default. When set to `true`, VoicePad re-enables its lightweight text cleanup pipeline.
 - `min_fresh_speech_duration_s`

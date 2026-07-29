@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import inspect
+from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 from unittest.mock import Mock, patch
 
+import numpy as np
 import pytest
 from voicepad_core.config import Config
 
@@ -68,6 +72,45 @@ class TestVoicePadAppInit:
         assert app._model_manager is not None
         assert app._timer_manager is not None
         assert app._tab_manager is not None
+
+
+class TestRetranscribeFile:
+    """Tests for history re-transcription."""
+
+    def test_passes_live_config_to_transcription(self, tmp_path: Path) -> None:
+        """Re-transcription uses the active TUI config, including vocabulary hints."""
+        from voicepad.tui.app import VoicePadApp
+
+        wav_path = tmp_path / "recording.wav"
+        wav_path.touch()
+        config = Config(
+            recordings_path=tmp_path / "recordings",
+            markdown_path=tmp_path / "markdown",
+            logs_path=tmp_path / "logs",
+            proper_nouns=("Mise",),
+        )
+        app = Mock(spec=VoicePadApp)
+        app.config = config
+        app.call_from_thread = Mock()
+        app._set_status = Mock()
+        app._history_handler = Mock()
+        result = Mock(text="Mise", latency_ms=1.0)
+
+        with (
+            patch("soundfile.read", return_value=(np.ones(16_000, dtype=np.float32), 16_000)),
+            patch("voicepad_core.transcribe", return_value=result) as mock_transcribe,
+            patch("voicepad.tui.app.begin_transcription_session", return_value=(Mock(), tmp_path / "log")),
+            patch("voicepad.tui.app.end_transcription_session"),
+            patch("voicepad.tui.app.log_transcription_start"),
+            patch("voicepad.tui.app.log_transcription_end"),
+        ):
+            retranscribe = cast(
+                Callable[[VoicePadApp, Path, Path | None], None],
+                inspect.unwrap(VoicePadApp._retranscribe_file),
+            )
+            retranscribe(cast(VoicePadApp, app), wav_path, None)
+
+        assert mock_transcribe.call_args.kwargs["config"] is config
 
     @patch("voicepad.tui.handlers.settings_handler.SettingsHandler")
     @patch("voicepad.tui.handlers.recording_handler.RecordingHandler")

@@ -104,6 +104,7 @@ class RecordingHandler:
             max_chunk_s=self.app.config.max_chunk_s,
             overlap_s=self.app.config.overlap_s,
             silence_threshold_ms=self.app.config.silence_threshold_ms,
+            config=self.app.config,
         )
         self.app._streamer.start()
         self._session_logger.info("Streaming transcriber started")
