@@ -4,21 +4,50 @@ icon: lucide/mic
 
 # Input Device
 
-By default, VoicePad uses your system's default microphone. If you have multiple audio input devices, you can choose a specific one from the **Settings** tab.
+On Linux, VoicePad always uses the system's default microphone. Select that
+microphone in your desktop's **Sound** settings.
 
-## Changing the Microphone
+This lets the Linux audio server (PipeWire or PulseAudio) share the microphone
+with applications such as OBS. VoicePad does not open raw ALSA devices such as
+`hw:1,0`, because those devices can become unavailable when another application
+is recording.
 
-1. Open VoicePad: `uvx voicepad`
-2. Go to the **Settings** tab
-3. Select your preferred microphone from the **Input device** dropdown
-4. Press **Save**
+## Changing the Microphone on Linux
 
-The dropdown shows all available input devices with their index numbers. If you select **system default**, VoicePad uses whatever your operating system has set as the default recording device.
+1. Open your desktop's **Sound** settings
+2. Choose the microphone under **Input**
+3. Confirm that its input level moves when you speak
+4. Start or restart a VoicePad recording
+
+VoicePad follows changes to the system default when it opens the next recording.
+An existing numeric `input_device_index` in `voicepad.yaml` is ignored on Linux
+and can be removed or set to `null`.
+
+On other operating systems, the VoicePad **Settings** tab continues to offer
+the input devices reported by the operating system.
+
+## Recording Alongside OBS
+
+Configure both applications to use the desktop-managed microphone:
+
+1. Set the microphone as the default input in the desktop's **Sound** settings
+2. In OBS, select the same PipeWire/PulseAudio microphone source
+3. Leave VoicePad on **System default**
+
+OBS and VoicePad can then record the microphone at the same time through the
+audio server.
 
 ## Troubleshooting
 
-If you don't see your microphone in the list:
+Run this command to confirm VoicePad's Linux input policy:
 
-- Make sure it is plugged in and recognised by your operating system
-- Check your OS audio settings to confirm the device appears there
-- Restart VoicePad after connecting a new device
+```sh
+voicepad config input
+```
+
+If VoicePad cannot open the microphone:
+
+- Make sure the microphone is visible and selected in the desktop's **Sound** settings
+- Check that VoicePad is not muted in the desktop's per-application audio controls
+- Ensure OBS uses a PipeWire/PulseAudio source rather than a raw ALSA `hw:*` source
+- Reconnect the microphone, then start a new recording

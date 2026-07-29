@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 import threading
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,17 @@ from .persistence import LiveWavRecording, WavArtifact
 from .types import AudioWindow
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_input_device(device_index: int | None) -> int | None:
+    if sys.platform == "linux":
+        if device_index is not None:
+            logger.info(
+                "Ignoring configured input device %s on Linux; using the shared system default",
+                device_index,
+            )
+        return None
+    return device_index
 
 
 def _query_native_rate(device_index: int | None) -> int:
@@ -30,9 +42,9 @@ class MicrophoneStream:
     """Live microphone capture using a non-blocking sounddevice InputStream."""
 
     def __init__(self, recording_path: Path, device_index: int | None = None) -> None:
-        self._device_index = device_index
+        self._device_index = _resolve_input_device(device_index)
         self._recording_path = recording_path
-        self._sample_rate = _query_native_rate(device_index)
+        self._sample_rate = _query_native_rate(self._device_index)
         self._channels = DEFAULT_INPUT_CHANNELS
         self._lock = threading.Lock()
         self._lifecycle_lock = threading.Lock()
@@ -77,7 +89,7 @@ class MicrophoneStream:
                 with self._lock:
                     self._stream = native_stream
                 native_stream.start()
-            except Exception:
+            except Exception as error:
                 with self._lock:
                     self._recording = False
                     self._stream = None
@@ -88,11 +100,16 @@ class MicrophoneStream:
                         native_stream.close()
                     except Exception as close_error:
                         self._logger.warning("Failed to close microphone stream after start error: %s", close_error)
+                if "PaErrorCode -9985" in str(error):
+                    raise AudioStreamStateError(
+                        "The shared system microphone is unavailable. Select a default input in Linux sound settings "
+                        "and check its application permissions."
+                    ) from error
                 raise
 
         self._logger.info(
-            "MicrophoneStream started: device_index=%s, sample_rate=%s",
-            self._device_index,
+            "MicrophoneStream started: device=%s, sample_rate=%s",
+            self._device_index if self._device_index is not None else "system-default",
             self._sample_rate,
         )
 

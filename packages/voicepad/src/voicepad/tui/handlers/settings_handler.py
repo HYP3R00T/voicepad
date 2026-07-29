@@ -29,12 +29,10 @@ class SettingsHandler:
     def refresh_settings_values(self) -> None:
         """Update settings form widget values to match the current config in-place."""
         with contextlib.suppress(Exception):
-            from voicepad.cli.config import _get_input_devices
+            from voicepad.cli.config import _get_input_device_options
 
             # Update device dropdown
-            devices = _get_input_devices()
-            device_options: list[tuple[str, int]] = [("System default", -1)]
-            device_options += [(d.name, d.index) for d in devices]
+            device_options = _get_input_device_options()
             valid = {v for _, v in device_options}
             current_idx = self.app.config.input_device_index if self.app.config.input_device_index is not None else -1
             sel_device = self.app.query_one("#setting-input_device_index", Select)
@@ -90,7 +88,7 @@ class SettingsHandler:
         from utilityhub_config import get_config_path
         from voicepad_core.config import get_config_with_metadata
 
-        from voicepad.cli.config import _get_input_devices
+        from voicepad.cli.config import _get_input_device_options
 
         user_fields = {
             "recordings_path": "Where your WAV recordings are saved",
@@ -101,9 +99,7 @@ class SettingsHandler:
         }
 
         # Build device options once — reused for the Select widget
-        audio_devices = _get_input_devices()
-        device_options: list[tuple[str, int]] = [("System default", -1)]
-        device_options += [(d.name, d.index) for d in audio_devices]
+        device_options = _get_input_device_options()
 
         container = self.app.query_one("#settings-fields", Static)
         _, meta = get_config_with_metadata()

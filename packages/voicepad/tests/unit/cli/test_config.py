@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 from typer.testing import CliRunner
 from voicepad.cli.config import (
     AudioDevice,
+    _get_input_device_options,
     _get_input_devices,
     config_app,
 )
@@ -168,6 +169,25 @@ class TestGetInputDevices:
         assert len(devices) == 1
 
 
+class TestGetInputDeviceOptions:
+    def test_linux_only_uses_shared_system_default(self) -> None:
+        with patch("voicepad.cli.config._get_input_devices") as get_devices:
+            options = _get_input_device_options()
+
+        assert options == [("System default (PipeWire / PulseAudio)", -1)]
+        get_devices.assert_not_called()
+
+    def test_non_linux_includes_enumerated_devices(self) -> None:
+        device = AudioDevice(index=2, name="USB Mic", channels=1, sample_rate=48000)
+        with (
+            patch("voicepad.cli.config.sys.platform", "win32"),
+            patch("voicepad.cli.config._get_input_devices", return_value=[device]),
+        ):
+            options = _get_input_device_options()
+
+        assert options == [("System default", -1), ("USB Mic", 2)]
+
+
 # ---------------------------------------------------------------------------
 # config show
 # ---------------------------------------------------------------------------
@@ -235,9 +255,20 @@ class TestShowConfig:
 
 
 class TestListInputDevices:
+    def test_linux_uses_desktop_sound_settings(self, tmp_path: Path) -> None:
+        mock_config = Config(recordings_path=tmp_path, markdown_path=tmp_path, input_device_index=5)
+        with patch("voicepad.cli.config.get_config", return_value=mock_config):
+            result = runner.invoke(config_app, ["input"])
+
+        assert result.exit_code == 0
+        assert "managed by PipeWire / PulseAudio" in result.stdout
+        assert "device index 5 is ignored" in result.stdout
+        assert "desktop's Sound settings" in result.stdout
+
     def test_exits_with_error_when_no_devices(self, tmp_path: Path) -> None:
         mock_config = Config(recordings_path=tmp_path, markdown_path=tmp_path)
         with (
+            patch("voicepad.cli.config.sys.platform", "win32"),
             patch("voicepad.cli.config._get_input_devices", return_value=[]),
             patch("voicepad.cli.config.get_config", return_value=mock_config),
         ):
@@ -254,6 +285,7 @@ class TestListInputDevices:
         ]
         mock_config = Config(recordings_path=tmp_path, markdown_path=tmp_path, input_device_index=None)
         with (
+            patch("voicepad.cli.config.sys.platform", "win32"),
             patch("voicepad.cli.config._get_input_devices", return_value=mock_devices),
             patch("voicepad.cli.config.get_config", return_value=mock_config),
         ):
@@ -270,6 +302,7 @@ class TestListInputDevices:
         ]
         mock_config = Config(recordings_path=tmp_path, markdown_path=tmp_path, input_device_index=1)
         with (
+            patch("voicepad.cli.config.sys.platform", "win32"),
             patch("voicepad.cli.config._get_input_devices", return_value=mock_devices),
             patch("voicepad.cli.config.get_config", return_value=mock_config),
         ):

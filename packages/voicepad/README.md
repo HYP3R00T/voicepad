@@ -18,7 +18,7 @@ uv tool install voicepad
 voicepad
 ```
 
-That's it. On first run, the interactive TUI opens an onboarding flow so you can choose a microphone and a starter Whisper model before the first download begins.
+That's it. On first run, the interactive TUI opens an onboarding flow so you can confirm the system microphone and choose a starter Whisper model before the first download begins.
 
 | Key | Action |
 |---|---|
@@ -65,6 +65,11 @@ vad_speech_pad_ms: 30
 ```
 
 The UI intentionally exposes a short curated model list for most users. If you want advanced model IDs or lower-level transcription tuning, edit `voicepad.yaml` directly.
+
+On Linux, Voicepad always uses the desktop's shared default input through
+PipeWire or PulseAudio. Choose the microphone in the desktop's Sound settings;
+numeric `input_device_index` values are ignored so Voicepad can record alongside
+OBS and other audio applications.
 
 ## Documentation
 

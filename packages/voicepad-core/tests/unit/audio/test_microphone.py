@@ -12,13 +12,23 @@ from voicepad_core.audio import AudioStreamStateError, AudioWindow, MicrophoneSt
 
 
 @patch("voicepad_core.audio.microphone.sd.query_devices")
-def test_uses_native_device_rate(mock_query: Mock, tmp_path: Path) -> None:
+def test_linux_uses_shared_system_default(mock_query: Mock, tmp_path: Path) -> None:
     mock_query.return_value = {"default_samplerate": 48_000}
 
     stream = MicrophoneStream(tmp_path / "recording.wav", device_index=2)
 
-    mock_query.assert_called_once_with(2, kind="input")
+    mock_query.assert_called_once_with(None, kind="input")
     assert stream.sample_rate == 48_000
+
+
+@patch("voicepad_core.audio.microphone.sys.platform", "win32")
+@patch("voicepad_core.audio.microphone.sd.query_devices")
+def test_non_linux_uses_configured_device(mock_query: Mock, tmp_path: Path) -> None:
+    mock_query.return_value = {"default_samplerate": 48_000}
+
+    MicrophoneStream(tmp_path / "recording.wav", device_index=2)
+
+    mock_query.assert_called_once_with(2, kind="input")
 
 
 @pytest.mark.parametrize("rate", [0, -1])
@@ -55,7 +65,7 @@ def test_start_opens_writer_before_microphone(
         samplerate=48_000,
         channels=1,
         dtype="float32",
-        device=3,
+        device=None,
         callback=stream._callback,
     )
     native_stream.start.assert_called_once_with()
@@ -78,6 +88,26 @@ def test_start_failure_aborts_writer(
 
     recording_type.return_value.abort.assert_called_once_with()
     assert not stream.is_recording
+
+
+@patch("voicepad_core.audio.microphone.LiveWavRecording")
+@patch(
+    "voicepad_core.audio.microphone.sd.InputStream",
+    side_effect=RuntimeError("Error opening InputStream: Device unavailable [PaErrorCode -9985]"),
+)
+@patch("voicepad_core.audio.microphone.sd.query_devices", return_value={"default_samplerate": 16_000})
+def test_unavailable_system_microphone_has_linux_guidance(
+    mock_query: Mock,
+    input_stream_type: Mock,
+    recording_type: Mock,
+    tmp_path: Path,
+) -> None:
+    stream = MicrophoneStream(tmp_path / "recording.wav")
+
+    with pytest.raises(AudioStreamStateError, match="Linux sound settings"):
+        stream.start()
+
+    recording_type.return_value.abort.assert_called_once_with()
 
 
 @patch("voicepad_core.audio.microphone.LiveWavRecording")

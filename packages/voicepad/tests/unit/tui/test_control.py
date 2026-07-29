@@ -106,6 +106,23 @@ class TestControlServer:
         finally:
             server.stop()
 
+    def test_request_toggle_allows_audio_startup_longer_than_one_second(self, tmp_path: Path) -> None:
+        """Audio startup does not outlive the control client's response timeout."""
+
+        def delayed_toggle() -> None:
+            time.sleep(1.1)
+
+        server = ControlServer(
+            on_toggle=delayed_toggle,
+            socket_path=tmp_path / "voicepad.sock",
+        )
+        server.start()
+
+        try:
+            request_toggle(server.socket_path)
+        finally:
+            server.stop()
+
     def test_invalid_command_is_rejected(self, tmp_path: Path) -> None:
         """Commands outside the minimal toggle protocol are rejected."""
         server = ControlServer(on_toggle=MagicMock(), socket_path=tmp_path / "voicepad.sock")

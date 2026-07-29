@@ -23,7 +23,7 @@ def populate_settings_form(
 
     Extracted from app.py _populate_settings method.
     """
-    from voicepad.cli.config import _get_input_devices
+    from voicepad.cli.config import _get_input_device_options
 
     # Config path label
     exists_hint = "" if Path(config_path_str).exists() else "  [dim red](not yet created)[/]"
@@ -44,9 +44,7 @@ def populate_settings_form(
     }
 
     # Build device options
-    audio_devices = _get_input_devices()
-    device_options: list[tuple[str, int]] = [("System default", -1)]
-    device_options += [(d.name, d.index) for d in audio_devices]
+    device_options = _get_input_device_options()
 
     # Create field widgets
     # Create field widgets

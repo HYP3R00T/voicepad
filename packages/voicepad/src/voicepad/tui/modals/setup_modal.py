@@ -251,17 +251,22 @@ class SetupModal(ModalScreen[tuple[str, int | None]]):
     # ------------------------------------------------------------------
 
     def _mount_step_microphone(self, body: Static) -> None:
-        from voicepad.cli.config import _get_input_devices
+        from voicepad.cli.config import _get_input_device_options
 
         body.mount(Static("Select Your Microphone", classes="wizard-title"))
-        body.mount(Static("[dim]System default[/] works for most setups.", classes="wizard-text"))
+        body.mount(
+            Static(
+                "On Linux, choose your microphone in the desktop Sound settings so it can be shared with other apps.",
+                classes="wizard-text",
+            )
+        )
 
-        devices = _get_input_devices()
-        device_options: list[tuple[str, int]] = [("System default", -1)]
-        device_options += [(d.name, d.index) for d in devices]
+        device_options = _get_input_device_options()
 
         current = self._chosen_device_index if self._chosen_device_index is not None else -1
         valid = {v for _, v in device_options}
+        if current not in valid:
+            self._chosen_device_index = None
 
         body.mount(
             Select(
@@ -271,7 +276,7 @@ class SetupModal(ModalScreen[tuple[str, int | None]]):
                 allow_blank=False,
             )
         )
-        body.mount(Static(f"[dim]{len(devices)} input device(s) found[/]", classes="wizard-hint"))
+        body.mount(Static("[dim]Voicepad follows the system default input[/]", classes="wizard-hint"))
 
     @on(Select.Changed, "#wizard-device-select")
     def on_device_changed(self, event: Select.Changed) -> None:

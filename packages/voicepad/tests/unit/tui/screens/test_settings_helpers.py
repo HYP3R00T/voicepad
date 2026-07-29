@@ -9,8 +9,8 @@ from textual.app import App
 from textual.widgets import Checkbox, Input, Label, Select, Static
 from voicepad.tui.screens.settings_helpers import populate_settings_form
 
-# Patch target for _get_input_devices (imported inside populate_settings_form)
-PATCH_TARGET = "voicepad.cli.config._get_input_devices"
+# Patch target for _get_input_device_options (imported inside populate_settings_form)
+PATCH_TARGET = "voicepad.cli.config._get_input_device_options"
 
 
 class SettingsTestApp(App[None]):
@@ -51,17 +51,13 @@ def create_mock_config() -> MagicMock:
     return config
 
 
-def create_mock_devices() -> list[MagicMock]:
-    """Create mock audio devices."""
-    device1 = MagicMock()
-    device1.index = 0
-    device1.name = "Microphone 1"
-
-    device2 = MagicMock()
-    device2.index = 1
-    device2.name = "Microphone 2"
-
-    return [device1, device2]
+def create_mock_devices() -> list[tuple[str, int]]:
+    """Create mock audio device options."""
+    return [
+        ("System default (PipeWire / PulseAudio)", -1),
+        ("Microphone 1", 0),
+        ("Microphone 2", 1),
+    ]
 
 
 class TestPopulateSettingsForm:
@@ -176,7 +172,7 @@ class TestPopulateSettingsForm:
             select = app.container.query_one("#setting-input_device_index", Select)
             options = select._options
             # First option should be system default
-            assert options[0][0] == "System default"
+            assert options[0][0] == "System default (PipeWire / PulseAudio)"
             assert options[0][1] == -1
 
     @pytest.mark.asyncio

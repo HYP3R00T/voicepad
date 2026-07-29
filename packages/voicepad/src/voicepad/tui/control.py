@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 _TOGGLE_COMMAND = b"toggle\n"
 _OK_RESPONSE = b"ok\n"
-_SOCKET_TIMEOUT_S = 1.0
+_SOCKET_TIMEOUT_S = 5.0
 
 
 class ControlError(RuntimeError):
