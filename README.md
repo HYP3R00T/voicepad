@@ -52,7 +52,7 @@ Full docs at **[voicepad.hyperoot.dev](https://voicepad.hyperoot.dev)**
 
 ## Contributing and security
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md) before proposing substantial work. Report suspected vulnerabilities privately by following [SECURITY.md](SECURITY.md), not through a public issue.
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before proposing substantial work. Trusted checkouts include a manually invoked Pi `issue-to-pr` skill for delivering approved issues. Report suspected vulnerabilities privately by following [SECURITY.md](SECURITY.md), not through a public issue.
 
 ## License
 

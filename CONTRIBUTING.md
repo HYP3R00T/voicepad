@@ -23,6 +23,18 @@ An issue is ready for implementation when it has:
 
 The maintainer moves approved, unblocked work to `Ready` in the VoicePad GitHub Project. Approval of an issue does not guarantee that every proposed implementation will be merged.
 
+## Deliver an issue with Pi
+
+Trusted VoicePad checkouts include a manually invoked Pi skill for delivering one ready issue:
+
+```text
+/skill:issue-to-pr https://github.com/HYP3R00T/voicepad/issues/<number>
+```
+
+Run `/reload` first when the checkout gained or changed the skill after Pi started. The skill validates live issue and Project state, creates or resumes an isolated worktree, implements and verifies the accepted outcome, and opens or updates one pull request. It stops at `In Review`; it never merges, enables auto-merge, publishes packages, marks the issue `Done`, or removes the implementation worktree.
+
+Invocation authorizes only delivery of the linked issue. Review the resulting pull request and merge it manually.
+
 ## Set up the project
 
 VoicePad requires Python 3.13 or newer, [Mise](https://mise.jdx.dev/), and [uv](https://docs.astral.sh/uv/).
