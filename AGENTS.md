@@ -4,8 +4,8 @@ Instructions for coding agents working in this repository.
 
 ## Project overview
 
-- Repo: `HYP3R00T/voicepad` — a minimal, reusable Python devcontainer template.
-- Stack: Python >= 3.13, `uv`, `ruff`, `ty`, `pytest`, `zensical`.
+- Repo: `HYP3R00T/voicepad` — a private, local-first dictation application.
+- Stack: Python >= 3.13, `uv`, Textual, `ruff`, `ty`, `pytest`, and Zensical.
 
 ## Environment setup
 
@@ -16,8 +16,8 @@ prek install --hook-type pre-commit --overwrite
 prek install --hook-type commit-msg --overwrite
 ```
 
-GPU support (CUDA DLLs) is bundled with `torch` — no separate CUDA installation needed.
-Dev container runs `scripts/setup.sh` automatically on create.
+GPU runtime libraries are installed through project dependencies; no separate CUDA toolkit is required.
+The Mise enter hook runs `scripts/enter_project.sh` to install Commitizen and configure Git hooks.
 
 ## Key files
 
@@ -25,12 +25,12 @@ Dev container runs `scripts/setup.sh` automatically on create.
 |---|---|
 | Python / tooling | `pyproject.toml`, `ruff.toml`, `ty.toml`, `mise.toml` |
 | Docs | `zensical.toml`, `docs/index.md` |
-| Scripts | `scripts/setup.sh`, `scripts/enter_project.sh` |
+| Scripts | `scripts/enter_project.sh` |
 | CI | `.github/workflows/ci.yml`, `.github/workflows/docs.yml` |
 
 ## Commands
 
-IMPORTANT - Activate the virtual environment first
+Use `uv run` for project commands; manual virtual-environment activation is not required.
 
 ```sh
 # Full quality pass (run before PR)
@@ -55,8 +55,10 @@ Coverage threshold: **70%** (enforced in CI and `mise.toml` `test` task).
 - **Code:** typed, explicit Python; `ruff` is the formatting/lint source of truth; avoid new tools unless justified; keep template files generic.
 - **Tests:** add or update tests for behavior changes; prefer focused unit tests over broad integration scaffolding.
 - **Docs:** update `docs/` if behavior or config changes; don't hand-edit `site/` (build artifact).
-- **Commits:** use conventional commits (`cz commit` if available); PRs should include a short summary of commands run.
-- **Secrets:** never commit credentials; `.env` is gitignored and local-only.
+- **Commits:** use conventional commits (`cz commit` if available); planned work uses `issue-<number>-<slug>` branches and pull requests linked to an approved issue.
+- **Reviews:** `main` requires a pull request, current `CI (uv)`, and resolved review conversations; merging remains an explicit human action.
+- **Secrets:** never commit credentials; `.env` is gitignored and local-only. User recordings, private logs, and model binaries must not enter Git or GitHub.
+- **Publishing:** PyPI publication is frozen during the backend migration. Keep the release workflow disabled and do not add or use publishing credentials without explicit approval.
 
 ## Agent behavior
 

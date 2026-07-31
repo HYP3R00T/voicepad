@@ -50,6 +50,10 @@ Full docs at **[voicepad.hyperoot.dev](https://voicepad.hyperoot.dev)**
 - [Configuration](https://voicepad.hyperoot.dev/configuration/)
 - [GPU Acceleration](https://voicepad.hyperoot.dev/configuration/gpu/)
 
+## Contributing and security
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before proposing substantial work. Report suspected vulnerabilities privately by following [SECURITY.md](SECURITY.md), not through a public issue.
+
 ## License
 
 [MIT](LICENSE)
