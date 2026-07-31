@@ -6,8 +6,8 @@ import contextlib
 from typing import TYPE_CHECKING
 
 from textual import on
-from textual.widgets import Button, Input, Label, Select, Static
-from voicepad_core import list_basic_model_options
+from textual.widgets import Button, Input, Label, Select, Static, TextArea
+from voicepad_core import model_options
 from voicepad_core.config import Config as _Config
 
 from voicepad.tui.components.checkbox import VoiceCheckbox
@@ -29,12 +29,10 @@ class SettingsHandler:
     def refresh_settings_values(self) -> None:
         """Update settings form widget values to match the current config in-place."""
         with contextlib.suppress(Exception):
-            from voicepad.cli.config import _get_input_devices
+            from voicepad.cli.config import _get_input_device_options
 
             # Update device dropdown
-            devices = _get_input_devices()
-            device_options: list[tuple[str, int]] = [("System default", -1)]
-            device_options += [(d.name, d.index) for d in devices]
+            device_options = _get_input_device_options()
             valid = {v for _, v in device_options}
             current_idx = self.app.config.input_device_index if self.app.config.input_device_index is not None else -1
             sel_device = self.app.query_one("#setting-input_device_index", Select)
@@ -44,9 +42,9 @@ class SettingsHandler:
         with contextlib.suppress(Exception):
             # Update model dropdown
             sel_model = self.app.query_one("#setting-transcription_model", Select)
-            model_options = list_basic_model_options(current_model=self.app.config.transcription_model)
-            sel_model.set_options(model_options)
-            valid_models = {value for _, value in model_options}
+            options = model_options()
+            sel_model.set_options(options)
+            valid_models = {value for _, value in options}
             sel_model.value = (
                 self.app.config.transcription_model if self.app.config.transcription_model in valid_models else "turbo"
             )
@@ -63,6 +61,9 @@ class SettingsHandler:
             self.app.query_one("#setting-recordings_path", _Input).value = str(self.app.config.recordings_path)
             self.app.query_one("#setting-markdown_path", _Input).value = str(self.app.config.markdown_path)
             self.app.query_one("#setting-vad_model_path", _Input).value = str(self.app.config.vad_model_path)
+
+        with contextlib.suppress(Exception):
+            self.app.query_one("#setting-proper_nouns", TextArea).text = "\n".join(self.app.config.proper_nouns)
 
         with contextlib.suppress(Exception):
             # Sync hotkey picker from config
@@ -88,9 +89,9 @@ class SettingsHandler:
     def populate_settings(self) -> None:
         """Build the settings form — only user-facing fields shown."""
         from utilityhub_config import get_config_path
-        from voicepad_core.config.settings import get_config_with_metadata
+        from voicepad_core.config import get_config_with_metadata
 
-        from voicepad.cli.config import _get_input_devices
+        from voicepad.cli.config import _get_input_device_options
 
         user_fields = {
             "recordings_path": "Where your WAV recordings are saved",
@@ -98,12 +99,11 @@ class SettingsHandler:
             "vad_model_path": "Where VAD (Voice Activity Detection) model is stored",
             "transcription_model": "Simple model choices for the UI. Edit voicepad.yaml for advanced models.",
             "input_device_index": "Microphone to record from",
+            "proper_nouns": "Vocabulary hints to prioritize during recognition, one term per line",
         }
 
         # Build device options once — reused for the Select widget
-        audio_devices = _get_input_devices()
-        device_options: list[tuple[str, int]] = [("System default", -1)]
-        device_options += [(d.name, d.index) for d in audio_devices]
+        device_options = _get_input_device_options()
 
         container = self.app.query_one("#settings-fields", Static)
         _, meta = get_config_with_metadata()
@@ -129,9 +129,17 @@ class SettingsHandler:
                 classes="settings-key",
             )
 
-            if field_name == "transcription_model":
+            if field_name == "proper_nouns":
+                widget = TextArea(
+                    "\n".join(current_val),
+                    placeholder="Mise\nVoicePad\nZensical",
+                    id="setting-proper_nouns",
+                    classes="settings-input",
+                    show_line_numbers=False,
+                )
+            elif field_name == "transcription_model":
                 current_str = str(current_val) if current_val is not None else "turbo"
-                options = list_basic_model_options(current_model=current_str)
+                options = model_options()
                 valid_models = {value for _, value in options}
                 widget = Select(
                     options=options,
@@ -185,7 +193,7 @@ class SettingsHandler:
 
         # ── Hotkey picker ──────────────────────────────────────────────
         hotkey_label = Label(
-            "[bold]global_hotkey[/]  [dim]—  System-wide record/stop shortcut[/]",
+            "[bold]global_hotkey[/]  [dim]—  Windows shortcut; Linux uses voicepad toggle[/]",
             classes="settings-key",
         )
         hotkey_row = Static(classes="settings-row", id="hotkey-row")
@@ -229,7 +237,7 @@ class SettingsHandler:
         )
 
     def get_hotkey_from_picker(self) -> str:
-        """Read modifier checkboxes + key dropdown and return pynput hotkey string."""
+        """Return the Windows hotkey selected in the settings picker."""
         mods: list[str] = []
         for mod_id in ("ctrl", "alt", "shift", "cmd"):
             with contextlib.suppress(Exception):
@@ -276,6 +284,7 @@ class SettingsHandler:
             "vad_model_path",
             "transcription_model",
             "input_device_index",
+            "proper_nouns",
         ]
 
         status = self.app.query_one("#settings-status", Label)
@@ -292,7 +301,10 @@ class SettingsHandler:
             if field_info is None:
                 continue
             with contextlib.suppress(Exception):
-                if field_name == "transcription_model":
+                if field_name == "proper_nouns":
+                    text_area = self.app.query_one("#setting-proper_nouns", TextArea)
+                    raw[field_name] = _parse_proper_nouns(text_area.text)
+                elif field_name == "transcription_model":
                     sel = self.app.query_one("#setting-transcription_model", Select)
                     raw[field_name] = str(sel.value) if sel.value is not Select.BLANK else raw[field_name]
                 elif field_name == "input_device_index":
@@ -348,9 +360,9 @@ class SettingsHandler:
                 self.app._start_hotkey_listener()
 
             if model_changed and not self.app._recording and not self.app._transcribing:
-                from voicepad_core import _model_cache
+                from voicepad_core import deactivate_model
 
-                _model_cache.clear()
+                deactivate_model()
                 self.app._model_ready = False
                 self.app._set_status("transcribing", "loading model…")
                 self.app.query_one("#header-model", Label).update("[dim]M:[/] loading…")
@@ -368,3 +380,16 @@ class SettingsHandler:
             self.app.set_timer(3.0, lambda: status.update(""))
         except Exception as e:
             status.update(f"[red]\U000f0156  {e}[/]")
+
+
+def _parse_proper_nouns(text: str) -> tuple[str, ...]:
+    """Return unique, non-empty vocabulary hints while preserving user spelling."""
+    terms: list[str] = []
+    seen: set[str] = set()
+    for line in text.splitlines():
+        term = line.strip()
+        key = term.casefold()
+        if term and key not in seen:
+            terms.append(term)
+            seen.add(key)
+    return tuple(terms)

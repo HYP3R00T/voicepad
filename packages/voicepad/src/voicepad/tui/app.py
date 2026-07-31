@@ -12,7 +12,6 @@ from importlib.metadata import version as _pkg_version
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -28,7 +27,9 @@ from textual.widgets import (
 )
 from voicepad_core import (
     ChunkResult,
+    RawAudio,
     StreamingTranscriber,
+    WavArtifact,
     begin_transcription_session,
     configure_global_logging,
     end_transcription_session,
@@ -40,6 +41,7 @@ from voicepad_core.config import Config
 
 from voicepad.tui.components import VoiceButton
 from voicepad.tui.config import TUIConfig, load_tui_config, save_tui_config
+from voicepad.tui.control import ControlServer
 from voicepad.tui.managers import (
     LayoutBuilder,
     LifecycleManager,
@@ -169,6 +171,7 @@ class VoicePadApp(App[None]):
         self._recording_handler = RecordingHandler(self)
         self._history_handler = HistoryHandler(self)
         self._hotkey_handler = HotkeyHandler(self)
+        self._control_server = ControlServer(on_toggle=self._hotkey_handler.hotkey_on_toggle)
 
     # ------------------------------------------------------------------
     # Layout
@@ -202,22 +205,6 @@ class VoicePadApp(App[None]):
         """Start the system-wide hotkey listener and status overlay."""
         self._hotkey_handler.start_hotkey_listener()
 
-    def _hotkey_on_start(self) -> None:
-        """Called from the hotkey thread when the hotkey is pressed to start."""
-        self._hotkey_handler.hotkey_on_start()
-
-    def _hotkey_on_stop(self) -> None:
-        """Called from the hotkey thread when the hotkey is pressed to stop."""
-        self._hotkey_handler.hotkey_on_stop()
-
-    def _hotkey_start_recording(self) -> None:
-        """Start recording triggered by global hotkey (runs on main thread)."""
-        self._hotkey_handler.hotkey_start_recording()
-
-    def _hotkey_stop_recording(self) -> None:
-        """Stop recording triggered by global hotkey (runs on main thread)."""
-        self._hotkey_handler.hotkey_stop_recording()
-
     def _overlay_set(self, state: str) -> None:
         """Update the floating overlay state if it exists."""
         self._hotkey_handler.overlay_set(state)
@@ -231,7 +218,7 @@ class VoicePadApp(App[None]):
         self._settings_handler.populate_settings()
 
     def _get_hotkey_from_picker(self) -> str:
-        """Read modifier checkboxes + key dropdown and return pynput hotkey string."""
+        """Return the Windows hotkey selected in the settings picker."""
         return self._settings_handler.get_hotkey_from_picker()
 
     def _refresh_settings_values(self) -> None:
@@ -305,17 +292,13 @@ class VoicePadApp(App[None]):
     # ------------------------------------------------------------------
 
     @work(thread=True, name="finalize")
-    def _finalize_worker(self, audio: np.ndarray) -> None:
+    def _finalize_worker(self, audio: WavArtifact) -> None:
         """Stop the streamer (transcribes tail) then save the full recording."""
         self._recording_handler.finalize_worker(audio)
 
     def _on_stream_chunk(self, chunk: ChunkResult) -> None:
         """Called from the streaming thread for each transcribed chunk."""
         self._recording_handler.on_stream_chunk(chunk)
-
-    def _save_recording(self, audio: np.ndarray) -> None:
-        """Save WAV + markdown and add history entry after streaming completes."""
-        self._recording_handler.save_recording(audio)
 
     # ------------------------------------------------------------------
     # History
@@ -438,13 +421,16 @@ class VoicePadApp(App[None]):
             session_id=session_id,
         )
         try:
-            audio, _sr = sf.read(str(wav_path), dtype="float32", always_2d=False)
-            if audio.ndim > 1:
-                audio = audio.mean(axis=1)
+            samples, sample_rate = sf.read(str(wav_path), dtype="float32", always_2d=False)
+            audio = RawAudio(
+                samples,
+                sample_rate=sample_rate,
+                channels=1 if samples.ndim == 1 else samples.shape[1],
+            )
 
             log_transcription_start(
                 session_logger,
-                len(audio) / 16000,
+                audio.duration(),
                 self.config.transcription_model,
                 self.config.transcription_device,
                 self.config.transcription_compute_type,
@@ -456,6 +442,7 @@ class VoicePadApp(App[None]):
                 compute_type=self.config.transcription_compute_type,
                 language=self.config.language,
                 word_timestamps=False,
+                config=self.config,
             )
             log_transcription_end(
                 session_logger,

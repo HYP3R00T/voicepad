@@ -9,8 +9,8 @@ from textual.app import App
 from textual.widgets import Checkbox, Input, Label, Select, Static
 from voicepad.tui.screens.settings_helpers import populate_settings_form
 
-# Patch target for _get_input_devices (imported inside populate_settings_form)
-PATCH_TARGET = "voicepad.cli.config._get_input_devices"
+# Patch target for _get_input_device_options (imported inside populate_settings_form)
+PATCH_TARGET = "voicepad.cli.config._get_input_device_options"
 
 
 class SettingsTestApp(App[None]):
@@ -51,17 +51,13 @@ def create_mock_config() -> MagicMock:
     return config
 
 
-def create_mock_devices() -> list[MagicMock]:
-    """Create mock audio devices."""
-    device1 = MagicMock()
-    device1.index = 0
-    device1.name = "Microphone 1"
-
-    device2 = MagicMock()
-    device2.index = 1
-    device2.name = "Microphone 2"
-
-    return [device1, device2]
+def create_mock_devices() -> list[tuple[str, int]]:
+    """Create mock audio device options."""
+    return [
+        ("System default (PipeWire / PulseAudio)", -1),
+        ("Microphone 1", 0),
+        ("Microphone 2", 1),
+    ]
 
 
 class TestPopulateSettingsForm:
@@ -141,7 +137,12 @@ class TestPopulateSettingsForm:
             # Check that valid models are in options
             option_values = [opt[1] for opt in select._options]
             assert "turbo" in option_values
-            assert option_values == ["small", "large-v3", "turbo"]
+            assert option_values == [
+                "turbo",
+                "small",
+                "distil-large-v3.5",
+                "parakeet-tdt-0.6b-v3",
+            ]
 
     @pytest.mark.asyncio
     @patch(PATCH_TARGET)
@@ -171,7 +172,7 @@ class TestPopulateSettingsForm:
             select = app.container.query_one("#setting-input_device_index", Select)
             options = select._options
             # First option should be system default
-            assert options[0][0] == "System default"
+            assert options[0][0] == "System default (PipeWire / PulseAudio)"
             assert options[0][1] == -1
 
     @pytest.mark.asyncio
@@ -338,24 +339,6 @@ class TestPopulateSettingsForm:
 
             select = app.container.query_one("#setting-transcription_model", Select)
             assert select.value == "turbo"
-
-    @pytest.mark.asyncio
-    @pytest.mark.asyncio
-    @patch(PATCH_TARGET)
-    async def test_preserves_current_advanced_model_when_configured(self, mock_get_devices: MagicMock) -> None:
-        """Advanced config models remain selectable even though the default UI is curated."""
-        mock_get_devices.return_value = create_mock_devices()
-        config = create_mock_config()
-        config.transcription_model = "base.en"
-
-        app = SettingsTestApp(config, "/path/to/config.yaml")
-        async with app.run_test():
-            assert app.container is not None
-
-            select = app.container.query_one("#setting-transcription_model", Select)
-            assert select.value == "base.en"
-            option_values = [opt[1] for opt in select._options]
-            assert option_values == ["small", "large-v3", "turbo", "base.en"]
 
     @pytest.mark.asyncio
     @patch(PATCH_TARGET)

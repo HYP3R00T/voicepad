@@ -21,8 +21,8 @@ CUDA runtime libraries are bundled with VoicePad automatically. You do **not** n
 | GPU | VRAM | Recommended Model |
 |---|---|---|
 | RTX 3050, RTX 4060 | 4 GB | `turbo` |
-| RTX 3060, RTX 4070 | 6-8 GB | `turbo` or `large-v3` |
-| RTX 3080, RTX 4090 | 10+ GB | `large-v3` |
+| RTX 3060, RTX 4070 | 6-8 GB | `turbo` |
+| RTX 3080, RTX 4090 | 10+ GB | `turbo` |
 
 ## Verifying GPU Is Active
 
@@ -32,7 +32,7 @@ When VoicePad starts, the header bar shows the active device:
 model: turbo  device: cuda
 ```
 
-If it shows `device: cpu`, VoicePad did not detect a usable NVIDIA GPU and fell back to CPU automatically.
+Parakeet uses the CUDA 12/cuDNN 9 build of Sherpa-ONNX and opens its recognizer with `provider=cuda`. VoicePad stops with an explicit error when that build or the CUDA execution provider is unavailable. It does not offer a Parakeet CPU mode. Faster Whisper can still run on CPU when the user selects CPU explicitly.
 
 ## Performance
 
@@ -58,4 +58,4 @@ GPU acceleration provides roughly **4-10x speedup** over CPU.
 
 Switch to a smaller model from the **Settings** tab. The simplest fallback is `small`.
 
-If you want more advanced options such as `distil-small.en`, edit `voicepad.yaml` directly instead of relying on the curated UI list.
+Use `small` when lower memory use matters more than accuracy. Use `distil-large-v3.5` for English-only dictation.

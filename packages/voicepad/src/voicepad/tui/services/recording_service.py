@@ -7,8 +7,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import numpy as np
-import soundfile as sf
+from voicepad_core import RawAudio, WavArtifact, write_wav_atomic
 
 from voicepad.tui.workers import RecordingSession
 
@@ -53,27 +52,27 @@ class RecordingService:
             logger.error(f"Failed to start recording: {e}")
             raise
 
-    def stop_session(self, session: RecordingSession) -> np.ndarray:
+    def stop_session(self, session: RecordingSession) -> WavArtifact:
         """Stop a recording session and return the audio.
 
         Args:
             session: The recording session to stop
 
         Returns:
-            The recorded audio as a numpy array
+            Native recorded samples with their capture metadata
 
         Raises:
             RuntimeError: If the recorder fails to stop
         """
         try:
             audio = session.stop()
-            logger.info(f"Recording stopped, captured {len(audio)} samples")
+            logger.info("Recording stopped, captured %s frames", audio.frame_count)
             return audio
         except RuntimeError as e:
             logger.error(f"Failed to stop recording: {e}")
             raise
 
-    def save_audio(self, audio: np.ndarray, prefix: str | None = None) -> Path:
+    def save_audio(self, audio: RawAudio, prefix: str | None = None) -> Path:
         """Save audio to a WAV file.
 
         Args:
@@ -96,15 +95,15 @@ class RecordingService:
 
         # Save the audio file
         try:
-            sf.write(wav_path, audio, 16000)
+            write_wav_atomic(audio, wav_path)
             logger.info(f"Audio saved to {wav_path}")
             return wav_path
         except Exception as e:
             logger.error(f"Failed to save audio: {e}")
             raise
 
-    def get_audio_duration(self, audio: np.ndarray) -> float:
-        """Calculate the duration of an audio array in seconds.
+    def get_audio_duration(self, audio: RawAudio) -> float:
+        """Calculate the duration of typed source audio in seconds.
 
         Args:
             audio: The audio data
@@ -112,4 +111,4 @@ class RecordingService:
         Returns:
             Duration in seconds
         """
-        return len(audio) / 16000
+        return audio.duration()

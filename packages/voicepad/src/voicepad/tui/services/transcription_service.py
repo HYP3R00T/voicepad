@@ -1,5 +1,3 @@
-"""Transcription service for VoicePad TUI."""
-
 from __future__ import annotations
 
 import logging
@@ -7,16 +5,16 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import numpy as np
 from voicepad_core import (
+    RawAudio,
     TranscriptionError,
+    activate_model,
     begin_transcription_session,
     end_transcription_session,
-    ensure_model_downloaded,
-    load_model,
     log_transcription_end,
     log_transcription_start,
-    model_downloaded,
+    model_is_ready,
+    prepare_model,
     transcribe,
 )
 from voicepad_core.inference import AudioTooShortError
@@ -42,7 +40,7 @@ class TranscriptionService:
         self.config = config
 
     def warm_model(self) -> ModelWarmResult:
-        """Download (if needed) and load_model the model into VRAM.
+        """Prepare and activate the configured model.
 
         This operation blocks until complete.
 
@@ -50,42 +48,37 @@ class TranscriptionService:
             ModelWarmResult containing device info or error
         """
         try:
-            # Check if model needs to be downloaded
-            if not model_downloaded(self.config.transcription_model):
+            if not model_is_ready(self.config.transcription_model):
                 logger.info(f"Model '{self.config.transcription_model}' not cached — downloading")
-                ensure_model_downloaded(self.config.transcription_model)
+                prepare_model(self.config.transcription_model)
 
-            # Load the model
-            model = load_model(
+            runtime = activate_model(
                 self.config.transcription_model,
                 self.config.transcription_device,
                 self.config.transcription_compute_type,
             )
-            device = self.config.transcription_device
-            compute = self.config.transcription_compute_type
-            fallback = False
 
-            # Check if we fell back to CPU
-            from voicepad_core.inference.model_manager import _model_cache
-
-            for (m, d, c), cached_model in _model_cache.items():
-                if m == self.config.transcription_model and cached_model is model:
-                    device = d
-                    compute = c
-                    fallback = device == "cpu" and self.config.transcription_device != "cpu"
-                    break
-
-            logger.info(f"Model loaded: device={device}, compute={compute}, fallback={fallback}")
-            return ModelWarmResult(device=device, compute_type=compute, fallback=fallback)
+            logger.info(
+                "Model activated: backend=%s, device=%s, precision=%s, fallback=%s",
+                runtime.backend_id,
+                runtime.device,
+                runtime.precision,
+                runtime.fallback_to_cpu,
+            )
+            return ModelWarmResult(
+                device=runtime.device,
+                compute_type=runtime.precision,
+                fallback=runtime.fallback_to_cpu,
+            )
 
         except TranscriptionError as e:
-            logger.error(f"Model download failed: {e}")
+            logger.error("Model preparation or activation failed: %s", e)
             return ModelWarmResult(device="cpu", compute_type="int8", fallback=True, error=str(e))
         except Exception as e:
-            logger.error(f"Model warm failed: {e}")
+            logger.error("Unexpected model warm failure: %s", e)
             return ModelWarmResult(device="cpu", compute_type="int8", fallback=True, error=str(e))
 
-    def transcribe_audio(self, audio: np.ndarray) -> TranscriptionResult | None:
+    def transcribe_audio(self, audio: RawAudio) -> TranscriptionResult | None:
         """Transcribe an audio buffer.
 
         Args:
@@ -108,7 +101,7 @@ class TranscriptionService:
 
         try:
             # Calculate audio duration
-            duration_s = len(audio) / 16000  # Assuming 16kHz sample rate
+            duration_s = audio.duration()
 
             # Log transcription start
             log_transcription_start(

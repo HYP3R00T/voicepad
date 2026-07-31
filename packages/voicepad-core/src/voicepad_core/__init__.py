@@ -1,68 +1,16 @@
-"""Audio capture and transcription engine.
-
-On Windows, ctranslate2 cannot discover CUDA DLLs from site-packages.
-We pre-load them via ctypes.WinDLL so they're found by name in memory.
-"""
-
-import sys
 from pathlib import Path
 
-# Pre-load CUDA DLLs on Windows so ctranslate2 can find them.
-if sys.platform == "win32":
-    import ctypes
-    import os
-    import pathlib
-
-    _cuda_dll_dirs: set[str] = set()
-
-    # Find nvidia DLL directories from sys.path
-    for _path_entry in sys.path:
-        _nvidia_dir = pathlib.Path(_path_entry) / "nvidia"
-        if _nvidia_dir.is_dir():
-            for _dll_file in _nvidia_dir.rglob("*.dll"):
-                _cuda_dll_dirs.add(str(_dll_file.parent))
-            break
-
-    # Register directories and pre-load DLLs for ctranslate2 discovery
-    _loaded = 0
-    for _d in sorted(_cuda_dll_dirs):
-        os.add_dll_directory(_d)
-        os.environ["PATH"] = _d + os.pathsep + os.environ.get("PATH", "")
-
-    # Two passes to handle DLL dependency ordering (cudnn depends on cublas)
-    _dll_files = []
-    for _d in sorted(_cuda_dll_dirs):
-        _dll_files.extend(sorted(pathlib.Path(_d).glob("*.dll")))
-    _remaining = list(_dll_files)
-    for _pass_num in range(2):
-        _still_remaining = []
-        for _dll in _remaining:
-            try:
-                ctypes.WinDLL(str(_dll))
-                _loaded += 1
-            except OSError:
-                _still_remaining.append(_dll)
-        _remaining = _still_remaining
-        if not _remaining:
-            break
-
-from .audio import FileSource, MicrophoneStream
-from .config import VALID_TRANSCRIPTION_MODELS, Config, get_config, get_config_with_metadata
-from .inference import transcribe
-from .inference.constants import COMPUTE_TYPE, DEFAULT_MODEL, DEVICE, LANGUAGE, SAMPLE_RATE
-from .inference.download import ensure_model_downloaded, model_downloaded
-from .inference.errors import (
-    AudioTooLongWarning,
-    AudioTooShortError,
-    ModelNotFoundError,
-    TranscriptionError,
+from .audio import FileSource, MicrophoneStream, RawAudio, WavArtifact, WaveformSpec, write_wav_atomic
+from .config import Config, get_config, get_config_with_metadata
+from .inference import (
+    RuntimeInfo,
+    activate_model,
+    deactivate_model,
+    model_is_ready,
+    prepare_model,
+    transcribe,
 )
-from .inference.model_manager import _model_cache
-from .inference.model_manager import get as get_model
-from .inference.model_manager import is_loaded as is_model_loaded
-from .inference.model_manager import load as load_model
-from .inference.model_manager import unload as unload_model
-from .inference.model_manager import unload_all as unload_all_models
+from .inference.errors import AudioTooShortError, TranscriptionError
 from .inference.types import Segment, TranscriptionResult, WordTimestamp
 from .logging_utils import (
     begin_transcription_session,
@@ -70,25 +18,12 @@ from .logging_utils import (
     end_transcription_session,
     log_transcription_end,
     log_transcription_start,
-    setup_transcription_logger,
 )
 from .models import (
-    ModelCompatibilityError,
-    ModelSpec,
-    get_model_hint,
-    get_model_label,
-    list_basic_model_ids,
-    list_basic_model_options,
-    list_model_ids,
-    list_model_specs,
-    register_model,
-    register_models,
-)
-from .postprocessing import (
-    deduplicate_overlap,
-    filter_segments,
-    normalize,
-    remove_hallucinations,
+    MODELS,
+    Model,
+    get_model,
+    model_options,
 )
 from .preprocessing import TARGET_SAMPLE_RATE, AudioPreProcessor
 from .streaming import ChunkResult, StreamingTranscriber
@@ -105,29 +40,7 @@ def transcribe_file(
     local_agreement: bool | None = None,
     config: Config | None = None,
 ) -> TranscriptionResult:
-    """Transcribe a WAV file using the new architecture.
-
-    Blueprint Part 8 implementation. Loads audio via FileSource,
-    preprocesses to 16kHz mono, and transcribes using the inference engine.
-
-    Args:
-        wav_path: Path to WAV file to transcribe
-        model_name: Whisper model to use (default: 'turbo')
-        device: Inference device ('cuda' or 'cpu')
-        compute_type: CTranslate2 precision string
-        language: BCP-47 language code (default: 'en')
-        local_agreement: Enable two-pass verification for higher accuracy
-
-    Returns:
-        TranscriptionResult with full transcription, segments, and metadata
-
-    Raises:
-        FileNotFoundError: If WAV file doesn't exist
-        AudioTooShortError: If audio is below minimum duration
-        TranscriptionError: If transcription fails
-    """
-    from pathlib import Path
-
+    """Load source audio and let the selected backend contract prepare it."""
     resolved_config = config or get_config()
     model_name = model_name if model_name is not None else resolved_config.transcription_model
     device = device if device is not None else resolved_config.transcription_device
@@ -139,14 +52,10 @@ def transcribe_file(
     if not wav_path.exists():
         raise FileNotFoundError(f"WAV file not found: {wav_path}")
 
-    source = FileSource(wav_path)
-    source.read()
-
-    preprocessor = AudioPreProcessor(source)
-    processed_audio = preprocessor.process()
+    raw_audio = FileSource(wav_path).read_audio()
 
     result = transcribe(
-        processed_audio.samples,
+        raw_audio,
         model_name=model_name,
         device=device,
         compute_type=compute_type,
@@ -157,74 +66,47 @@ def transcribe_file(
     if local_agreement:
         from .postprocessing.agreement import apply_local_agreement
 
-        result = apply_local_agreement(processed_audio.samples, result, model_name, device, compute_type, language)
+        result = apply_local_agreement(raw_audio, result, model_name, device, compute_type, language)
 
     return result
 
 
 __all__ = [
-    # Audio
     "MicrophoneStream",
+    "WaveformSpec",
+    "RawAudio",
     "FileSource",
+    "WavArtifact",
+    "write_wav_atomic",
     "AudioPreProcessor",
     "TARGET_SAMPLE_RATE",
-    "SAMPLE_RATE",
-    # Config
     "Config",
     "get_config",
     "get_config_with_metadata",
-    "get_model_hint",
-    "get_model_label",
-    "list_basic_model_ids",
-    "list_basic_model_options",
-    "VALID_TRANSCRIPTION_MODELS",
-    "ModelCompatibilityError",
-    "ModelSpec",
-    "list_model_ids",
-    "list_model_specs",
-    "register_model",
-    "register_models",
-    # Inference
+    "MODELS",
+    "Model",
+    "get_model",
+    "model_options",
     "transcribe",
     "transcribe_file",
-    "DEVICE",
-    "COMPUTE_TYPE",
-    "DEFAULT_MODEL",
-    "LANGUAGE",
-    "load_model",
-    "unload_model",
-    "unload_all_models",
-    "is_model_loaded",
-    "get_model",
-    "model_downloaded",
-    "ensure_model_downloaded",
-    "_model_cache",
-    # Types
+    "activate_model",
+    "deactivate_model",
+    "model_is_ready",
+    "prepare_model",
+    "RuntimeInfo",
     "TranscriptionResult",
     "Segment",
     "WordTimestamp",
-    # Exceptions
     "TranscriptionError",
     "AudioTooShortError",
-    "AudioTooLongWarning",
-    "ModelNotFoundError",
-    # Postprocessing
-    "filter_segments",
-    "deduplicate_overlap",
-    "remove_hallucinations",
-    "normalize",
-    # Streaming
     "ChunkResult",
     "StreamingTranscriber",
-    # VAD
     "SileroVAD",
     "SpeechSegment",
     "ensure_vad_model",
-    # Logging
     "begin_transcription_session",
     "configure_global_logging",
     "end_transcription_session",
-    "setup_transcription_logger",
     "log_transcription_start",
     "log_transcription_end",
 ]

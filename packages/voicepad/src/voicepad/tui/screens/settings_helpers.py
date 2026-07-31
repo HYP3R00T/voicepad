@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from textual.widgets import Input, Label, Select, Static
-from voicepad_core import list_basic_model_options
+from voicepad_core import model_options
 
 from voicepad.tui.components.checkbox import VoiceCheckbox
 
@@ -23,7 +23,7 @@ def populate_settings_form(
 
     Extracted from app.py _populate_settings method.
     """
-    from voicepad.cli.config import _get_input_devices
+    from voicepad.cli.config import _get_input_device_options
 
     # Config path label
     exists_hint = "" if Path(config_path_str).exists() else "  [dim red](not yet created)[/]"
@@ -44,9 +44,7 @@ def populate_settings_form(
     }
 
     # Build device options
-    audio_devices = _get_input_devices()
-    device_options: list[tuple[str, int]] = [("System default", -1)]
-    device_options += [(d.name, d.index) for d in audio_devices]
+    device_options = _get_input_device_options()
 
     # Create field widgets
     # Create field widgets
@@ -65,7 +63,7 @@ def populate_settings_form(
 
         if field_name == "transcription_model":
             current_str = str(current_val) if current_val is not None else "turbo"
-            options = list_basic_model_options(current_model=current_str)
+            options = model_options()
             valid_models = {value for _, value in options}
             widget = Select(
                 options=options,
@@ -123,7 +121,7 @@ def _mount_hotkey_picker(container: Static, config: Config) -> None:
     )
 
     hotkey_label = Label(
-        "[bold]global_hotkey[/]  [dim]—  System-wide record/stop shortcut[/]",
+        "[bold]global_hotkey[/]  [dim]—  Windows shortcut; Linux uses voicepad toggle[/]",
         classes="settings-key",
     )
     hotkey_row = Static(classes="settings-row", id="hotkey-row")

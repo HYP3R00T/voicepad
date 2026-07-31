@@ -62,7 +62,12 @@ def remove_hallucinations(
             count += 1
 
         if count > max_repetitions:
-            logger.debug(f"remove_hallucinations: word '{word}' repeated {count}x — keeping {max_repetitions}.")
+            logger.debug(
+                "Repeated word %r %sx; keeping %s.",
+                word,
+                count,
+                max_repetitions,
+            )
             cleaned.extend([word] * max_repetitions)
             i += count
         else:
@@ -80,7 +85,7 @@ def remove_hallucinations(
             phrase3 = f"{words[i + 4]} {words[i + 5]}"
 
             if phrase.lower() == phrase2.lower() == phrase3.lower():
-                logger.debug(f"remove_hallucinations: 2-word phrase '{phrase}' repeated 3+ times — keeping one copy.")
+                logger.debug("Repeated two-word phrase %r at least three times; keeping one copy.", phrase)
                 # Keep exactly one copy
                 final.extend([words[i], words[i + 1]])
                 # Skip all further consecutive occurrences

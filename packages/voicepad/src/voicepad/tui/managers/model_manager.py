@@ -1,5 +1,3 @@
-"""Model warming and status management for VoicePad TUI."""
-
 from __future__ import annotations
 
 import logging
@@ -45,9 +43,9 @@ class ModelManager:
         """Re-download (if needed) and reload the current model."""
         if self.app._recording or self.app._transcribing:
             return
-        from voicepad_core import _model_cache
+        from voicepad_core import deactivate_model
 
-        _model_cache.clear()
+        deactivate_model()
         self.app._model_ready = False
         self.set_status("transcribing", "reloading model…")
         self.app.query_one("#header-model", Label).update("[dim]model:[/] loading…")

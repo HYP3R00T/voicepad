@@ -1,6 +1,4 @@
-"""VoicePad package entry point."""
-
-from voicepad.main import app
+from voicepad.entrypoint import main
 
 if __name__ == "__main__":
-    app()
+    raise SystemExit(main())

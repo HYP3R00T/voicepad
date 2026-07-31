@@ -70,7 +70,7 @@ Different shortcuts are available depending on which tab you're in:
 
 The main tab. Press ++space++ to start recording. While recording, a live timer shows in the status bar. Text appears in real time via streaming transcription as you speak.
 
-When you stop recording, the final transcription appears in the panel. Press ++c++ or use the **copy** button to copy the text to your clipboard.
+When you stop recording, the final transcription appears in the panel and is copied to your clipboard automatically. Press ++c++ or use the **copy** button whenever you want to copy it again.
 
 ### History
 
@@ -97,8 +97,9 @@ Configure VoicePad without editing any files. Changes are saved to your global c
 | VAD model path | Where Voice Activity Detection model is stored |
 | Transcription model | Whisper model to use |
 | Input device | Microphone to record from |
+| Vocabulary hints | Names and terms to prioritize during recognition, one per line |
 | Theme | UI color theme |
-| Global hotkey | System-wide keyboard shortcut for recording |
+| Global hotkey | Native Windows shortcut; Linux uses the `voicepad toggle` desktop command |
 
 **Quick actions:**
 
@@ -109,6 +110,7 @@ Configure VoicePad without editing any files. Changes are saved to your global c
     The Settings tab intentionally shows a simpler model list than the full config file. Advanced model IDs and lower-level transcription behavior can still be changed by editing `voicepad.yaml` directly.
 
 See [Configuration](configuration/index.md) for more details on each setting.
+See [Global Hotkey](configuration/global-hotkey.md) to configure a system-wide shortcut on Windows or Linux.
 
 ## Info Panel
 

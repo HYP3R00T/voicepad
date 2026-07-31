@@ -3,20 +3,20 @@ name = "voicepad-core"
 version = "0.2.1"
 description = "Core audio processing for Voicepad."
 readme = "README.md"
-authors = [{ name = "Rajesh Das", email = "rajesh@hyperoot.dev" }]
 requires-python = ">=3.13"
 license = "MIT"
+authors = [{ name = "Rajesh Das", email = "hyperoot.tech@proton.me" }]
 keywords = [
   "audio",
+  "audio-processing",
+  "faster-whisper",
+  "gpu-acceleration",
+  "recording",
+  "speech-recognition",
+  "speech-to-text",
   "transcription",
   "voice",
   "whisper",
-  "speech-to-text",
-  "recording",
-  "faster-whisper",
-  "gpu-acceleration",
-  "speech-recognition",
-  "audio-processing",
 ]
 
 classifiers = [
@@ -26,8 +26,8 @@ classifiers = [
   "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.13",
   "Topic :: Multimedia :: Sound/Audio :: Capture/Recording",
   "Topic :: Multimedia :: Sound/Audio :: Speech",
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
@@ -36,22 +36,27 @@ classifiers = [
 
 dependencies = [
   "faster-whisper>=1.2.1",
-  "nvidia-cublas-cu12>=12.0.0",
-  "nvidia-cudnn-cu12>=9.0.0",
-  "onnxruntime>=1.16.0",
+  "librosa>=0.11.0,<0.12.0",
+  "nvidia-cublas-cu12==12.8.4.1; (sys_platform == 'win32' and platform_machine == 'AMD64') or (sys_platform == 'linux' and platform_machine == 'x86_64')",
+  "nvidia-cuda-runtime-cu12==12.8.90; (sys_platform == 'win32' and platform_machine == 'AMD64') or (sys_platform == 'linux' and platform_machine == 'x86_64')",
+  "nvidia-cudnn-cu12==9.19.0.56; (sys_platform == 'win32' and platform_machine == 'AMD64') or (sys_platform == 'linux' and platform_machine == 'x86_64')",
+  "nvidia-cufft-cu12==11.3.3.83; (sys_platform == 'win32' and platform_machine == 'AMD64') or (sys_platform == 'linux' and platform_machine == 'x86_64')",
+  "nvidia-curand-cu12==10.3.9.90; sys_platform == 'linux' and platform_machine == 'x86_64'",
   "pydantic>=2.0.0",
+  "sherpa-onnx==1.13.3+cuda12.cudnn9",
   "scipy>=1.17.0",
   "sounddevice>=0.5.5",
   "soundfile>=0.13.1",
+  "tokenizers>=0.22.2",
   "utilityhub-config>=0.2.2",
   "utilityhub-logging>=0.1.0",
 ]
 
 [project.urls]
-HomePage = "https://hyp3r00t.github.io/voicepad/"
-Repository = "https://github.com/HYP3R00T/voicepad"
-Issues = "https://github.com/HYP3R00T/voicepad/issues"
 Documentation = "https://hyp3r00t.github.io/voicepad/"
+HomePage = "https://hyp3r00t.github.io/voicepad/"
+Issues = "https://github.com/HYP3R00T/voicepad/issues"
+Repository = "https://github.com/HYP3R00T/voicepad"
 
 [build-system]
 requires = ["uv_build>=0.11.8,<0.12"]

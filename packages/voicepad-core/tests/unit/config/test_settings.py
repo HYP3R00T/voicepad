@@ -18,6 +18,23 @@ def make_config(*args: Any, **kwargs: Any) -> ConfigModel:
 Config = make_config
 
 
+class TestProperNouns:
+    def test_default_proper_nouns_are_empty(self) -> None:
+        """Proper-noun biasing is opt-in."""
+        assert Config().proper_nouns == ()
+
+    def test_proper_nouns_preserve_user_spelling_and_order(self) -> None:
+        """Configured terms reach inference without rewriting their spelling or order."""
+        config = Config(proper_nouns=["VoicePad", "HYP3R00T"])
+
+        assert config.proper_nouns == ("VoicePad", "HYP3R00T")
+
+    def test_blank_proper_noun_is_rejected(self) -> None:
+        """Empty vocabulary entries are rejected before backend translation."""
+        with pytest.raises(ValueError, match="proper_nouns"):
+            Config(proper_nouns=["VoicePad", " "])
+
+
 class TestConfigExpandPaths:
     def test_expand_paths_with_absolute_path_string(self) -> None:
         """When recordings_path is an absolute path string, it becomes a Path object."""
@@ -50,8 +67,9 @@ class TestConfigExpandPaths:
         config = Config(recordings_path="data/recordings", markdown_path="data/markdown")
         from pydantic import ValidationError
 
+        field = "recordings_path"
         with pytest.raises(ValidationError):  # FrozenInstanceError from Pydantic
-            config.recordings_path = Path("other")
+            setattr(config, field, Path("other"))
 
     def test_default_recordings_path(self) -> None:
         """When recordings_path is not provided, the default points to ~/.config/voicepad/data/recordings."""
@@ -145,9 +163,9 @@ class TestConfigExpandPaths:
         config = Config(
             recordings_path="data/recordings",
             markdown_path="data/markdown",
-            transcription_model="base",
+            transcription_model="small",
         )
-        assert config.transcription_model == "base"
+        assert config.transcription_model == "small"
 
 
 class TestGetConfig:
@@ -466,23 +484,23 @@ class TestTranscriptionModelValidation:
         )
         assert config.transcription_model == "turbo"
 
-    def test_valid_transcription_model_base(self) -> None:
-        """Valid model 'base' is accepted."""
+    def test_valid_transcription_model_small(self) -> None:
+        """Valid model 'small' is accepted."""
         config = Config(
             recordings_path="data/recordings",
             markdown_path="data/markdown",
-            transcription_model="base",
+            transcription_model="small",
         )
-        assert config.transcription_model == "base"
+        assert config.transcription_model == "small"
 
-    def test_valid_transcription_model_large_v3(self) -> None:
-        """Valid model 'large-v3' is accepted."""
+    def test_valid_transcription_model_distil_large_v3_5(self) -> None:
+        """Valid model 'distil-large-v3.5' is accepted."""
         config = Config(
             recordings_path="data/recordings",
             markdown_path="data/markdown",
-            transcription_model="large-v3",
+            transcription_model="distil-large-v3.5",
         )
-        assert config.transcription_model == "large-v3"
+        assert config.transcription_model == "distil-large-v3.5"
 
     def test_invalid_transcription_model_raises_error(self) -> None:
         """Invalid model name raises ValidationError."""
@@ -567,9 +585,9 @@ class TestGlobalHotkeyField:
     """Tests for global_hotkey field."""
 
     def test_default_global_hotkey(self) -> None:
-        """Default global hotkey is '<ctrl>+<alt>+v'."""
+        """Default global hotkey uses the keyboard package's natural format."""
         config = Config(recordings_path="data/recordings", markdown_path="data/markdown")
-        assert config.global_hotkey == "<ctrl>+<alt>+v"
+        assert config.global_hotkey == "ctrl+alt+v"
 
     def test_custom_global_hotkey(self) -> None:
         """Custom global hotkey is accepted."""
@@ -678,22 +696,6 @@ class TestStreamingParameters:
 
 
 class TestLocalAgreementFields:
-    """Tests for local_agreement_mic and local_agreement_file fields."""
-
-    def test_default_local_agreement_mic_is_false(self) -> None:
-        """Default local_agreement_mic is False."""
-        config = Config(recordings_path="data/recordings", markdown_path="data/markdown")
-        assert config.local_agreement_mic is False
-
-    def test_custom_local_agreement_mic_true(self) -> None:
-        """local_agreement_mic can be set to True."""
-        config = Config(
-            recordings_path="data/recordings",
-            markdown_path="data/markdown",
-            local_agreement_mic=True,
-        )
-        assert config.local_agreement_mic is True
-
     def test_default_local_agreement_file_is_true(self) -> None:
         """Default local_agreement_file is True."""
         config = Config(recordings_path="data/recordings", markdown_path="data/markdown")
@@ -768,34 +770,6 @@ class TestAllPathFieldsExpanded:
         assert config.markdown_path == Path("/custom/markdown")
         assert config.model_cache_path == Path("/custom/models")
         assert config.logs_path == Path("/custom/logs")
-
-
-class TestConfigImmutability:
-    """Tests for config immutability (frozen model)."""
-
-    def test_cannot_modify_recordings_path(self) -> None:
-        """Cannot modify recordings_path after creation."""
-        from pydantic import ValidationError
-
-        config = Config(recordings_path="data/recordings", markdown_path="data/markdown")
-        with pytest.raises(ValidationError):
-            config.recordings_path = Path("other")  # type: ignore[misc]
-
-    def test_cannot_modify_transcription_model(self) -> None:
-        """Cannot modify transcription_model after creation."""
-        from pydantic import ValidationError
-
-        config = Config(recordings_path="data/recordings", markdown_path="data/markdown")
-        with pytest.raises(ValidationError):
-            config.transcription_model = "base"  # type: ignore[misc]
-
-    def test_cannot_modify_log_level(self) -> None:
-        """Cannot modify log_level after creation."""
-        from pydantic import ValidationError
-
-        config = Config(recordings_path="data/recordings", markdown_path="data/markdown")
-        with pytest.raises(ValidationError):
-            config.log_level = "DEBUG"  # type: ignore[misc]
 
 
 class TestGetConfigWithCwd:
@@ -892,10 +866,7 @@ class TestAdvancedRuntimeParameters:
         assert config.vad_threshold == 0.5
         assert config.vad_min_speech_duration_ms == 250
         assert config.vad_speech_pad_ms == 30
-        assert config.vad_model_filename == "silero_vad_v6.onnx"
         assert config.vad_download_chunk_size == 8192
-        assert config.model_warmup_enabled is True
-        assert config.model_warmup_duration_s == 0.5
 
     def test_custom_runtime_tuning_fields(self) -> None:
         config = Config(
@@ -917,14 +888,7 @@ class TestAdvancedRuntimeParameters:
             vad_threshold=0.6,
             vad_min_speech_duration_ms=300,
             vad_speech_pad_ms=45,
-            vad_model_filename="custom_vad.onnx",
-            vad_model_url="https://example.com/custom_vad.onnx",
             vad_download_chunk_size=4096,
-            model_warmup_enabled=False,
-            model_warmup_duration_s=0.25,
-            model_warmup_language="fr",
-            model_warmup_beam_size=2,
-            model_warmup_vad_filter=True,
         )
 
         assert config.initial_prompt == "Test prompt"
@@ -943,11 +907,4 @@ class TestAdvancedRuntimeParameters:
         assert config.vad_threshold == 0.6
         assert config.vad_min_speech_duration_ms == 300
         assert config.vad_speech_pad_ms == 45
-        assert config.vad_model_filename == "custom_vad.onnx"
-        assert config.vad_model_url == "https://example.com/custom_vad.onnx"
         assert config.vad_download_chunk_size == 4096
-        assert config.model_warmup_enabled is False
-        assert config.model_warmup_duration_s == 0.25
-        assert config.model_warmup_language == "fr"
-        assert config.model_warmup_beam_size == 2
-        assert config.model_warmup_vad_filter is True

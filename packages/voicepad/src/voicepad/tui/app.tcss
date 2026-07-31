@@ -207,6 +207,10 @@ TabPane {
     margin-top: 0;
 }
 
+#setting-proper_nouns {
+    height: 6;
+}
+
 #settings-footer {
     layout: horizontal;
     height: 3;

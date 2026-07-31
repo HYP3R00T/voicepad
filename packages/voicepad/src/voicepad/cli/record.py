@@ -1,5 +1,3 @@
-"""Recording commands for the voicepad CLI."""
-
 from __future__ import annotations
 
 import logging
@@ -8,25 +6,26 @@ import threading
 import time
 from pathlib import Path
 from typing import Annotated
+from uuid import uuid4
 
 import typer
 from voicepad_core import (
-    AudioPreProcessor,
     AudioTooShortError,
+    FileSource,
     MicrophoneStream,
     TranscriptionError,
-    _model_cache,
+    activate_model,
     begin_transcription_session,
     configure_global_logging,
     end_transcription_session,
-    ensure_model_downloaded,
     get_config,
-    load_model,
     log_transcription_end,
     log_transcription_start,
-    model_downloaded,
+    model_is_ready,
+    prepare_model,
     transcribe,
 )
+from voicepad_core.audio import AudioWindow
 from voicepad_core.inference.constants import BEAM_SIZE, COMPUTE_TYPE, DEVICE, LANGUAGE
 
 logger = logging.getLogger(__name__)
@@ -69,7 +68,7 @@ def start_recording(
     no_save: bool = typer.Option(
         False,
         "--no-save",
-        help="Do not save WAV to disk (transcribe from memory only)",
+        help="Delete the temporary WAV after capture",
     ),
 ) -> None:
     """Record audio from your microphone and transcribe it.
@@ -94,7 +93,7 @@ def start_recording(
     # On subsequent runs the cache check is instant.
     if not no_transcribe:
         model_name = config.transcription_model
-        if not model_downloaded(model_name):
+        if not model_is_ready(model_name):
             typer.echo()
             typer.secho(
                 f"[↓] Model '{model_name}' not found locally — downloading now.",
@@ -103,47 +102,42 @@ def start_recording(
             typer.echo("    This only happens once. Subsequent runs start immediately.")
             typer.echo()
             try:
-                ensure_model_downloaded(model_name)
+                prepare_model(model_name)
                 typer.secho(f"    [OK] '{model_name}' downloaded.", fg=typer.colors.GREEN)
             except TranscriptionError as e:
                 typer.secho(f"[ERROR] Download failed: {e}", fg=typer.colors.RED, err=True)
                 raise typer.Exit(1) from e
 
         # --- Step 2: Load model into VRAM ---
-        # Model is local — load_model it now so transcription is instant after recording.
+        # Model is local — activate it now so transcription is instant after recording.
         typer.echo(f"[~] Loading '{model_name}' into memory...")
         try:
-            model = load_model(
+            runtime = activate_model(
                 config.transcription_model,
                 config.transcription_device,
                 config.transcription_compute_type,
             )
-            actual_device = config.transcription_device
-            actual_compute = config.transcription_compute_type
-            fallback = False
-            for (m, d, c), cached_model in _model_cache.items():
-                if m == config.transcription_model and cached_model is model:
-                    actual_device = d
-                    actual_compute = c
-                    fallback = actual_device == "cpu" and config.transcription_device != "cpu"
-                    break
 
-            if fallback:
+            if runtime.fallback_to_cpu:
                 typer.secho(
-                    f"    [!] CUDA not available — using CPU ({actual_compute})",
+                    f"    [!] CUDA not available — using CPU ({runtime.precision})",
                     fg=typer.colors.YELLOW,
                 )
             else:
                 typer.secho(
-                    f"    [OK] Ready on {actual_device} ({actual_compute})",
+                    f"    [OK] Ready on {runtime.device} ({runtime.precision})",
                     fg=typer.colors.GREEN,
                 )
         except TranscriptionError as e:
-            typer.secho(f"[ERROR] Could not load_model model: {e}", fg=typer.colors.RED, err=True)
+            typer.secho(f"[ERROR] Could not load model: {e}", fg=typer.colors.RED, err=True)
             raise typer.Exit(1) from e
 
     # --- Start recording ---
-    recorder = MicrophoneStream(config.input_device_index)
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    recording_prefix = prefix or config.recording_prefix
+    filename = f".voicepad-{uuid4().hex}.wav" if no_save else f"{recording_prefix}_{timestamp}.wav"
+    capture_path = config.recordings_path / filename
+    recorder = MicrophoneStream(capture_path, device_index=config.input_device_index)
     try:
         recorder.start()
     except Exception as e:
@@ -176,32 +170,26 @@ def start_recording(
     # --- Stop and collect audio ---
     typer.echo()
     try:
-        raw_audio = recorder.stop()
-        processor = AudioPreProcessor(recorder)  # type: ignore
-        audio = processor.process_array(raw_audio, recorder.sample_rate)
+        artifact = recorder.stop()
+        try:
+            audio = FileSource(artifact.path).read_audio()
+        finally:
+            if no_save:
+                artifact.path.unlink(missing_ok=True)
     except Exception as e:
         typer.secho(f"[ERROR] {e}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from e
 
-    captured_s = len(audio) / 16000
+    captured_s = audio.duration()
     typer.secho(f"[OK] Captured {captured_s:.2f}s", fg=typer.colors.GREEN)
+
+    wav_path = None if no_save else artifact.path
+    if wav_path is not None:
+        typer.echo(f"      saved  : {wav_path}")
 
     if captured_s < 0.5:
         typer.secho("[SKIP] Too short to transcribe (< 0.5s)", fg=typer.colors.YELLOW)
         return
-
-    # --- Save WAV ---
-    wav_path: Path | None = None
-    if not no_save:
-        ts = time.strftime("%Y%m%d_%H%M%S")
-        p = prefix or config.recording_prefix
-        wav_path = config.recordings_path / f"{p}_{ts}.wav"
-        try:
-            recorder.save_wav(audio, wav_path, sample_rate=16000)
-            typer.echo(f"      saved  : {wav_path}")
-        except Exception as e:
-            typer.secho(f"[WARN] Could not save WAV: {e}", fg=typer.colors.YELLOW)
-            wav_path = None
 
     # --- Transcribe ---
     if no_transcribe:
@@ -209,14 +197,6 @@ def start_recording(
 
     typer.echo()
     typer.secho("[*] Transcribing...", fg=typer.colors.CYAN)
-
-    transcription_audio = audio
-    if wav_path and wav_path.exists():
-        import soundfile as sf
-
-        transcription_audio, _ = sf.read(str(wav_path), dtype="float32", always_2d=False)
-        if transcription_audio.ndim > 1:
-            transcription_audio = transcription_audio.mean(axis=1)
 
     session_id = wav_path.stem if wav_path is not None else f"cli_{time.strftime('%Y%m%d_%H%M%S')}"
     session_logger, _log_file = begin_transcription_session(
@@ -228,13 +208,13 @@ def start_recording(
     try:
         log_transcription_start(
             session_logger,
-            len(transcription_audio) / 16000,
+            audio.duration(),
             config.transcription_model,
             config.transcription_device,
             config.transcription_compute_type,
         )
         result = transcribe(
-            transcription_audio,
+            audio,
             model_name=config.transcription_model,
             device=config.transcription_device,
             compute_type=config.transcription_compute_type,
@@ -323,6 +303,14 @@ def _wait_for_quit(stop_event: threading.Event) -> None:
             break
 
 
+def _language_summary(result) -> str:
+    if result.language is None:
+        return "unavailable"
+    if result.language_probability is None:
+        return result.language
+    return f"{result.language} ({result.language_probability * 100:.1f}%)"
+
+
 def _print_result(result) -> None:
     typer.echo()
     typer.secho("┌─ Transcription " + "─" * 34, fg=typer.colors.CYAN)
@@ -330,7 +318,7 @@ def _print_result(result) -> None:
     typer.secho("└" + "─" * 50, fg=typer.colors.CYAN)
     typer.echo()
     typer.echo(f"  device   : {result.device} ({result.compute_type})")
-    typer.echo(f"  language : {result.language} ({result.language_probability * 100:.0f}% confidence)")
+    typer.echo(f"  language : {_language_summary(result)}")
     typer.echo(f"  audio    : {result.duration_s:.1f}s")
     typer.echo(f"  latency  : {result.latency_ms:.0f}ms")
     if result.fallback_to_cpu:
@@ -349,7 +337,7 @@ def _format_markdown(wav_path: Path, result, model_name: str = "") -> str:
         "transcriptions:",
         "  - n: 1",
         f"    model: {model_str}",
-        f"    language: {result.language} ({result.language_probability * 100:.1f}%)",
+        f"    language: {_language_summary(result)}",
         f"    duration: {result.duration_s:.1f}s",
         f"    latency: {result.latency_ms:.0f}ms",
     ]
@@ -395,18 +383,18 @@ def benchmark(
     import soundfile as sf
     from rich.console import Console
     from rich.table import Table
-    from voicepad_core import ensure_model_downloaded, load_model
+    from voicepad_core import activate_model, model_is_ready, prepare_model
     from voicepad_core.streaming import StreamingTranscriber
 
     config = get_config()
     _configure_command_logging(config)
 
-    if not model_downloaded(config.transcription_model):
+    if not model_is_ready(config.transcription_model):
         typer.secho(f"Downloading model '{config.transcription_model}'...", fg=typer.colors.CYAN)
-        ensure_model_downloaded(config.transcription_model)
+        prepare_model(config.transcription_model)
 
     typer.echo("Loading model...")
-    load_model(config.transcription_model, config.transcription_device, config.transcription_compute_type)
+    activate_model(config.transcription_model, config.transcription_device, config.transcription_compute_type)
 
     typer.echo(f"Loading {wav_path}...")
     audio, sr = sf.read(str(wav_path), dtype="float32")
@@ -437,8 +425,9 @@ def benchmark(
             self.sample_rate = 16000
             self.cursor = 0
 
-        def get_snapshot(self):
-            return self.audio_data[: self.cursor]
+        def read_window(self, start_sample: int, max_samples: int) -> AudioWindow:
+            end_sample = min(self.cursor, start_sample + max_samples)
+            return AudioWindow(self.audio_data[start_sample:end_sample], start_sample)
 
     typer.echo("Running permutations...")
 

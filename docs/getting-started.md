@@ -44,7 +44,7 @@ After installing, restart your terminal so the `uv` and `uvx` commands are avail
 uvx voicepad
 ```
 
-On first run, it downloads the package. VoicePad then walks you through a short onboarding flow to choose a microphone and a starter Whisper model before the first model download begins. Subsequent runs start immediately from cache.
+On first run, it downloads the package. VoicePad then walks you through a short onboarding flow to confirm the system microphone and choose a starter Whisper model before the first model download begins. Subsequent runs start immediately from cache.
 
 ### Option 2: Install as a persistent tool
 
@@ -62,7 +62,7 @@ This installs VoicePad into an isolated environment managed by uv and adds the `
 When you run VoicePad for the first time:
 
 1. The interface opens and shows **initialising** in the header
-2. The onboarding flow asks you to choose a microphone
+2. The onboarding flow confirms the system-default microphone
 3. The onboarding flow asks you to choose a starter Whisper model
 4. VoicePad downloads that model from HuggingFace (one time only)
 5. The model loads into GPU memory (or CPU if no NVIDIA GPU is detected)
@@ -87,7 +87,9 @@ The recording is saved as a WAV file and the transcription as a markdown file. B
 
 ## Check Your Microphone
 
-If nothing is captured, your microphone may not be set as the default input device. You can change the input device from the **Settings** tab in VoicePad.
+If nothing is captured, select the microphone as the default input in your
+desktop's **Sound** settings. On Linux, VoicePad uses that shared input so it can
+record at the same time as OBS and other PipeWire/PulseAudio applications.
 
 ## Next Steps
 

@@ -26,10 +26,10 @@ def test_word_timestamp_creation() -> None:
 
 
 def test_word_timestamp_default_probability() -> None:
-    """WordTimestamp has default probability of 0.0."""
+    """A backend that does not report word confidence leaves it unavailable."""
     word = WordTimestamp(word="hello", start=0.0, end=0.5)
 
-    assert word.probability == 0.0
+    assert word.probability is None
 
 
 def test_word_timestamp_is_frozen() -> None:
@@ -68,9 +68,26 @@ def test_segment_default_values() -> None:
     """Segment has default values for optional fields."""
     segment = Segment(start=0.0, end=1.0, text="test")
 
-    assert segment.avg_logprob == 0.0
-    assert segment.no_speech_prob == 0.0
+    assert segment.avg_logprob is None
+    assert segment.no_speech_prob is None
     assert segment.words == []
+    assert segment.confidence is None
+
+
+def test_segment_accepts_backend_neutral_confidence() -> None:
+    """Segment stores backend-neutral confidence when a backend provides it."""
+    segment = Segment(start=0.0, end=1.0, text="test", confidence=0.85)
+
+    assert segment.confidence == 0.85
+
+
+@pytest.mark.parametrize("confidence", [-0.01, 1.01])
+def test_segment_rejects_confidence_outside_probability_range(
+    confidence: float,
+) -> None:
+    """Segment rejects generic confidence values outside the probability range."""
+    with pytest.raises(ValueError, match="confidence must be between"):
+        Segment(start=0.0, end=1.0, text="test", confidence=confidence)
 
 
 def test_segment_duration() -> None:
@@ -147,8 +164,32 @@ def test_transcription_result_default_values() -> None:
     )
 
     assert result.fallback_to_cpu is False
-    assert result.avg_confidence == 0.0
-    assert result.low_confidence_count == 0
+    assert result.backend_id is None
+    assert result.model_id is None
+    assert result.artifact_format is None
+
+
+def test_transcription_result_with_provenance() -> None:
+    """TranscriptionResult records the backend and model artifact identity."""
+    result = TranscriptionResult(
+        text="test",
+        segments=[],
+        language="en",
+        language_probability=0.99,
+        duration_s=1.0,
+        latency_ms=100.0,
+        device="cuda",
+        compute_type="int8",
+        backend_id="faster-whisper",
+        model_id="large-v3",
+        artifact_format="ct2",
+    )
+
+    assert (
+        result.backend_id,
+        result.model_id,
+        result.artifact_format,
+    ) == ("faster-whisper", "large-v3", "ct2")
 
 
 def test_transcription_result_with_fallback() -> None:
@@ -167,25 +208,6 @@ def test_transcription_result_with_fallback() -> None:
 
     assert result.fallback_to_cpu is True
     assert result.device == "cpu"
-
-
-def test_transcription_result_with_quality_metrics() -> None:
-    """TranscriptionResult can include quality metrics."""
-    result = TranscriptionResult(
-        text="test",
-        segments=[],
-        language="en",
-        language_probability=0.99,
-        duration_s=1.0,
-        latency_ms=100.0,
-        device="cuda",
-        compute_type="int8",
-        avg_confidence=-0.3,
-        low_confidence_count=2,
-    )
-
-    assert result.avg_confidence == -0.3
-    assert result.low_confidence_count == 2
 
 
 def test_transcription_result_is_frozen() -> None:

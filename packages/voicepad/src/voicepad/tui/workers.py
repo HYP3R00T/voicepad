@@ -1,22 +1,13 @@
-"""Background workers for the VoicePad TUI.
-
-All blocking operations (model load_model, audio recording, transcription) run in
-worker threads so the Textual event loop stays responsive.
-
-Each worker is a plain dataclass that holds its result or error after run().
-The TUI calls worker.run() via app.run_worker() and reads the result in the
-on_worker_state_changed handler.
-"""
-
 from __future__ import annotations
 
 import logging
 import threading
+import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING
 
-import numpy as np
-from voicepad_core import MicrophoneStream
+from voicepad_core import MicrophoneStream, RawAudio, WavArtifact
 
 if TYPE_CHECKING:
     from voicepad_core import TranscriptionResult
@@ -39,37 +30,29 @@ class ModelWarmResult:
 
 
 def warm_model(config: Config) -> ModelWarmResult:
-    """Download (if needed) then load_model the model into VRAM. Blocks until complete."""
-    from voicepad_core import TranscriptionError, _model_cache, ensure_model_downloaded, load_model, model_downloaded
+    """Prepare and activate the configured model, returning its actual runtime."""
+    from voicepad_core import TranscriptionError, activate_model, model_is_ready, prepare_model
 
     try:
-        if not model_downloaded(config.transcription_model):
+        if not model_is_ready(config.transcription_model):
             logger.info(f"Model '{config.transcription_model}' not cached — downloading")
-            ensure_model_downloaded(config.transcription_model)
+            prepare_model(config.transcription_model)
 
-        model = load_model(
+        runtime = activate_model(
             config.transcription_model,
             config.transcription_device,
             config.transcription_compute_type,
         )
-
-        device = config.transcription_device
-        compute = config.transcription_compute_type
-        fallback = False
-
-        for (m, d, c), cached_model in _model_cache.items():
-            if m == config.transcription_model and cached_model is model:
-                device = d
-                compute = c
-                fallback = device == "cpu" and config.transcription_device != "cpu"
-                break
-
-        return ModelWarmResult(device=device, compute_type=compute, fallback=fallback)
+        return ModelWarmResult(
+            device=runtime.device,
+            compute_type=runtime.precision,
+            fallback=runtime.fallback_to_cpu,
+        )
     except TranscriptionError as e:
-        logger.error(f"Model download failed: {e}")
+        logger.error("Model preparation or activation failed: %s", e, exc_info=True)
         return ModelWarmResult(device="cpu", compute_type="int8", fallback=True, error=str(e))
     except Exception as e:
-        logger.error(f"Model warm failed: {e}")
+        logger.error("Unexpected model warm failure: %s", e, exc_info=True)
         return ModelWarmResult(device="cpu", compute_type="int8", fallback=True, error=str(e))
 
 
@@ -83,33 +66,30 @@ class RecordingSession:
     """Manages a live recording that can be stopped from another thread."""
 
     config: Config
+    recording_path: Path | None = None
     _recorder: MicrophoneStream | None = field(default=None, init=False, repr=False)
     _stop_event: threading.Event = field(default_factory=threading.Event, init=False)
-    _audio: np.ndarray | None = field(default=None, init=False)
     _error: str | None = field(default=None, init=False)
 
     def start(self) -> None:
         """Open the microphone. Call from a worker thread."""
         try:
-            self._recorder = MicrophoneStream(self.config.input_device_index)
+            recording_path = self.recording_path or (
+                self.config.recordings_path / f"{self.config.recording_prefix}_{time.strftime('%Y%m%d_%H%M%S')}.wav"
+            )
+            self.recording_path = recording_path
+            self._recorder = MicrophoneStream(recording_path, device_index=self.config.input_device_index)
             self._recorder.start()
         except Exception as e:
             self._error = str(e)
             raise
 
-    def stop(self) -> np.ndarray:
-        """Close the microphone and return captured audio."""
+    def stop(self) -> WavArtifact:
+        """Close the microphone and return the persisted recording."""
         if self._recorder is None:
-            return np.array([], dtype=np.float32)
+            raise RuntimeError("RecordingSession has not been started.")
         try:
-            from voicepad_core import AudioPreProcessor
-
-            raw_audio = self._recorder.stop()
-            processor = AudioPreProcessor(self._recorder)  # type: ignore
-            audio = processor.process_array(raw_audio, self._recorder.sample_rate)
-
-            self._audio = audio
-            return audio
+            return self._recorder.stop()
         except Exception as e:
             self._error = str(e)
             raise
@@ -126,9 +106,9 @@ class RecordingSession:
 
 @dataclass
 class TranscriptionJob:
-    """Transcribes a numpy audio array. Blocks until complete."""
+    """Transcribe canonical audio. Blocks until complete."""
 
-    audio: np.ndarray
+    audio: RawAudio
     config: Config
     result: TranscriptionResult | None = field(default=None, init=False)
     error: str | None = field(default=None, init=False)

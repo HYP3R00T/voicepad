@@ -242,14 +242,14 @@ def _get_runtime_model_cache_path() -> Path:
 
 
 def _ensure_profile_model_ready(profile: Profile) -> tuple[Path, bool, bool]:
-    from voicepad_core.inference.download import ensure_model_downloaded, model_downloaded
+    from voicepad_core import model_is_ready, prepare_model
 
     model_cache_path = _get_runtime_model_cache_path()
-    cached_before = model_downloaded(profile.model, models_dir=model_cache_path)
+    cached_before = model_is_ready(profile.model)
     if not cached_before:
         print(f"    cache miss: downloading {profile.model} into {model_cache_path}", flush=True)
-    ensure_model_downloaded(profile.model, models_dir=model_cache_path)
-    cached_after = model_downloaded(profile.model, models_dir=model_cache_path)
+    prepare_model(profile.model)
+    cached_after = model_is_ready(profile.model)
     return model_cache_path, cached_before, cached_after
 
 

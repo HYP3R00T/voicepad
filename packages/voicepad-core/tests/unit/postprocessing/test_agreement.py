@@ -6,7 +6,32 @@ from unittest.mock import Mock, patch
 
 import numpy as np
 import pytest
+from voicepad_core.audio import RawAudio
+from voicepad_core.inference.types import Segment, TranscriptionResult
 from voicepad_core.postprocessing.agreement import _compare_tokens, apply_local_agreement
+
+
+def _audio() -> RawAudio:
+    return RawAudio(np.array([0.1, 0.2, 0.3], dtype=np.float32), 16_000, 1)
+
+
+def _result(
+    text: str,
+    latency_ms: float,
+    *,
+    segments: list[Segment] | None = None,
+) -> TranscriptionResult:
+    return TranscriptionResult(
+        text=text,
+        segments=segments or [],
+        language="en",
+        language_probability=0.95,
+        duration_s=3.0,
+        latency_ms=latency_ms,
+        device="cuda",
+        compute_type="float16",
+        backend_id="faster-whisper",
+    )
 
 
 class TestCompareTokens:
@@ -93,21 +118,10 @@ class TestApplyLocalAgreement:
     @patch("voicepad_core.inference.transcribe")
     def test_runs_second_pass_and_compares(self, mock_transcribe: Mock) -> None:
         """Should run second transcription pass and compare results."""
-        audio = np.array([0.1, 0.2, 0.3])
+        audio = _audio()
 
         # First result (passed in)
-        first_result = Mock()
-        first_result.text = "hello world test"
-        first_result.segments = []
-        first_result.language = "en"
-        first_result.language_probability = 0.95
-        first_result.duration_s = 3.0
-        first_result.latency_ms = 100.0
-        first_result.device = "cuda"
-        first_result.compute_type = "float16"
-        first_result.fallback_to_cpu = False
-        first_result.avg_confidence = 0.9
-        first_result.low_confidence_count = 0
+        first_result = _result("hello world test", 100.0)
 
         # Second result (from mock)
         second_result = Mock()
@@ -141,20 +155,9 @@ class TestApplyLocalAgreement:
     @patch("voicepad_core.inference.transcribe")
     def test_filters_disagreed_tokens(self, mock_transcribe: Mock) -> None:
         """Should filter out tokens that don't agree."""
-        audio = np.array([0.1, 0.2, 0.3])
+        audio = _audio()
 
-        first_result = Mock()
-        first_result.text = "hello world test"
-        first_result.segments = []
-        first_result.language = "en"
-        first_result.language_probability = 0.95
-        first_result.duration_s = 3.0
-        first_result.latency_ms = 100.0
-        first_result.device = "cuda"
-        first_result.compute_type = "float16"
-        first_result.fallback_to_cpu = False
-        first_result.avg_confidence = 0.9
-        first_result.low_confidence_count = 0
+        first_result = _result("hello world test", 100.0)
 
         second_result = Mock()
         second_result.text = "hello earth test"  # "world" -> "earth"
@@ -177,20 +180,13 @@ class TestApplyLocalAgreement:
     @patch("voicepad_core.inference.transcribe")
     def test_preserves_first_result_metadata(self, mock_transcribe: Mock) -> None:
         """Should preserve metadata from first result."""
-        audio = np.array([0.1, 0.2, 0.3])
+        audio = _audio()
 
-        first_result = Mock()
-        first_result.text = "hello"
-        first_result.segments = [Mock(), Mock()]
-        first_result.language = "en"
-        first_result.language_probability = 0.95
-        first_result.duration_s = 3.0
-        first_result.latency_ms = 100.0
-        first_result.device = "cuda"
-        first_result.compute_type = "float16"
-        first_result.fallback_to_cpu = False
-        first_result.avg_confidence = 0.9
-        first_result.low_confidence_count = 2
+        segments = [
+            Segment(start=0.0, end=1.0, text="hello"),
+            Segment(start=1.0, end=2.0, text="again"),
+        ]
+        first_result = _result("hello", 100.0, segments=segments)
 
         second_result = Mock()
         second_result.text = "hello"
@@ -215,26 +211,14 @@ class TestApplyLocalAgreement:
         assert result.device == "cuda"
         assert result.compute_type == "float16"
         assert result.fallback_to_cpu is False
-        assert result.avg_confidence == 0.9
-        assert result.low_confidence_count == 2
+        assert result.backend_id == "faster-whisper"
 
     @patch("voicepad_core.inference.transcribe")
     def test_sums_latencies(self, mock_transcribe: Mock) -> None:
         """Should sum latencies from both passes."""
-        audio = np.array([0.1, 0.2, 0.3])
+        audio = _audio()
 
-        first_result = Mock()
-        first_result.text = "hello"
-        first_result.segments = []
-        first_result.language = "en"
-        first_result.language_probability = 0.95
-        first_result.duration_s = 3.0
-        first_result.latency_ms = 123.45
-        first_result.device = "cuda"
-        first_result.compute_type = "float16"
-        first_result.fallback_to_cpu = False
-        first_result.avg_confidence = 0.9
-        first_result.low_confidence_count = 0
+        first_result = _result("hello", 123.45)
 
         second_result = Mock()
         second_result.text = "hello"
@@ -256,20 +240,9 @@ class TestApplyLocalAgreement:
     @patch("voicepad_core.inference.transcribe")
     def test_empty_agreement(self, mock_transcribe: Mock) -> None:
         """Should handle case where no tokens agree."""
-        audio = np.array([0.1, 0.2, 0.3])
+        audio = _audio()
 
-        first_result = Mock()
-        first_result.text = "hello world"
-        first_result.segments = []
-        first_result.language = "en"
-        first_result.language_probability = 0.95
-        first_result.duration_s = 3.0
-        first_result.latency_ms = 100.0
-        first_result.device = "cuda"
-        first_result.compute_type = "float16"
-        first_result.fallback_to_cpu = False
-        first_result.avg_confidence = 0.9
-        first_result.low_confidence_count = 0
+        first_result = _result("hello world", 100.0)
 
         second_result = Mock()
         second_result.text = "completely different"

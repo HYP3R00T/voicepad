@@ -13,6 +13,14 @@ members = ["packages/voicepad-core", "packages/voicepad"]
 voicepad = { workspace = true }
 voicepad-core = { workspace = true }
 
+[tool.uv]
+find-links = ["https://k2-fsa.github.io/sherpa/onnx/cuda.html"]
+# Keep Faster-Whisper's transitive CPU runtime off Windows, where VoicePad
+# installs the CUDA-enabled distribution instead.
+override-dependencies = [
+  "onnxruntime>=1.26.0,<1.27.0; sys_platform != 'win32' or platform_machine != 'AMD64'",
+]
+
 [dependency-groups]
 dev = [
   "pytest>=9.0.2",

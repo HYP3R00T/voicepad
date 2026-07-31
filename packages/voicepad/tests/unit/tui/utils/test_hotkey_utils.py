@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from voicepad.tui.utils.hotkey_utils import build_hotkey_str, parse_hotkey_str
+from unittest.mock import patch
+
+from voicepad.tui.utils.hotkey_utils import build_hotkey_display_str, build_hotkey_str, parse_hotkey_str
 
 
 class TestHotkeyUtils:
@@ -19,3 +21,25 @@ class TestHotkeyUtils:
     def test_build_wraps_multi_char_key(self) -> None:
         """Multi-character keys are built in keyboard module format (no angle brackets)."""
         assert build_hotkey_str(["ctrl"], "space") == "ctrl+space"
+
+    def test_parse_accepts_linux_super_name(self) -> None:
+        """The Linux Super modifier maps to the shared command modifier."""
+        assert parse_hotkey_str("super+space") == (["cmd"], "space")
+
+    def test_parse_accepts_windows_name(self) -> None:
+        """The Windows modifier name maps to the shared command modifier."""
+        assert parse_hotkey_str("win+space") == (["cmd"], "space")
+
+    def test_display_uses_super_on_linux(self) -> None:
+        """Linux displays the platform-standard Super modifier name."""
+        with patch("voicepad.tui.utils.hotkey_utils.platform.system", return_value="Linux"):
+            display = build_hotkey_display_str(["cmd"], "space")
+
+        assert display == "super+space"
+
+    def test_display_uses_win_on_windows(self) -> None:
+        """Windows displays the platform-standard Win modifier name."""
+        with patch("voicepad.tui.utils.hotkey_utils.platform.system", return_value="Windows"):
+            display = build_hotkey_display_str(["cmd"], "space")
+
+        assert display == "win+space"

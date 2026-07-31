@@ -1,5 +1,3 @@
-"""Setup wizard modal for VoicePad TUI."""
-
 from __future__ import annotations
 
 import contextlib
@@ -10,7 +8,7 @@ from textual import on, work
 from textual.binding import Binding
 from textual.screen import ModalScreen
 from textual.widgets import Button, DataTable, ProgressBar, Select, Static
-from voicepad_core import get_model_hint, list_basic_model_options
+from voicepad_core import get_model, model_options
 
 from voicepad.tui.components import VoiceButton
 
@@ -151,13 +149,13 @@ class SetupModal(ModalScreen[tuple[str, int | None]]):
         )
         body.mount(
             Select(
-                options=list_basic_model_options(current_model=self._chosen_model),
+                options=model_options(),
                 value=self._chosen_model,
                 id="wizard-model-select",
                 allow_blank=False,
             )
         )
-        body.mount(Static(get_model_hint(self._chosen_model), id="wizard-model-hint", classes="wizard-hint"))
+        body.mount(Static(get_model(self._chosen_model).hint, id="wizard-model-hint", classes="wizard-hint"))
         body.mount(Static("", id="wizard-download-status", classes="wizard-status"))
         # Indeterminate progress bar — no percentage, just a looping animation
         bar = ProgressBar(id="wizard-progress", show_eta=False, show_percentage=False)
@@ -169,7 +167,7 @@ class SetupModal(ModalScreen[tuple[str, int | None]]):
         if event.value is not Select.BLANK:
             self._chosen_model = str(event.value)
             with contextlib.suppress(Exception):
-                self.query_one("#wizard-model-hint", Static).update(get_model_hint(self._chosen_model))
+                self.query_one("#wizard-model-hint", Static).update(get_model(self._chosen_model).hint)
 
     def _start_download(self) -> None:
         if self._downloading:
@@ -197,11 +195,11 @@ class SetupModal(ModalScreen[tuple[str, int | None]]):
     def _download_model_worker(self, model: str) -> None:
         import time
 
-        from voicepad_core import TranscriptionError, ensure_model_downloaded, model_downloaded
+        from voicepad_core import TranscriptionError, model_is_ready, prepare_model
 
         self.app.call_from_thread(self._set_download_status, f"Checking {model}")
 
-        if model_downloaded(model):
+        if model_is_ready(model):
             self.app.call_from_thread(self._on_download_done, model, None, 0.0)
             return
 
@@ -212,7 +210,7 @@ class SetupModal(ModalScreen[tuple[str, int | None]]):
         self.app.call_from_thread(self.set_timer, 1.0, self._start_elapsed_timer)
 
         try:
-            ensure_model_downloaded(model, on_progress=None)
+            prepare_model(model, on_progress=None)
             elapsed = time.monotonic() - self._download_start_time
             self.app.call_from_thread(self._on_download_done, model, None, elapsed)
         except TranscriptionError as e:
@@ -253,17 +251,22 @@ class SetupModal(ModalScreen[tuple[str, int | None]]):
     # ------------------------------------------------------------------
 
     def _mount_step_microphone(self, body: Static) -> None:
-        from voicepad.cli.config import _get_input_devices
+        from voicepad.cli.config import _get_input_device_options
 
         body.mount(Static("Select Your Microphone", classes="wizard-title"))
-        body.mount(Static("[dim]System default[/] works for most setups.", classes="wizard-text"))
+        body.mount(
+            Static(
+                "On Linux, choose your microphone in the desktop Sound settings so it can be shared with other apps.",
+                classes="wizard-text",
+            )
+        )
 
-        devices = _get_input_devices()
-        device_options: list[tuple[str, int]] = [("System default", -1)]
-        device_options += [(d.name, d.index) for d in devices]
+        device_options = _get_input_device_options()
 
         current = self._chosen_device_index if self._chosen_device_index is not None else -1
         valid = {v for _, v in device_options}
+        if current not in valid:
+            self._chosen_device_index = None
 
         body.mount(
             Select(
@@ -273,7 +276,7 @@ class SetupModal(ModalScreen[tuple[str, int | None]]):
                 allow_blank=False,
             )
         )
-        body.mount(Static(f"[dim]{len(devices)} input device(s) found[/]", classes="wizard-hint"))
+        body.mount(Static("[dim]Voicepad follows the system default input[/]", classes="wizard-hint"))
 
     @on(Select.Changed, "#wizard-device-select")
     def on_device_changed(self, event: Select.Changed) -> None:

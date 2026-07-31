@@ -3,21 +3,20 @@ git-cliff = "latest"
 prek = "latest"
 python = "3.13"
 rumdl = "latest"
+tombi = "latest"
 uv = "latest"
 
 [settings]
 experimental = true
-python.uv_venv_auto = true
 idiomatic_version_file_enable_tools = ["python"]
 
 [hooks]
 enter = [
   "bash ./scripts/enter_project.sh",
-  "pwsh -File ./scripts/enter_project.ps1",
 ]
 
 [env]
-_.file = '.env'       # for sensitive data
+_.file = ".env"  # for sensitive data
 UV_LINK_MODE = "copy"
 
 [tasks.docs]

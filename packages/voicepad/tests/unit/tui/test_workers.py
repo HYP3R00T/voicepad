@@ -1,7 +1,6 @@
-"""Tests for workers.py module."""
-
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
 import numpy as np
@@ -12,6 +11,11 @@ from voicepad.tui.workers import (
     TranscriptionJob,
     warm_model,
 )
+from voicepad_core.audio import RawAudio, WavArtifact
+
+
+def _audio(samples: list[float]) -> RawAudio:
+    return RawAudio(np.array(samples, dtype=np.float32), 16_000, 1)
 
 
 class TestModelWarmResult:
@@ -49,25 +53,24 @@ class TestModelWarmResult:
 class TestWarmModel:
     """Test warm_model function."""
 
-    @patch("voicepad_core._model_cache")
-    @patch("voicepad_core.load_model")
-    @patch("voicepad_core.model_downloaded")
+    @patch("voicepad_core.activate_model")
+    @patch("voicepad_core.model_is_ready")
     def test_warm_model_when_already_downloaded(
         self,
-        mock_model_downloaded: Mock,
-        mock_load: Mock,
-        mock_cache: Mock,
+        mock_model_is_ready: Mock,
+        mock_activate: Mock,
     ) -> None:
+        """A ready artifact is activated without preparing it again."""
         mock_config = MagicMock()
         mock_config.transcription_model = "base"
         mock_config.transcription_device = "cuda"
         mock_config.transcription_compute_type = "float16"
-        mock_model = MagicMock()
-        mock_model_downloaded.return_value = True
-        mock_load.return_value = mock_model
-
-        # Mock the cache to return the device/compute info
-        mock_cache.items.return_value = [(("base", "cuda", "float16"), mock_model)]
+        mock_model_is_ready.return_value = True
+        mock_activate.return_value = MagicMock(
+            device="cuda",
+            precision="float16",
+            fallback_to_cpu=False,
+        )
 
         result = warm_model(mock_config)
 
@@ -75,29 +78,29 @@ class TestWarmModel:
         assert result.compute_type == "float16"
         assert result.fallback is False
         assert result.error is None
-        mock_model_downloaded.assert_called_once_with("base")
-        mock_load.assert_called_once_with("base", "cuda", "float16")
+        mock_model_is_ready.assert_called_once_with("base")
+        mock_activate.assert_called_once_with("base", "cuda", "float16")
 
-    @patch("voicepad_core._model_cache")
-    @patch("voicepad_core.ensure_model_downloaded")
-    @patch("voicepad_core.load_model")
-    @patch("voicepad_core.model_downloaded")
+    @patch("voicepad_core.prepare_model")
+    @patch("voicepad_core.activate_model")
+    @patch("voicepad_core.model_is_ready")
     def test_warm_model_downloads_when_not_cached(
         self,
-        mock_model_downloaded: Mock,
-        mock_load: Mock,
-        mock_ensure_model_downloaded: Mock,
-        mock_cache: Mock,
+        mock_model_is_ready: Mock,
+        mock_activate: Mock,
+        mock_prepare: Mock,
     ) -> None:
+        """A missing artifact is prepared before activation."""
         mock_config = MagicMock()
         mock_config.transcription_model = "large"
         mock_config.transcription_device = "cuda"
         mock_config.transcription_compute_type = "float16"
-        mock_model = MagicMock()
-        mock_model_downloaded.return_value = False
-        mock_load.return_value = mock_model
-
-        mock_cache.items.return_value = [(("large", "cuda", "float16"), mock_model)]
+        mock_model_is_ready.return_value = False
+        mock_activate.return_value = MagicMock(
+            device="cuda",
+            precision="float16",
+            fallback_to_cpu=False,
+        )
 
         result = warm_model(mock_config)
 
@@ -105,40 +108,44 @@ class TestWarmModel:
         assert result.compute_type == "float16"
         assert result.fallback is False
         assert result.error is None
-        mock_ensure_model_downloaded.assert_called_once_with("large")
+        mock_prepare.assert_called_once_with("large")
 
-    @patch("voicepad_core.load_model")
-    @patch("voicepad_core.model_downloaded")
-    def test_warm_model_handles_transcription_error(
+    @patch("voicepad_core.activate_model")
+    @patch("voicepad_core.model_is_ready")
+    def test_warm_model_logs_transcription_error_traceback(
         self,
-        mock_model_downloaded: Mock,
-        mock_load: Mock,
+        mock_model_is_ready: Mock,
+        mock_activate: Mock,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
+        """A handled activation error is returned to the UI and logged with its traceback."""
         from voicepad_core import TranscriptionError
 
         mock_config = MagicMock()
         mock_config.transcription_model = "base"
-        mock_model_downloaded.return_value = True
-        mock_load.side_effect = TranscriptionError("Model load_model failed")
+        mock_model_is_ready.return_value = True
+        mock_activate.side_effect = TranscriptionError("Model activation failed")
 
         result = warm_model(mock_config)
 
         assert result.device == "cpu"
         assert result.compute_type == "int8"
         assert result.fallback is True
-        assert result.error == "Model load_model failed"
+        assert result.error == "Model activation failed"
+        assert caplog.records[-1].exc_info is not None
 
-    @patch("voicepad_core.load_model")
-    @patch("voicepad_core.model_downloaded")
+    @patch("voicepad_core.activate_model")
+    @patch("voicepad_core.model_is_ready")
     def test_warm_model_handles_generic_exception(
         self,
-        mock_model_downloaded: Mock,
-        mock_load: Mock,
+        mock_model_is_ready: Mock,
+        mock_activate: Mock,
     ) -> None:
+        """An unexpected activation failure is returned to the UI."""
         mock_config = MagicMock()
         mock_config.transcription_model = "base"
-        mock_model_downloaded.return_value = True
-        mock_load.side_effect = RuntimeError("Unexpected error")
+        mock_model_is_ready.return_value = True
+        mock_activate.side_effect = RuntimeError("Unexpected error")
 
         result = warm_model(mock_config)
 
@@ -147,25 +154,24 @@ class TestWarmModel:
         assert result.fallback is True
         assert result.error == "Unexpected error"
 
-    @patch("voicepad_core._model_cache")
-    @patch("voicepad_core.load_model")
-    @patch("voicepad_core.model_downloaded")
+    @patch("voicepad_core.activate_model")
+    @patch("voicepad_core.model_is_ready")
     def test_warm_model_with_fallback(
         self,
-        mock_model_downloaded: Mock,
-        mock_load: Mock,
-        mock_cache: Mock,
+        mock_model_is_ready: Mock,
+        mock_activate: Mock,
     ) -> None:
+        """The actual CPU fallback reported by the runtime is preserved."""
         mock_config = MagicMock()
         mock_config.transcription_model = "base"
-        mock_config.transcription_device = "cuda"  # Request CUDA
+        mock_config.transcription_device = "cuda"
         mock_config.transcription_compute_type = "float16"
-        mock_model = MagicMock()
-        mock_model_downloaded.return_value = True
-        mock_load.return_value = mock_model
-
-        # Mock cache shows it loaded on CPU despite requesting CUDA (fallback)
-        mock_cache.items.return_value = [(("base", "cpu", "int8"), mock_model)]
+        mock_model_is_ready.return_value = True
+        mock_activate.return_value = MagicMock(
+            device="cpu",
+            precision="int8",
+            fallback_to_cpu=True,
+        )
 
         result = warm_model(mock_config)
 
@@ -189,66 +195,57 @@ class TestRecordingSession:
         assert session.error is None
 
     @patch("voicepad.tui.workers.MicrophoneStream")
-    def test_start_creates_and_starts_recorder(self, mock_recorder_class: Mock) -> None:
+    def test_start_creates_and_starts_recorder(self, mock_recorder_class: Mock, tmp_path: Path) -> None:
         mock_config = MagicMock()
         mock_config.input_device_index = 0
         mock_recorder = MagicMock()
         mock_recorder_class.return_value = mock_recorder
 
-        session = RecordingSession(config=mock_config)
+        recording_path = tmp_path / "recording.wav"
+        session = RecordingSession(config=mock_config, recording_path=recording_path)
         session.start()
 
-        mock_recorder_class.assert_called_once_with(0)
+        mock_recorder_class.assert_called_once_with(recording_path, device_index=0)
         mock_recorder.start.assert_called_once()
 
     @patch("voicepad.tui.workers.MicrophoneStream")
-    def test_start_handles_audio_recorder_error(self, mock_recorder_class: Mock) -> None:
+    def test_start_handles_audio_recorder_error(self, mock_recorder_class: Mock, tmp_path: Path) -> None:
         mock_config = MagicMock()
         mock_recorder = MagicMock()
         mock_recorder.start.side_effect = RuntimeError("Device busy")
         mock_recorder_class.return_value = mock_recorder
 
-        session = RecordingSession(config=mock_config)
+        session = RecordingSession(config=mock_config, recording_path=tmp_path / "recording.wav")
         with pytest.raises(RuntimeError):
             session.start()
 
         assert session.error == "Device busy"
 
-    @patch("voicepad_core.AudioPreProcessor")
     @patch("voicepad.tui.workers.MicrophoneStream")
     def test_stop_returns_audio_from_recorder(
         self,
         mock_recorder_class: Mock,
-        mock_preprocessor_class: Mock,
     ) -> None:
         mock_config = MagicMock()
         mock_config.input_device_index = 0
         mock_recorder = MagicMock()
-        expected_audio = np.array([0.1, 0.2, 0.3], dtype=np.float32)
+        expected_audio = WavArtifact(Path("recording.wav"), 16_000, 1, 3, 3 / 16_000)
         mock_recorder.stop.return_value = expected_audio
-        mock_recorder.sample_rate = 16000
         mock_recorder_class.return_value = mock_recorder
 
-        # Mock AudioPreProcessor
-        mock_processor = MagicMock()
-        mock_processor.process_array.return_value = expected_audio
-        mock_preprocessor_class.return_value = mock_processor
-
-        session = RecordingSession(config=mock_config)
+        session = RecordingSession(config=mock_config, recording_path=Path("recording.wav"))
         session.start()
         audio = session.stop()
 
-        np.testing.assert_array_equal(audio, expected_audio)
+        assert audio == expected_audio
         mock_recorder.stop.assert_called_once()
 
-    def test_stop_returns_empty_array_when_recorder_is_none(self) -> None:
+    def test_stop_before_start_is_rejected(self) -> None:
         mock_config = MagicMock()
         session = RecordingSession(config=mock_config)
-        audio = session.stop()
 
-        assert isinstance(audio, np.ndarray)
-        assert audio.dtype == np.float32
-        assert len(audio) == 0
+        with pytest.raises(RuntimeError, match="has not been started"):
+            session.stop()
 
     @patch("voicepad.tui.workers.MicrophoneStream")
     def test_stop_handles_audio_recorder_error(self, mock_recorder_class: Mock) -> None:
@@ -258,7 +255,7 @@ class TestRecordingSession:
         mock_recorder.stop.side_effect = RuntimeError("Buffer overrun")
         mock_recorder_class.return_value = mock_recorder
 
-        session = RecordingSession(config=mock_config)
+        session = RecordingSession(config=mock_config, recording_path=Path("recording.wav"))
         session.start()
 
         with pytest.raises(RuntimeError):
@@ -271,22 +268,22 @@ class TestTranscriptionJob:
     """Test TranscriptionJob dataclass."""
 
     def test_init_stores_audio_and_config(self) -> None:
-        audio = np.array([0.1, 0.2], dtype=np.float32)
+        audio = _audio([0.1, 0.2])
         mock_config = MagicMock()
         job = TranscriptionJob(audio=audio, config=mock_config)
 
-        np.testing.assert_array_equal(job.audio, audio)
+        assert job.audio is audio
         assert job.config is mock_config
 
     def test_result_is_none_initially(self) -> None:
-        audio = np.array([0.1, 0.2], dtype=np.float32)
+        audio = _audio([0.1, 0.2])
         mock_config = MagicMock()
         job = TranscriptionJob(audio=audio, config=mock_config)
 
         assert job.result is None
 
     def test_error_is_none_initially(self) -> None:
-        audio = np.array([0.1, 0.2], dtype=np.float32)
+        audio = _audio([0.1, 0.2])
         mock_config = MagicMock()
         job = TranscriptionJob(audio=audio, config=mock_config)
 
@@ -294,7 +291,7 @@ class TestTranscriptionJob:
 
     @patch("voicepad_core.transcribe")
     def test_run_transcribes_audio_successfully(self, mock_transcribe: Mock) -> None:
-        audio = np.array([0.1, 0.2], dtype=np.float32)
+        audio = _audio([0.1, 0.2])
         mock_config = MagicMock()
         mock_config.transcription_model = "base"
         mock_config.transcription_device = "cuda"
@@ -322,7 +319,7 @@ class TestTranscriptionJob:
     def test_run_handles_audio_too_short_error(self, mock_transcribe: Mock) -> None:
         from voicepad_core import AudioTooShortError
 
-        audio = np.array([0.1], dtype=np.float32)
+        audio = _audio([0.1])
         mock_config = MagicMock()
         mock_transcribe.side_effect = AudioTooShortError("Too short")
 
@@ -337,7 +334,7 @@ class TestTranscriptionJob:
     def test_run_handles_transcription_error(self, mock_transcribe: Mock) -> None:
         from voicepad_core import TranscriptionError
 
-        audio = np.array([0.1, 0.2], dtype=np.float32)
+        audio = _audio([0.1, 0.2])
         mock_config = MagicMock()
         mock_transcribe.side_effect = TranscriptionError("Model failed")
 
@@ -350,7 +347,7 @@ class TestTranscriptionJob:
 
     @patch("voicepad_core.transcribe")
     def test_run_handles_generic_exception(self, mock_transcribe: Mock) -> None:
-        audio = np.array([0.1, 0.2], dtype=np.float32)
+        audio = _audio([0.1, 0.2])
         mock_config = MagicMock()
         mock_transcribe.side_effect = RuntimeError("Unexpected error")
 

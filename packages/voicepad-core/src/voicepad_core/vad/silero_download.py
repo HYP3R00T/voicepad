@@ -4,10 +4,15 @@ import logging
 import urllib.request
 from pathlib import Path
 
-from .errors import VADModelDownloadError
 from ..config import Config, get_config
 
 logger = logging.getLogger(__name__)
+MODEL_FILENAME = "silero_vad.onnx"
+MODEL_URL = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx"
+
+
+class VADModelDownloadError(RuntimeError):
+    """Raised when the Silero model cannot be downloaded."""
 
 
 def get_model_path(vad_model_dir: Path | None = None, config: Config | None = None) -> Path:
@@ -15,7 +20,7 @@ def get_model_path(vad_model_dir: Path | None = None, config: Config | None = No
     resolved_config = config or get_config()
     if vad_model_dir is None:
         vad_model_dir = resolved_config.vad_model_path
-    return vad_model_dir / resolved_config.vad_model_filename
+    return vad_model_dir / MODEL_FILENAME
 
 
 def ensure_model_exists(
@@ -29,17 +34,17 @@ def ensure_model_exists(
 
     if model_path.exists():
         if verbose:
-            logger.info(f"[VAD] Silero model found at: {model_path}")
+            logger.info("Silero VAD model found: %s", model_path)
         return model_path
 
     if verbose:
         logger.info("[VAD] Silero ONNX model not found. Downloading...")
-        logger.info(f"      Source : {resolved_config.vad_model_url}")
-        logger.info(f"      Target : {model_path}")
+        logger.info("Silero VAD source: %s", MODEL_URL)
+        logger.info("Silero VAD target: %s", model_path)
 
     _download(
         model_path,
-        download_url=resolved_config.vad_model_url,
+        download_url=MODEL_URL,
         chunk_size=resolved_config.vad_download_chunk_size,
         verbose=verbose,
     )
@@ -74,7 +79,7 @@ def _download(
 
                     if verbose and total > 0:
                         pct = downloaded * 100 // total
-                        logger.debug(f"[VAD] Progress: {pct:3d}%")
+                        logger.debug("Silero VAD download: %3d%%", pct)
 
         if verbose:
             logger.debug("[VAD] Download completed stream read")

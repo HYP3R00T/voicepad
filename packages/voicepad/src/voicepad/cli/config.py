@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 from dataclasses import dataclass
 from typing import TypedDict, cast
 
@@ -159,9 +160,24 @@ def _get_input_devices() -> list[AudioDevice]:
     return result
 
 
+def _get_input_device_options() -> list[tuple[str, int]]:
+    if sys.platform == "linux":
+        return [("System default (PipeWire / PulseAudio)", -1)]
+    return [("System default", -1), *((device.name, device.index) for device in _get_input_devices())]
+
+
 @config_app.command("input")
 def list_input_devices() -> None:
     """List available audio input devices."""
+    if sys.platform == "linux":
+        configured = get_config().input_device_index
+        typer.echo("Input device: system default (managed by PipeWire / PulseAudio)")
+        if configured is not None:
+            typer.echo(f"Configured device index {configured} is ignored on Linux.")
+        typer.echo("Choose the microphone in your desktop's Sound settings.")
+        _config_file_hint()
+        return
+
     devices = _get_input_devices()
     if not devices:
         typer.secho("No audio input devices found.", fg=typer.colors.RED, err=True)

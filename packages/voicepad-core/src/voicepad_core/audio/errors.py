@@ -20,3 +20,7 @@ class AudioConversionError(RuntimeError, AudioError):
 
 class AudioStreamStateError(RuntimeError, AudioError):
     """Raised when microphone stream lifecycle methods are misused."""
+
+
+class AudioWriteBackpressureError(RuntimeError, AudioError):
+    """Raised when durable audio writing cannot keep pace with capture."""

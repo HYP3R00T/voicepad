@@ -6,7 +6,6 @@ from unittest.mock import patch
 
 from voicepad_core.config import Config
 from voicepad_core.logging_utils import (
-    _cleanup_handlers,
     begin_transcription_session,
     configure_global_logging,
     end_transcription_session,
@@ -23,6 +22,8 @@ def _make_config(tmp_path: Path) -> Config:
 
 def test_configure_global_logging_uses_config_logs_path_when_not_provided(tmp_path: Path) -> None:
     config = _make_config(tmp_path)
+    root_logger = logging.getLogger()
+    existing_handlers = set(root_logger.handlers)
 
     with patch("voicepad_core.logging_utils.get_config", return_value=config):
         log_file = configure_global_logging("INFO")
@@ -35,7 +36,9 @@ def test_configure_global_logging_uses_config_logs_path_when_not_provided(tmp_pa
         assert log_file.exists()
         assert "hello from app logger" in log_file.read_text(encoding="utf-8")
     finally:
-        _cleanup_handlers()
+        for handler in set(root_logger.handlers) - existing_handlers:
+            root_logger.removeHandler(handler)
+            handler.close()
 
 
 @patch("voicepad_core.streaming.transcriber.set_streaming_session_logger")
@@ -60,7 +63,7 @@ def test_begin_transcription_session_wires_core_loggers(
         assert log_file.exists()
         assert "scoped log works" in log_file.read_text(encoding="utf-8")
     finally:
-        _cleanup_handlers()
+        end_transcription_session(include_streaming=True)
 
 
 @patch("voicepad_core.streaming.transcriber.set_streaming_session_logger")

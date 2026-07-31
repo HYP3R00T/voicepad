@@ -41,6 +41,9 @@ language: en
 beam_size: 1
 transcription_vad_filter: false
 initial_prompt: "Hello. This is a transcription with proper punctuation, capitalization, and grammar."
+proper_nouns:
+  - Mise
+  - VoicePad
 text_postprocessing_enabled: false
 no_speech_threshold: 0.6
 hallucination_silence_threshold: 2.0
@@ -65,29 +68,32 @@ dedup_partial_lead_words: 5
 vad_threshold: 0.5
 vad_min_speech_duration_ms: 250
 vad_speech_pad_ms: 30
-vad_model_filename: silero_vad_v6.onnx
-vad_model_url: https://raw.githubusercontent.com/SYSTRAN/faster-whisper/master/faster_whisper/assets/silero_vad_v6.onnx
 vad_download_chunk_size: 8192
 
-local_agreement_mic: false
 local_agreement_file: true
-
-model_warmup_enabled: true
-model_warmup_duration_s: 0.5
-model_warmup_language: en
-model_warmup_beam_size: 1
-model_warmup_vad_filter: false
 ```
 
 !!! tip "Global Hotkey Format"
     The `global_hotkey` setting uses natural hotkey strings like `ctrl+shift+space`, `alt+v`, or `f9`.
-    The hotkey works system-wide on Windows, allowing you to start/stop recording from any application.
+    VoicePad registers this value directly on Windows. Linux users configure their desktop to run `voicepad toggle`.
+    See [Global Hotkey](global-hotkey.md) for setup instructions.
+
+!!! note "Linux microphone selection"
+    On Linux, VoicePad always opens the shared system-default input through the
+    active audio stack (normally PipeWire or PulseAudio). Choose the microphone
+    in the desktop's Sound settings. Numeric `input_device_index` values are
+    ignored on Linux so VoicePad can record alongside applications such as OBS.
 
 !!! note "Settings visibility"
-    Not all settings are shown in the Settings tab interface. Advanced runtime tuning such as inference thresholds, VAD behavior, overlap deduplication, warm-up behavior, text post-processing, final-chunk speech gating, model download locations, and the full advanced model list can be changed by editing the YAML file directly.
+    Not all settings are shown in the Settings tab interface. Advanced runtime tuning such as inference thresholds, VAD behavior, overlap deduplication, text post-processing, final-chunk speech gating, and model download locations can be changed by editing the YAML file directly.
 
 ## Notes on Advanced Settings
 
+- `proper_nouns`
+  Adds vocabulary hints for names, tools, and other terms that the selected model may otherwise mishear. Enter one
+  term per line in the Settings tab. Faster Whisper passes them as native hotwords. Parakeet tokenizes them with its
+  official tokenizer and applies contextual biasing during modified beam search. The hints bias recognition but do
+  not rewrite the transcript or guarantee a match.
 - `text_postprocessing_enabled`
   Keeps raw model text by default. When set to `true`, VoicePad re-enables its lightweight text cleanup pipeline.
 - `min_fresh_speech_duration_s`
@@ -96,7 +102,8 @@ model_warmup_vad_filter: false
 For details on individual settings, see:
 
 - [Whisper Models](models.md): choose the right model for your hardware
-- [Input Device](input-device.md): select which microphone to use
+- [Input Device](input-device.md): configure the shared system microphone
+- [Global Hotkey](global-hotkey.md): configure system-wide record and stop shortcuts
 - [Output Paths](output-paths.md): change where recordings and transcriptions are saved
 - [GPU Acceleration](gpu.md): NVIDIA GPU requirements and performance
 

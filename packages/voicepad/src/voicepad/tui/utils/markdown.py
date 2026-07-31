@@ -42,8 +42,10 @@ def format_markdown(audio_path: Path, result: object, model_name: str = "") -> s
     ts = time.strftime("%Y-%m-%d %H:%M")
     device = getattr(result, "device", "unknown")
     compute_type = getattr(result, "compute_type", "unknown")
-    language = getattr(result, "language", "en")
-    language_probability = getattr(result, "language_probability", 1.0)
+    language = _format_language(
+        getattr(result, "language", None),
+        getattr(result, "language_probability", None),
+    )
     duration_s = getattr(result, "duration_s", 0.0)
     latency_ms = getattr(result, "latency_ms", 0.0)
     text = getattr(result, "text", "") or "*(no speech detected)*"
@@ -55,7 +57,7 @@ def format_markdown(audio_path: Path, result: object, model_name: str = "") -> s
         "transcriptions:",
         "  - n: 1",
         f"    model: {model_str}",
-        f"    language: {language} ({language_probability * 100:.1f}%)",
+        f"    language: {language}",
         f"    duration: {duration_s:.1f}s",
         f"    latency: {latency_ms:.0f}ms",
         f"    timestamp: {ts}",
@@ -80,8 +82,10 @@ def format_markdown_streaming(
     """Create a new markdown file for a streaming transcription."""
     latest_chunk = next((chunk for chunk in reversed(chunks) if chunk.text), None)
     device = latest_chunk.device if latest_chunk else "unknown"
-    language = latest_chunk.language if latest_chunk else "en"
-    language_probability = latest_chunk.language_probability if latest_chunk else 0.0
+    language = _format_language(
+        latest_chunk.language if latest_chunk else None,
+        latest_chunk.language_probability if latest_chunk else None,
+    )
     latency_ms = sum(chunk.latency_ms for chunk in chunks)
     ts = time.strftime("%Y-%m-%d %H:%M")
     model_str = f"{model_name} · {device} / streaming" if model_name else f"{device} / streaming"
@@ -92,7 +96,7 @@ def format_markdown_streaming(
         "transcriptions:",
         "  - n: 1",
         f"    model: {model_str}",
-        f"    language: {language} ({language_probability * 100:.1f}%)",
+        f"    language: {language}",
         f"    duration: {duration_s:.1f}s",
         f"    latency: {latency_ms:.0f}ms",
         f"    timestamp: {ts}",
@@ -117,8 +121,10 @@ def prepend_retranscription(md_path: Path, result: object, model_name: str = "")
     ts = time.strftime("%Y-%m-%d %H:%M")
     device = getattr(result, "device", "unknown")
     compute_type = getattr(result, "compute_type", "unknown")
-    language = getattr(result, "language", "en")
-    language_probability = getattr(result, "language_probability", 1.0)
+    language = _format_language(
+        getattr(result, "language", None),
+        getattr(result, "language_probability", None),
+    )
     duration_s = getattr(result, "duration_s", 0.0)
     latency_ms = getattr(result, "latency_ms", 0.0)
     text = getattr(result, "text", "") or "*(no speech detected)*"
@@ -143,7 +149,7 @@ def prepend_retranscription(md_path: Path, result: object, model_name: str = "")
     new_fm_entry = [
         f"  - n: {new_n}",
         f"    model: {model_str}",
-        f"    language: {language} ({language_probability * 100:.1f}%)",
+        f"    language: {language}",
         f"    duration: {duration_s:.1f}s",
         f"    latency: {latency_ms:.0f}ms",
         f"    timestamp: {ts}",
@@ -170,6 +176,14 @@ def prepend_retranscription(md_path: Path, result: object, model_name: str = "")
     new_block = ["", f"## Transcription {new_n}", "", text, ""]
     all_lines = new_lines + new_block + ([""] if body and body[0] != "" else []) + body
     return "\n".join(all_lines)
+
+
+def _format_language(language: str | None, probability: float | None) -> str:
+    if language is None:
+        return "unavailable"
+    if probability is None:
+        return language
+    return f"{language} ({probability * 100:.1f}%)"
 
 
 def parse_markdown_entry(
