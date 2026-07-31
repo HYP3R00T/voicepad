@@ -93,7 +93,6 @@ class HotkeyHandler:
         """Stop recording triggered by global hotkey (runs on main thread)."""
         if not self.app._recording:
             return
-        self.app._hotkey_pending_copy = True  # flag to auto-copy after transcription
         self.overlay_set("transcribing")
         self.app._recording_handler.stop_recording()
 

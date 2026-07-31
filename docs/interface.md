@@ -70,7 +70,7 @@ Different shortcuts are available depending on which tab you're in:
 
 The main tab. Press ++space++ to start recording. While recording, a live timer shows in the status bar. Text appears in real time via streaming transcription as you speak.
 
-When you stop recording, the final transcription appears in the panel. Press ++c++ or use the **copy** button to copy the text to your clipboard.
+When you stop recording, the final transcription appears in the panel and is copied to your clipboard automatically. Press ++c++ or use the **copy** button whenever you want to copy it again.
 
 ### History
 

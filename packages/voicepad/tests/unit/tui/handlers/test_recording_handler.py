@@ -322,10 +322,12 @@ class TestStopRecording:
         mock_app._streamer = Mock()
 
         handler = RecordingHandler(mock_app)
+        mock_app._hotkey_pending_copy = False
         handler.stop_recording()
 
         mock_app._set_status.assert_called_with("error", "stop error: Stop error")
         mock_app._streamer._stop_event.set.assert_called_once()
+        assert mock_app._hotkey_pending_copy is False
         mock_finalize.assert_not_called()
 
     @patch.object(RecordingHandler, "finalize_worker")
@@ -338,9 +340,11 @@ class TestStopRecording:
         mock_app._session = mock_session
 
         handler = RecordingHandler(mock_app)
+        mock_app._hotkey_pending_copy = False
         handler.stop_recording()
 
         assert mock_app._transcribing is True
+        assert mock_app._hotkey_pending_copy is True
         mock_app._finalize_worker.assert_called_once()
         # Check that audio array was passed
         call_args = mock_app._finalize_worker.call_args[0]
@@ -348,7 +352,7 @@ class TestStopRecording:
 
 
 class TestFinalizeWorker:
-    """Tests for finalize_worker and final full-audio fallback."""
+    """Tests for authoritative full-audio finalization."""
 
     @patch("voicepad.tui.handlers.recording_handler.end_transcription_session")
     @patch.object(RecordingHandler, "_transcribe_final_audio")
@@ -378,28 +382,100 @@ class TestFinalizeWorker:
 
     @patch("voicepad.tui.handlers.recording_handler.end_transcription_session")
     @patch.object(RecordingHandler, "_transcribe_final_audio")
-    def test_finalize_worker_drains_tail_without_second_pass_when_streaming_has_text(
+    def test_finalize_worker_uses_final_full_audio_result_when_streaming_has_text(
         self,
         mock_final_pass,
         mock_end_session,
     ):
-        """An existing streamed result drains its tail and skips duplicate full-audio inference."""
+        """Streamed previews must not replace authoritative full-audio inference."""
         mock_app = Mock()
         mock_app._streamer = Mock()
         mock_app._stream_chunks = [Mock()]
         mock_app.call_from_thread = Mock()
+        final_result = Mock()
+        mock_final_pass.return_value = final_result
 
         handler = RecordingHandler(mock_app)
-        handler._final_chunk_event = threading.Event()
-        handler._final_chunk_event.set()
         audio = _artifact(Path("/tmp/recording.wav"), 3)
 
         handler.finalize_worker(audio)
 
-        mock_app._streamer.stop.assert_called_once_with(transcribe_tail=True)
-        mock_final_pass.assert_not_called()
-        mock_app.call_from_thread.assert_called_once_with(handler.save_recording, audio, None)
+        mock_app._streamer.stop.assert_called_once_with(transcribe_tail=False)
+        mock_final_pass.assert_called_once_with(audio)
+        mock_app.call_from_thread.assert_called_once_with(handler._save_final_pass, audio, final_result)
         mock_end_session.assert_called_once_with(include_streaming=True)
+
+    def test_save_final_pass_replaces_streamed_previews_on_success(self):
+        mock_app = Mock()
+        mock_app._stream_chunks = [ChunkResult(index=1, text="Preview", is_final=False)]
+        handler = RecordingHandler(mock_app)
+        audio = _artifact(Path("/tmp/recording.wav"), 16_000)
+        final_result = Mock(
+            text="Authoritative transcript.",
+            segments=[],
+            latency_ms=123.0,
+            device="cuda",
+            language="en",
+            language_probability=1.0,
+        )
+
+        with (
+            patch.object(handler, "_handle_stream_chunk") as mock_handle_chunk,
+            patch.object(handler, "save_recording") as mock_save,
+        ):
+            handler._save_final_pass(audio, final_result)
+
+        assert mock_app._stream_chunks == []
+        assert mock_handle_chunk.call_args.args[0].text == "Authoritative transcript."
+        mock_save.assert_called_once_with(audio, final_result)
+
+    def test_save_final_pass_keeps_streamed_previews_when_full_pass_fails(self):
+        mock_app = Mock()
+        preview = ChunkResult(index=1, text="Preview fallback", is_final=False)
+        mock_app._stream_chunks = [preview]
+        handler = RecordingHandler(mock_app)
+        audio = _artifact(Path("/tmp/recording.wav"), 16_000)
+
+        with (
+            patch.object(handler, "_handle_stream_chunk"),
+            patch.object(handler, "save_recording") as mock_save,
+        ):
+            handler._save_final_pass(audio, None)
+
+        assert mock_app._stream_chunks == [preview]
+        mock_save.assert_called_once_with(audio, None)
+
+    def test_save_final_pass_keeps_streamed_chunks_when_nonempty_result_is_incomplete(self):
+        mock_app = Mock()
+        previews = [
+            ChunkResult(index=1, text="a" * 900, is_final=False),
+            ChunkResult(index=2, text="b" * 800, is_final=False),
+        ]
+        mock_app._stream_chunks = previews.copy()
+        handler = RecordingHandler(mock_app)
+        handler._session_logger = Mock()
+        audio = _artifact(Path("/tmp/recording.wav"), 16_000)
+        incomplete_result = Mock(
+            text="c" * 694,
+            segments=[],
+            latency_ms=23_661.0,
+            device="cuda",
+            language=None,
+            language_probability=None,
+        )
+
+        with (
+            patch.object(handler, "_handle_stream_chunk") as mock_handle_chunk,
+            patch.object(handler, "save_recording") as mock_save,
+        ):
+            handler._save_final_pass(audio, incomplete_result)
+
+        assert mock_app._stream_chunks == previews
+        final_marker = mock_handle_chunk.call_args.args[0]
+        assert final_marker.text == ""
+        assert final_marker.is_final is True
+        mock_save.assert_called_once_with(audio, None)
+        handler._session_logger.warning.assert_called_once()
 
 
 class TestOnStreamChunk:
@@ -456,7 +532,7 @@ class TestOnStreamChunk:
         handler.on_stream_chunk(chunk)
 
         assert mock_app._transcribing is False
-        mock_meta_label.update.assert_called_once_with("[dim]5.5s  ·  streaming[/]")
+        mock_meta_label.update.assert_called_once_with("[dim]5.5s  ·  final[/]")
         mock_app._set_status.assert_called_with("ready", "ready")
         mock_app._overlay_set.assert_called_once_with("hidden")
 

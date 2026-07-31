@@ -300,17 +300,6 @@ class TestHotkeyStopRecording:
             handler.hotkey_stop_recording()
             mock_overlay_set.assert_not_called()
 
-    def test_sets_hotkey_pending_copy_flag(self, mock_app: Mock) -> None:
-        """Test that hotkey_stop_recording sets hotkey pending copy flag."""
-        from voicepad.tui.handlers.hotkey_handler import HotkeyHandler
-
-        mock_app._recording = True
-        handler = HotkeyHandler(mock_app)
-
-        handler.hotkey_stop_recording()
-
-        assert mock_app._hotkey_pending_copy is True
-
     def test_sets_transcribing_overlay(self, mock_app: Mock) -> None:
         """Test that hotkey_stop_recording sets transcribing overlay."""
         from voicepad.tui.handlers.hotkey_handler import HotkeyHandler

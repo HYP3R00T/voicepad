@@ -21,13 +21,22 @@ Streaming transcriber
   -> requests unconsumed samples + overlap
   -> VAD chooses a boundary
   -> 15–30 second chunk
-  -> inference
+  -> provisional preview inference
+
+Recording stops
+  -> stop streaming without transcribing the remaining tail
+  -> load the completed WAV
+  -> transcribe the complete recording
+  -> accept the final result only when it covers the accumulated previews
 ```
 
-The complete recording lives on disk.
-Only one maximum-size chunk, its overlap, and the bounded writer queue occupy
-working memory. A delayed backlog is read and drained in multiple bounded
-sample ranges.
+The complete recording lives on disk. During capture, only one maximum-size
+chunk, its overlap, and the bounded writer queue occupy working memory. When
+recording stops, the completed file is loaded for the final full-recording
+pass. If that pass fails, returns no text, or returns substantially less text
+than the accumulated chunks, VoicePad retains the streaming transcript as a
+fallback. This protects long recordings from a backend returning a nonempty
+but incomplete result.
 
 The queue accepts at most 256 callback buffers.
 If disk writing cannot keep pace, recording fails loudly instead of silently
