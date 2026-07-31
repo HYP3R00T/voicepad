@@ -6,7 +6,6 @@ compatibility: Requires git and an authenticated GitHub CLI. Run from a trusted 
 disable-model-invocation: true
 metadata:
   version: "1.0.0"
-  invocation: "/skill:issue-to-pr <github-issue-url>"
 ---
 
 # Issue to PR

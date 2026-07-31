@@ -23,15 +23,15 @@ An issue is ready for implementation when it has:
 
 The maintainer moves approved, unblocked work to `Ready` in the VoicePad GitHub Project. Approval of an issue does not guarantee that every proposed implementation will be merged.
 
-## Deliver an issue with Pi
+## Deliver an issue with a coding agent
 
-Trusted VoicePad checkouts include a manually invoked Pi skill for delivering one ready issue:
+Trusted VoicePad checkouts include a manually invoked `issue-to-pr` skill for Agent Skills-compatible coding agents. Invoke the skill through the client's supported mechanism and pass one full issue URL:
 
 ```text
-/skill:issue-to-pr https://github.com/HYP3R00T/voicepad/issues/<number>
+issue-to-pr https://github.com/HYP3R00T/voicepad/issues/<number>
 ```
 
-Run `/reload` first when the checkout gained or changed the skill after Pi started. The skill validates live issue and Project state, creates or resumes an isolated worktree, implements and verifies the accepted outcome, and opens or updates one pull request. It stops at `In Review`; it never merges, enables auto-merge, publishes packages, marks the issue `Done`, or removes the implementation worktree.
+Reload project skills through the client when the checkout gained or changed the skill after the session started. The skill validates live issue and Project state, creates or resumes an isolated worktree, implements and verifies the accepted outcome, and opens or updates one pull request. It stops at `In Review`; it never merges, enables auto-merge, publishes packages, marks the issue `Done`, or removes the implementation worktree.
 
 Invocation authorizes only delivery of the linked issue. Review the resulting pull request and merge it manually.
 
