@@ -21,19 +21,29 @@ An issue is ready for implementation when it has:
 - explicit dependencies; and
 - related work that is out of scope.
 
-The maintainer moves approved, unblocked work to `Ready` in the VoicePad GitHub Project. Approval of an issue does not guarantee that every proposed implementation will be merged.
+Newly tracked issues start in `Backlog`. Approval of an issue does not guarantee that every proposed implementation will be merged.
 
-## Deliver an issue with a coding agent
+## Refine and deliver issues with a coding agent
 
-Trusted VoicePad checkouts include a manually invoked `issue-to-pr` skill for Agent Skills-compatible coding agents. Invoke the skill through the client's supported mechanism and pass one full issue URL:
+Trusted VoicePad checkouts include two manually invoked skills for Agent Skills-compatible coding agents. Reload project skills through the client when the checkout gained or changed a skill after the session started.
+
+Use `refine-issue` to inspect one backlog issue against live repository evidence, resolve material readiness gaps, structure the issue, and move it to `Ready`:
+
+```text
+refine-issue https://github.com/HYP3R00T/voicepad/issues/<number>
+```
+
+If a product or technical decision remains, the skill leaves the issue unchanged in `Backlog` and asks only for that decision. It never implements the issue, creates related issues, changes repository files, or invokes a delivery skill.
+
+After refinement and approval, invoke `issue-to-pr` separately with the same full issue URL:
 
 ```text
 issue-to-pr https://github.com/HYP3R00T/voicepad/issues/<number>
 ```
 
-Reload project skills through the client when the checkout gained or changed the skill after the session started. The skill validates live issue and Project state, creates or resumes an isolated worktree, implements and verifies the accepted outcome, and opens or updates one pull request. It stops at `In Review`; it never merges, enables auto-merge, publishes packages, marks the issue `Done`, or removes the implementation worktree.
+The delivery skill validates live issue and Project state, creates or resumes an isolated worktree, implements and verifies the accepted issue, and opens or updates one pull request. It stops at `In Review`; it never refines backlog work, merges, enables auto-merge, publishes packages, marks the issue `Done`, or removes the implementation worktree.
 
-Invocation authorizes only delivery of the linked issue. Review the resulting pull request and merge it manually.
+Each invocation authorizes only its named lifecycle step for the linked issue. Review the resulting pull request and merge it manually.
 
 ## Set up the project
 
