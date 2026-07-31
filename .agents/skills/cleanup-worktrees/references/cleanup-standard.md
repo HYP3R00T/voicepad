@@ -6,8 +6,10 @@ may be deleted. Repository instructions remain authoritative when stricter.
 ## Destructive authority
 
 Manual invocation authorizes only the verified removal of stale agent-managed
-issue worktrees and their proven local or remote issue branches. Destructive
-permission is narrow: uncertainty always preserves data.
+issue worktrees as complete directories, including ignored contents inside
+them, and their proven local or remote issue branches. Destructive permission
+is narrow: uncertainty always preserves data, but ignored contents alone do not
+block an otherwise qualifying worktree.
 
 The workflow never authorizes issue or Project finalization. A closed or Done
 issue is lifecycle evidence, not deletion proof.
@@ -92,9 +94,16 @@ proof.
 
 ## Cleanliness and atomicity
 
-Clean means no staged, unstaged, tracked, untracked, or ignored path. Ignored
-files may be disposable caches, but they may also be `.env` files, recordings,
-or other private local data; their presence blocks worktree removal.
+Ordinarily clean means no staged, unstaged, tracked, or ordinary untracked path,
+as proven by `git status --porcelain --untracked-files=all`. Capture ignored
+state separately with `git status --porcelain --ignored --untracked-files=all`.
+Once every other removal check passes, remaining `!!` entries are authorized for
+deletion only as contents of that exact qualifying worktree. They may include
+caches, environments, `.env` files, recordings, or other private data, so never
+read their contents, print secrets, delete them individually, or apply this
+authority outside the worktree. Use normal, non-force `git worktree remove` to
+remove the complete approved worktree; never use `git clean` or general file
+deletion.
 
 Use expected object IDs when deleting local refs. For a qualifying remote ref,
 the bundled guarded-delete helper checks the pre-read value and uses a private
@@ -104,14 +113,29 @@ after advertisement. Never use force or an API that bypasses normal Git ref
 checks.
 
 A missing, changed, reused, or otherwise non-qualifying remote branch is
-preserved and reported. It does not block deletion of a clean local artifact
-whose ownership, publication, and integration are independently proven.
+preserved and reported. It does not block deletion of an ordinarily clean local
+artifact whose ownership, publication, and integration are independently
+proven.
 
-Plan all candidates before mutation. If any planned candidate changes during
-the final repository-wide concurrency check, perform no deletion. Revalidate
-the complete Git and GitHub state of each later candidate again immediately
-before processing it. Once mutation starts, stop on the first changed candidate
-or unexpected failure and report partial state exactly.
+Plan all candidates before mutation. If any relevant semantic evidence for a
+planned candidate changes during the final repository-wide concurrency check,
+perform no deletion. Revalidate the complete Git and GitHub reads of each later
+candidate again immediately before processing it, but compare only normalized,
+named decision evidence rather than serialized output or hashes of complete API
+payloads. Relevant GitHub evidence comprises repository and issue identity,
+lifecycle and selected Project status, dependency and timeline relationships,
+exact PR candidates, PR state, head repository/branch/object ID, base, draft and
+merge state, and exact closing issue references. JSON ordering, pagination
+metadata, generated URLs, nullable representations, and other unused API fields
+are not concurrency evidence.
+
+Post-step validation must model successful planned deletions. Expected absence
+of deleted refs, worktree paths, occupancy records, and metadata is not a
+change. A branch deletion may alter incidental REST or timeline
+representations; continue when every named semantic ownership, lifecycle, PR,
+object-ID, and integration value still matches the plan. Once mutation starts,
+stop on the first relevant semantic change or unexpected operation failure and
+report partial state exactly.
 
 ## Metadata pruning
 
@@ -124,26 +148,28 @@ skip pruning and report every retained record.
 
 Use these scenarios for source review and controlled verification:
 
-| Scenario | Required outcome |
-|---|---|
-| Primary checkout resembles an inactive issue worktree | Retained as unrelated/manual because primary protection wins |
-| Managed worktree belongs to an open Backlog, Ready, In Progress, In Review, or Blocked issue | Retained as active |
-| Managed worktree belongs to a closed or Done issue and its tip is in the remote default branch | Worktree and guarded local ref removed |
-| Squash-merged PR has an exact local tip and exact issue linkage | Worktree and guarded local ref may be removed through merged-PR proof |
-| Worktree has staged, unstaged, untracked, or ignored content | Entire issue artifact blocked |
-| Local tip differs from merged PR head or contains an unpushed commit | Entire issue artifact blocked |
-| Delivery PR is open or closed-unmerged | Entire issue artifact blocked |
-| Local issue branch has no worktree and has an exact linked same-repository PR plus integration proof | Guarded local ref removed |
-| Detached or nonconforming managed-root worktree has exact path/PR-head/closing-issue evidence | Evaluated as an equivalent strongly associated candidate |
-| Branch or worktree lacks conventional or equivalent ownership, or is outside the managed root | Retained as unrelated/manual |
-| GitHub issue state is inaccessible or ownership conflicts | Blocked without mutation |
-| Open issue has missing, unfamiliar, or conflicting Project status | Retained as active |
-| Remote branch equals an exact merged PR head | Eligible for normal non-force deletion after immediate revalidation |
-| Remote branch was changed, reused, or lacks exact merged-PR ownership | Remote branch retained; independently safe local cleanup may continue |
-| Guarded normal remote deletion fails after qualification | Mutation stops and exact state is reported |
-| Any candidate changes before the first mutation | Entire cleanup plan discarded without deletion |
-| A later candidate changes after cleanup started | Further mutation stops and partial state is reported |
-| Prune dry-run includes an unrelated record | No metadata is pruned |
+| Scenario                                                                                             | Required outcome                                                                           |
+| ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Primary checkout resembles an inactive issue worktree                                                | Retained as unrelated/manual because primary protection wins                               |
+| Managed worktree belongs to an open Backlog, Ready, In Progress, In Review, or Blocked issue         | Retained as active                                                                         |
+| Managed worktree belongs to a closed or Done issue and its tip is in the remote default branch       | Worktree and guarded local ref removed                                                     |
+| Squash-merged PR has an exact local tip and exact issue linkage                                      | Worktree and guarded local ref may be removed through merged-PR proof                      |
+| Worktree has staged, unstaged, or ordinary untracked content                                         | Entire issue artifact blocked                                                              |
+| Otherwise-qualifying worktree has only ignored content                                               | Normal non-force worktree removal deletes the complete worktree, including ignored content |
+| Local tip differs from merged PR head or contains an unpushed commit                                 | Entire issue artifact blocked                                                              |
+| Delivery PR is open or closed-unmerged                                                               | Entire issue artifact blocked                                                              |
+| Local issue branch has no worktree and has an exact linked same-repository PR plus integration proof | Guarded local ref removed                                                                  |
+| Detached or nonconforming managed-root worktree has exact path/PR-head/closing-issue evidence        | Evaluated as an equivalent strongly associated candidate                                   |
+| Branch or worktree lacks conventional or equivalent ownership, or is outside the managed root        | Retained as unrelated/manual                                                               |
+| GitHub issue state is inaccessible or ownership conflicts                                            | Blocked without mutation                                                                   |
+| Open issue has missing, unfamiliar, or conflicting Project status                                    | Retained as active                                                                         |
+| Remote branch equals an exact merged PR head                                                         | Eligible for normal non-force deletion after immediate revalidation                        |
+| Remote branch was changed, reused, or lacks exact merged-PR ownership                                | Remote branch retained; independently safe local cleanup may continue                      |
+| Guarded normal remote deletion fails after qualification                                             | Mutation stops and exact state is reported                                                 |
+| Planned remote deletion changes only incidental raw API representation                               | Semantic post-step revalidation passes and local cleanup continues                         |
+| Any candidate's relevant semantic evidence changes before the first mutation                         | Entire cleanup plan discarded without deletion                                             |
+| A later candidate's relevant semantic evidence changes after cleanup started                         | Further mutation stops and partial state is reported                                       |
+| Prune dry-run includes an unrelated record                                                           | No metadata is pruned                                                                      |
 
 ## Reporting quality
 

@@ -51,7 +51,7 @@ After issues have been finalized, use `cleanup-worktrees` without arguments to a
 cleanup-worktrees
 ```
 
-The cleanup skill removes only inactive, clean, fully integrated agent-managed issue artifacts. It preserves the primary checkout, active issues, dirty or unpublished work, and unrelated or manually created worktrees and branches. It reads GitHub lifecycle and pull-request state but never finalizes issues or changes Project status.
+The cleanup skill removes only inactive, ordinarily clean, fully integrated agent-managed issue artifacts. Removing a qualifying worktree also removes all ignored files and directories contained within it; staged, unstaged, and ordinary untracked content still blocks removal. The skill preserves the primary checkout, active issues, dirty or unpublished work, and unrelated or manually created worktrees and branches. It reads GitHub lifecycle and pull-request state but never finalizes issues or changes Project status.
 
 ## Set up the project
 
