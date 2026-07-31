@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from importlib import import_module
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ class GlobalHotkeyListener:
             return
 
         try:
-            import keyboard
+            keyboard = import_module("keyboard")
         except ModuleNotFoundError as error:
             raise RuntimeError("The keyboard package is not installed") from error
 
