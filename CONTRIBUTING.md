@@ -25,7 +25,7 @@ Newly tracked issues start in `Backlog`. Approval of an issue does not guarantee
 
 ## Refine and deliver issues with a coding agent
 
-Trusted VoicePad checkouts include two manually invoked skills for Agent Skills-compatible coding agents. Reload project skills through the client when the checkout gained or changed a skill after the session started.
+Trusted VoicePad checkouts include three manually invoked skills for Agent Skills-compatible coding agents. Reload project skills through the client when the checkout gained or changed a skill after the session started.
 
 Use `refine-issue` to inspect one backlog issue against live repository evidence, resolve material readiness gaps, structure the issue, and move it to `Ready`:
 
@@ -44,6 +44,14 @@ issue-to-pr https://github.com/HYP3R00T/voicepad/issues/<number>
 The delivery skill validates live issue and Project state, creates or resumes an isolated worktree, implements and verifies the accepted issue, and opens or updates one pull request. It stops at `In Review`; it never refines backlog work, merges, enables auto-merge, publishes packages, marks the issue `Done`, or removes the implementation worktree.
 
 Each invocation authorizes only its named lifecycle step for the linked issue. Review the resulting pull request and merge it manually.
+
+After issues have been finalized, use `cleanup-worktrees` without arguments to audit all local worktrees and issue branches for the current repository:
+
+```text
+cleanup-worktrees
+```
+
+The cleanup skill removes only inactive, clean, fully integrated agent-managed issue artifacts. It preserves the primary checkout, active issues, dirty or unpublished work, and unrelated or manually created worktrees and branches. It reads GitHub lifecycle and pull-request state but never finalizes issues or changes Project status.
 
 ## Set up the project
 

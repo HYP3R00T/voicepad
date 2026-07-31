@@ -52,7 +52,7 @@ Full docs at **[voicepad.hyperoot.dev](https://voicepad.hyperoot.dev)**
 
 ## Contributing and security
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md) before proposing substantial work. Trusted checkouts include manually invoked `refine-issue` and `issue-to-pr` skills for Agent Skills-compatible coding agents. Report suspected vulnerabilities privately by following [SECURITY.md](SECURITY.md), not through a public issue.
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before proposing substantial work. Trusted checkouts include manually invoked `refine-issue`, `issue-to-pr`, and `cleanup-worktrees` skills for Agent Skills-compatible coding agents. Report suspected vulnerabilities privately by following [SECURITY.md](SECURITY.md), not through a public issue.
 
 ## License
 
