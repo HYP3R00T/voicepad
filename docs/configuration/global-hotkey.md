@@ -8,6 +8,11 @@ VoicePad can start or stop recording while another application has focus. On
 Linux and Wayland, the desktop compositor owns the key combination; VoicePad
 does not read privileged keyboard devices.
 
+When the TUI launches, one native status card reports that VoicePad is starting
+while CUDA is admitted and Parakeet is warmed. A **VoicePad is ready** card then
+replaces it and closes explicitly after three seconds, so the terminal may remain
+in the background.
+
 The shortcut runs:
 
 ```bash
@@ -30,8 +35,11 @@ responsible for the microphone, durable WAV recording, and transcription.
 Press the shortcut once from any application to record. Press it again to stop,
 finalize the WAV, and transcribe. VoicePad switches its TUI to the Record tab and
 uses one transient desktop status card for recording, transcribing, completion,
-or errors. COSMIC renders and positions the card natively, updates it in place,
-and applies the desktop's current fonts and display scaling. VoicePad does not
+or errors. While recording, its monotonic `MM:SS` counter updates once per second.
+COSMIC renders and positions the card natively, updates it in place,
+and applies the desktop's current fonts and display scaling. VoicePad explicitly
+closes completion and error cards after their short display interval instead of
+relying on desktop-specific expiration policy. VoicePad does not
 create an XWayland overlay window.
 
 COSMIC uses **Super+Space** for input-source switching by default. Replace or

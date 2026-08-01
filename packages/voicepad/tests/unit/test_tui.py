@@ -55,7 +55,11 @@ async def test_tui_activates_resident_nvidia_runtime(tmp_path: Path) -> None:
     config = AppConfig(recordings_path=tmp_path / "recordings", markdown_path=tmp_path / "markdown")
     app = VoicePadApp(config, runtime=cast(ApplicationRuntime, runtime))
 
-    with patch("voicepad.tui.app.ControlServer.start"), patch("voicepad.tui.app.ControlServer.stop"):
+    with (
+        patch("voicepad.tui.app.ControlServer.start"),
+        patch("voicepad.tui.app.ControlServer.stop"),
+        patch("voicepad.tui.app.DesktopStatus", FakeDesktopStatus),
+    ):
         async with app.run_test() as pilot:
             await pilot.pause()
             assert "ready" in str(app.query_one("#status").render())
@@ -76,16 +80,15 @@ async def test_tui_activates_resident_nvidia_runtime(tmp_path: Path) -> None:
             app._update_timer()
             assert "2.0s" in str(app.query_one("#status").render())
 
-            app._state = "ready"
-            with (
-                patch("voicepad.tui.app.DesktopStatus", FakeDesktopStatus),
-                patch.object(app, "_start_recording") as start,
-            ):
-                app._external_toggle()
             desktop_status = cast(FakeDesktopStatus, app._desktop_status)
+            assert desktop_status.states == ["initializing", "ready"]
+
+            app._state = "ready"
+            with patch.object(app, "_start_recording") as start:
+                app._external_toggle()
             assert start.called
             assert desktop_status.started is True
-            assert desktop_status.states == ["recording"]
+            assert desktop_status.states == ["initializing", "ready", "recording"]
             assert app._state == "starting"
 
     assert runtime.closed is True

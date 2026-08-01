@@ -141,6 +141,7 @@ class VoicePadApp(App[None]):
 
     def on_mount(self) -> None:
         self._control.start()
+        self._ensure_desktop_status().set_state("initializing")
         self.set_interval(0.1, self._update_timer)
         self._load_history()
         self._activate()
@@ -175,16 +176,20 @@ class VoicePadApp(App[None]):
         label.add_class(state)
         label.update(f"{icons.get(state, '󰔟')}  {message}")
 
-    def _set_ready(self, device_name: str) -> None:
+    def _set_ready(self, device_name: str, announce: bool = True) -> None:
         del device_name
         self._state = "ready"
         self._set_status("ready", "ready")
         self.query_one("#header-model", Label).update("[dim]model:[/] Parakeet v3  [dim]device:[/] NVIDIA CUDA · FP16")
+        if announce and self._desktop_status is not None:
+            self._desktop_status.set_state("ready")
 
     def _set_error(self, message: str) -> None:
+        notify = self._state == "loading" or self._external_session
         self._state = "error"
         self._set_status("error", message)
-        self._overlay_set("error")
+        if notify and self._desktop_status is not None:
+            self._desktop_status.set_state("error")
         self._external_session = False
 
     @on(VoiceButton.Pressed, "#tx-copy-btn")
@@ -231,10 +236,11 @@ class VoicePadApp(App[None]):
             self._external_session = True
             self._overlay_set("error")
 
-    def _ensure_desktop_status(self) -> None:
+    def _ensure_desktop_status(self) -> DesktopStatus:
         if self._desktop_status is None:
             self._desktop_status = DesktopStatus()
             self._desktop_status.start()
+        return self._desktop_status
 
     def _overlay_set(self, state: DesktopStatusState) -> None:
         if self._external_session and self._desktop_status is not None:
@@ -273,6 +279,8 @@ class VoicePadApp(App[None]):
         if self._state != "recording":
             return
         elapsed = time.monotonic() - self._record_started
+        if self._external_session and self._desktop_status is not None:
+            self._desktop_status.set_recording_elapsed(elapsed)
         minutes, seconds = divmod(int(elapsed), 60)
         rendered = f"{minutes:02d}:{seconds:02d}" if minutes else f"{elapsed:.1f}s"
         self._set_status("recording", f"recording… 󰔛 {rendered}")
@@ -314,7 +322,7 @@ class VoicePadApp(App[None]):
         self._load_history(select=markdown_path)
         if result.complete:
             self._overlay_set("copied" if copied else "hidden")
-            self._set_ready(result.deployment.device_name)
+            self._set_ready(result.deployment.device_name, announce=False)
         else:
             self._overlay_set("error")
             self._state = "ready"
@@ -376,15 +384,14 @@ class VoicePadApp(App[None]):
             self.query_one("#settings-status", Label).update(f"Settings error: {error}")
             return
         self.runtime.close()
-        if self._desktop_status is not None:
-            self._desktop_status.stop()
-            self._desktop_status = None
         self.config = updated
         self.runtime = ApplicationRuntime(updated)
         self.theme = updated.theme
         self.query_one("#settings-status", Label).update("Saved. Reloading verified deployment…")
         self._state = "loading"
         self._set_status("transcribing", "loading model…")
+        if self._desktop_status is not None:
+            self._desktop_status.set_state("initializing")
         self._load_history()
         self._activate()
 
