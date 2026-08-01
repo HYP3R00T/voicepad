@@ -4,7 +4,7 @@ from typing import cast
 from unittest.mock import patch
 
 import pytest
-from textual.widgets import Input, Select
+from textual.widgets import Input, Select, Static, TabPane
 from voicepad.config import AppConfig
 from voicepad.runtime import ApplicationRuntime
 from voicepad.tui.app import VoicePadApp
@@ -70,6 +70,15 @@ async def test_tui_activates_resident_nvidia_runtime(tmp_path: Path) -> None:
             assert app.query_one("#tab-settings")
             assert str(app.query_one("#setting-recordings", Input).value) == str(app.config.recordings_path)
             assert app.query_one("#setting-theme", Select).value == app.config.theme
+            header = app.query_one("#header", Static)
+            assert header.region.height == 2
+            assert header.styles.padding.top == 1
+            assert app.native_ansi_color is True
+            assert app.styles.background.ansi == -1
+            assert app.screen.styles.background.a == 0
+            assert app.query_one("#tab-record", TabPane).styles.background.a == 0
+            assert app.query_one("#tab-history", TabPane).styles.background.a == 0
+            assert app.query_one("#tab-settings", TabPane).styles.background.a == 0
 
             app._state = "recording"
             app._show_live_update(GrowingTranscriptionUpdate("provisional words", 1, 26 * 16_000))

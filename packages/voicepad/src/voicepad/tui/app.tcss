@@ -12,20 +12,21 @@ VoiceButton:hover, VoiceButton:focus { background: transparent; }
 
 Screen {
     layout: vertical;
+    background: transparent;
 }
 
 /* ── header bar ── */
 #header {
-    height: 1;
-    background: $background;
+    height: 2;
+    background: transparent;
     layout: horizontal;
-    padding: 0 2;
+    padding: 1 2 0 2;
 }
 
 /* ── separator between header and tabs ── */
 #header-rule {
     height: 1;
-    background: $background;
+    background: transparent;
     border-bottom: solid $border-blurred;
 }
 
@@ -66,6 +67,7 @@ Screen {
 #body {
     layout: vertical;
     height: 1fr;
+    background: transparent;
 }
 
 Footer {
@@ -75,6 +77,13 @@ Footer {
 #tabs {
     height: 1fr;
     padding: 0;
+    background: transparent;
+}
+
+#tabs Tabs,
+#tabs ContentSwitcher,
+#tabs TabPane {
+    background: transparent;
 }
 
 Tabs .underline--bar {

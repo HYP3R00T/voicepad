@@ -69,7 +69,7 @@ class VoicePadApp(App[None]):
     ]
 
     def __init__(self, config: AppConfig | None = None, runtime: ApplicationRuntime | None = None) -> None:
-        super().__init__()
+        super().__init__(ansi_color=True)
         self.config = config or load_config()
         self.theme = self.config.theme
         self.runtime = runtime or ApplicationRuntime(self.config)
