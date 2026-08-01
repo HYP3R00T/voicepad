@@ -754,9 +754,11 @@ The initial adapter requires a CUDA-capable NVIDIA GPU and validates:
 
 Transient CUDA indices are not durable IDs. The deployment resource profile
 records measured GPU, peak memory, precision, chunk policy, and confidence level
-of the requirement. Initial public guidance claims 4 GiB because that is the
-physical class tested. Lower-memory support requires physical hardware evidence;
-allocator-cap experiments are supporting evidence only.
+of the requirement. Initial public guidance claims the 4 GB physical class tested. The RTX 3050
+reports 4,096 MiB through `nvidia-smi` but exposes 3,953,393,664 bytes to
+PyTorch, so executable admission uses a 3,900,000,000-byte floor rather than an
+incorrect binary 4 GiB threshold. Lower-memory support requires physical
+hardware evidence; allocator-cap experiments are supporting evidence only.
 
 No silent CPU fallback occurs for the CUDA deployment. A future CPU or
 lower-memory deployment must be explicitly represented and tested.

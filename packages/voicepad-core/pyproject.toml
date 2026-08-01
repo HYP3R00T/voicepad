@@ -33,10 +33,16 @@ classifiers = [
 ]
 
 dependencies = [
+  "accelerate==1.14.0",
+  "huggingface-hub==1.26.0",
+  "librosa==0.11.0",
   "numpy>=2.0.0",
+  "onnxruntime==1.28.0",
   "scipy>=1.17.0",
   "sounddevice>=0.5.5",
   "soundfile>=0.13.1",
+  "torch==2.13.0",
+  "transformers==5.14.1",
 ]
 
 [project.urls]
