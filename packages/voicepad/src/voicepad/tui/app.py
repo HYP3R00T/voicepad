@@ -35,6 +35,9 @@ from voicepad.output import persist_markdown
 from voicepad.runtime import ApplicationRuntime
 from voicepad.tui.components import VoiceButton
 from voicepad.tui.control import ControlServer
+from voicepad.tui.overlay import State as OverlayState
+from voicepad.tui.overlay import StatusOverlay
+from voicepad.tui.shortcut import desktop_shortcut_status, open_shortcut_settings
 from voicepad.tui.theme import THEMES
 from voicepad.tui.utils.clipboard import copy_to_clipboard
 
@@ -76,7 +79,10 @@ class VoicePadApp(App[None]):
         self._last_result: FileTranscriptionResult | None = None
         self._record_started = 0.0
         self._history: list[HistoryEntry] = []
-        self._control = ControlServer(lambda: self.call_from_thread(self.action_toggle_recording))
+        self._overlay: StatusOverlay | None = None
+        self._external_session = False
+        self._shortcut = desktop_shortcut_status()
+        self._control = ControlServer(lambda: self.call_from_thread(self._external_toggle))
 
     def compose(self) -> ComposeResult:
         with Static(id="header"):
@@ -121,6 +127,14 @@ class VoicePadApp(App[None]):
             )
             yield Label("proper-noun aliases — Canonical = alias | alias", classes="settings-key")
             yield TextArea(self._render_aliases(), id="setting-proper_nouns")
+            yield Label("global desktop shortcut", classes="settings-key")
+            yield Label(
+                f"{self._shortcut.hint} · {'configured' if self._shortcut.configured else 'setup required'}",
+                id="shortcut-status",
+            )
+            yield Input(self._shortcut.command, id="shortcut-command", disabled=True)
+            yield VoiceButton("󰆏  copy toggle command", id="shortcut-copy-btn")
+            yield VoiceButton("󰍜  open keyboard settings", id="shortcut-settings-btn")
         with Static(id="settings-footer"):
             yield Label("", id="settings-status")
             yield VoiceButton("󰉋  save", role="primary", id="settings-save-btn")
@@ -136,6 +150,8 @@ class VoicePadApp(App[None]):
         if self._microphone is not None and self._microphone.is_recording:
             with contextlib.suppress(Exception):
                 self._microphone.stop()
+        if self._overlay is not None:
+            self._overlay.stop()
         if self._job is not None:
             self._job.cancel()
             with contextlib.suppress(Exception):
@@ -168,6 +184,8 @@ class VoicePadApp(App[None]):
     def _set_error(self, message: str) -> None:
         self._state = "error"
         self._set_status("error", message)
+        self._overlay_set("error")
+        self._external_session = False
 
     @on(VoiceButton.Pressed, "#tx-copy-btn")
     def copy_pressed(self) -> None:
@@ -177,15 +195,50 @@ class VoicePadApp(App[None]):
     def settings_pressed(self) -> None:
         self.action_save_settings()
 
+    @on(VoiceButton.Pressed, "#shortcut-copy-btn")
+    def shortcut_copy_pressed(self) -> None:
+        if copy_to_clipboard(self._shortcut.command):
+            self.notify("Copied desktop toggle command")
+
+    @on(VoiceButton.Pressed, "#shortcut-settings-btn")
+    def shortcut_settings_pressed(self) -> None:
+        try:
+            open_shortcut_settings()
+        except RuntimeError as error:
+            self.notify(str(error), severity="warning")
+
     def action_toggle_recording(self) -> None:
+        self._toggle_recording(external=False)
+
+    def _external_toggle(self) -> None:
+        self._ensure_overlay()
+        self.query_one("#tabs", TabbedContent).active = "tab-record"
+        self._toggle_recording(external=True)
+
+    def _toggle_recording(self, *, external: bool) -> None:
         if self._state == "ready":
+            self._external_session = external
             self._state = "starting"
             self._set_status("transcribing", "starting recording…")
+            self._overlay_set("recording")
             self._start_recording()
         elif self._state == "recording":
             self._state = "transcribing"
             self._set_status("transcribing", "finalizing WAV and transcription…")
+            self._overlay_set("transcribing")
             self._stop_recording()
+        elif external:
+            self._external_session = True
+            self._overlay_set("error")
+
+    def _ensure_overlay(self) -> None:
+        if self._overlay is None:
+            self._overlay = StatusOverlay(theme=self.config.theme)
+            self._overlay.start()
+
+    def _overlay_set(self, state: OverlayState) -> None:
+        if self._external_session and self._overlay is not None:
+            self._overlay.set_state(state)
 
     @work(thread=True, exclusive=True, group="recording-start")
     def _start_recording(self) -> None:
@@ -233,14 +286,20 @@ class VoicePadApp(App[None]):
         try:
             artifact, result = self.runtime.stop_recording(microphone, job)
             markdown = persist_markdown(artifact.path, result, self.config.markdown_path)
+            copied = False
             if result.complete and result.text and self.config.copy_complete_text:
-                copy_to_clipboard(result.text)
+                copied = copy_to_clipboard(result.text)
         except Exception as error:
             self.call_from_thread(self._set_error, f"transcription failed: {error}")
             return
-        self.call_from_thread(self._recording_finished, markdown, result)
+        self.call_from_thread(self._recording_finished, markdown, result, copied)
 
-    def _recording_finished(self, markdown_path: Path, result: FileTranscriptionResult) -> None:
+    def _recording_finished(
+        self,
+        markdown_path: Path,
+        result: FileTranscriptionResult,
+        copied: bool,
+    ) -> None:
         self._microphone = None
         self._job = None
         self._last_result = result
@@ -254,10 +313,13 @@ class VoicePadApp(App[None]):
         self.query_one("#tx-copy-btn", VoiceButton).disabled = not (result.complete and bool(result.text))
         self._load_history(select=markdown_path)
         if result.complete:
+            self._overlay_set("copied" if copied else "hidden")
             self._set_ready(result.deployment.device_name)
         else:
+            self._overlay_set("error")
             self._state = "ready"
             self._set_status("error", "incomplete result saved; audio preserved")
+        self._external_session = False
 
     def action_copy(self) -> None:
         if self._last_result is None or not self._last_result.complete or not self._last_result.text:
@@ -314,6 +376,9 @@ class VoicePadApp(App[None]):
             self.query_one("#settings-status", Label).update(f"Settings error: {error}")
             return
         self.runtime.close()
+        if self._overlay is not None:
+            self._overlay.stop()
+            self._overlay = None
         self.config = updated
         self.runtime = ApplicationRuntime(updated)
         self.theme = updated.theme

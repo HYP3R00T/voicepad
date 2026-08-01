@@ -13,6 +13,23 @@ from voicepad_core.inference import ActiveDeployment
 from voicepad_core.pipeline import GrowingTranscriptionUpdate
 
 
+class FakeOverlay:
+    def __init__(self, theme: str) -> None:
+        self.theme = theme
+        self.states: list[str] = []
+        self.started = False
+        self.stopped = False
+
+    def start(self) -> None:
+        self.started = True
+
+    def stop(self) -> None:
+        self.stopped = True
+
+    def set_state(self, state: str) -> None:
+        self.states.append(state)
+
+
 class FakeRuntime:
     def __init__(self) -> None:
         source = PARAKEET_V3_MANIFEST.source
@@ -60,4 +77,14 @@ async def test_tui_activates_resident_nvidia_runtime(tmp_path: Path) -> None:
             app._update_timer()
             assert "2.0s" in str(app.query_one("#status").render())
 
+            app._state = "ready"
+            with patch("voicepad.tui.app.StatusOverlay", FakeOverlay), patch.object(app, "_start_recording") as start:
+                app._external_toggle()
+            overlay = cast(FakeOverlay, app._overlay)
+            assert start.called
+            assert overlay.started is True
+            assert overlay.states == ["recording"]
+            assert app._state == "starting"
+
     assert runtime.closed is True
+    assert overlay.stopped is True

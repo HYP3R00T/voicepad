@@ -11,7 +11,9 @@ three-tab workflow.
   25 seconds; later updates follow each processed chunk.
 - **History** lists schema-1 Markdown results and displays the selected record.
 - **Settings** controls recording, Markdown, and artifact-cache paths; filename
-  prefix; theme; automatic copy; and explicit proper-noun aliases. Saving reloads the verified resident deployment when necessary.
+  prefix; theme; automatic copy; explicit proper-noun aliases; and the
+  compositor-managed global shortcut. Saving reloads the verified resident
+  deployment when necessary.
 
 The theme selector includes the built-in Textual palettes, with `tokyo-night` as
 the default. The header intentionally reports the compact runtime identity
@@ -39,7 +41,9 @@ the default. The header intentionally reports the compact runtime identity
 
 The local `voicepad toggle` command sends the same start/stop action to a running
 TUI over a user-only Unix socket. Desktop environments may bind that command to
-a global shortcut.
+a global shortcut. External toggles switch to the Record tab and show a floating
+recording, transcribing, or completion indicator while another application has
+focus. See [Global desktop shortcut](configuration/global-hotkey.md).
 
 While recording, the header displays elapsed time in seconds and then minutes.
 Incomplete text is displayed and persisted with metadata, but is not copied
