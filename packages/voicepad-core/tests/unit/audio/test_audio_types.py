@@ -16,10 +16,10 @@ def test_audio_window_samples_are_read_only() -> None:
         window.samples[0] = 1.0
 
 
-def test_waveform_spec_exposes_backend_requirements() -> None:
-    spec = WaveformSpec(sample_rate=16_000, channels=1, peak_normalize=True)
+def test_waveform_spec_exposes_canonical_shape() -> None:
+    spec = WaveformSpec(sample_rate=16_000, channels=1)
 
-    assert (spec.sample_rate, spec.channels, spec.peak_normalize) == (16_000, 1, True)
+    assert (spec.sample_rate, spec.channels) == (16_000, 1)
 
 
 @pytest.mark.parametrize(("sample_rate", "channels"), [(0, 1), (16_000, 0)])

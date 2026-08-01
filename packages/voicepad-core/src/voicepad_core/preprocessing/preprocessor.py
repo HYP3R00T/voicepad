@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 MONO_CHANNELS = 1
 TARGET_SAMPLE_RATE = 16_000
-DEFAULT_WAVEFORM_SPEC = WaveformSpec(TARGET_SAMPLE_RATE, MONO_CHANNELS, peak_normalize=True)
+DEFAULT_WAVEFORM_SPEC = WaveformSpec(TARGET_SAMPLE_RATE, MONO_CHANNELS)
 
 
 class PreprocessingError(Exception):
@@ -108,10 +108,7 @@ class AudioPreProcessor:
         if sample_rate != target.sample_rate:
             transformations.append(f"resample:{sample_rate}->{target.sample_rate}")
         audio = AudioPreProcessor._resample(audio, sample_rate, target.sample_rate)
-        if target.peak_normalize:
-            transformations.append("peak-normalize")
-            audio = AudioPreProcessor._normalize(audio)
-        return audio, tuple(transformations)
+        return np.ascontiguousarray(audio), tuple(transformations)
 
     @staticmethod
     def _validate_metadata(sample_rate: int, channels: int) -> None:
@@ -151,27 +148,9 @@ class AudioPreProcessor:
         up = to_rate // common
         down = from_rate // common
 
-        try:
-            from scipy.signal import resample_poly
+        from scipy.signal import resample_poly
 
-            resampled = resample_poly(audio, up, down)
-        except ImportError:
-            original_length = len(audio)
-            target_length = int(original_length * to_rate / from_rate)
-            original_indices = np.linspace(0, original_length - 1, original_length)
-            target_indices = np.linspace(0, original_length - 1, target_length)
-            resampled = np.interp(target_indices, original_indices, audio)
-
-        return resampled.astype(np.float32)
-
-    @staticmethod
-    def _normalize(audio: np.ndarray) -> np.ndarray:
-        if audio.size == 0:
-            return audio
-        peak = np.max(np.abs(audio))
-        if peak > 0.0:
-            audio = audio / peak
-        return audio
+        return resample_poly(audio, up, down).astype(np.float32)
 
 
 __all__ = [

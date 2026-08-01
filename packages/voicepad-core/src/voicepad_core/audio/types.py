@@ -7,11 +7,10 @@ import numpy as np
 
 @dataclass(frozen=True, slots=True)
 class WaveformSpec:
-    """Waveform contract required by an inference backend."""
+    """Canonical waveform shape required by a processing deployment."""
 
     sample_rate: int
     channels: int = 1
-    peak_normalize: bool = False
 
     def __post_init__(self) -> None:
         if self.sample_rate <= 0:

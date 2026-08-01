@@ -1,26 +1,13 @@
 # voicepad-core
 
-Core library powering VoicePad — audio recording, GPU-accelerated transcription via faster-whisper, and system diagnostics.
+Local audio and transcription pipeline primitives for VoicePad.
 
-## Install
+The package owns audio capture, durable WAV persistence, canonical waveform
+preparation, artifact verification, inference sessions, and bounded
+transcription processing. Application configuration and presentation belong to
+the `voicepad` package.
 
-```bash
-pip install voicepad-core
-```
+The current production deployment is documented in
+[`docs/designs/transcription-pipeline.md`](../../docs/designs/transcription-pipeline.md).
 
-## Quick Start
-
-```python
-from voicepad_core import AudioRecorder, transcribe_audio, get_config
-
-config = get_config()
-
-recorder = AudioRecorder(config)
-audio_file = recorder.start_recording()  # Ctrl+C to stop
-
-transcribe_audio(audio_file, config.markdown_path / "transcript.md", config)
-```
-
-## Documentation
-
-**[voicepad.hyperoot.dev](https://voicepad.hyperoot.dev)**
+Package publication is currently frozen.
