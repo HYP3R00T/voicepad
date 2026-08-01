@@ -13,9 +13,8 @@ from voicepad_core.inference import ActiveDeployment
 from voicepad_core.pipeline import GrowingTranscriptionUpdate
 
 
-class FakeOverlay:
-    def __init__(self, theme: str) -> None:
-        self.theme = theme
+class FakeDesktopStatus:
+    def __init__(self) -> None:
         self.states: list[str] = []
         self.started = False
         self.stopped = False
@@ -78,13 +77,16 @@ async def test_tui_activates_resident_nvidia_runtime(tmp_path: Path) -> None:
             assert "2.0s" in str(app.query_one("#status").render())
 
             app._state = "ready"
-            with patch("voicepad.tui.app.StatusOverlay", FakeOverlay), patch.object(app, "_start_recording") as start:
+            with (
+                patch("voicepad.tui.app.DesktopStatus", FakeDesktopStatus),
+                patch.object(app, "_start_recording") as start,
+            ):
                 app._external_toggle()
-            overlay = cast(FakeOverlay, app._overlay)
+            desktop_status = cast(FakeDesktopStatus, app._desktop_status)
             assert start.called
-            assert overlay.started is True
-            assert overlay.states == ["recording"]
+            assert desktop_status.started is True
+            assert desktop_status.states == ["recording"]
             assert app._state == "starting"
 
     assert runtime.closed is True
-    assert overlay.stopped is True
+    assert desktop_status.stopped is True

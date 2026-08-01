@@ -35,9 +35,9 @@ from voicepad.output import persist_markdown
 from voicepad.runtime import ApplicationRuntime
 from voicepad.tui.components import VoiceButton
 from voicepad.tui.control import ControlServer
-from voicepad.tui.overlay import State as OverlayState
-from voicepad.tui.overlay import StatusOverlay
 from voicepad.tui.shortcut import desktop_shortcut_status, open_shortcut_settings
+from voicepad.tui.status import DesktopStatus
+from voicepad.tui.status import State as DesktopStatusState
 from voicepad.tui.theme import THEMES
 from voicepad.tui.utils.clipboard import copy_to_clipboard
 
@@ -79,7 +79,7 @@ class VoicePadApp(App[None]):
         self._last_result: FileTranscriptionResult | None = None
         self._record_started = 0.0
         self._history: list[HistoryEntry] = []
-        self._overlay: StatusOverlay | None = None
+        self._desktop_status: DesktopStatus | None = None
         self._external_session = False
         self._shortcut = desktop_shortcut_status()
         self._control = ControlServer(lambda: self.call_from_thread(self._external_toggle))
@@ -150,8 +150,8 @@ class VoicePadApp(App[None]):
         if self._microphone is not None and self._microphone.is_recording:
             with contextlib.suppress(Exception):
                 self._microphone.stop()
-        if self._overlay is not None:
-            self._overlay.stop()
+        if self._desktop_status is not None:
+            self._desktop_status.stop()
         if self._job is not None:
             self._job.cancel()
             with contextlib.suppress(Exception):
@@ -211,7 +211,7 @@ class VoicePadApp(App[None]):
         self._toggle_recording(external=False)
 
     def _external_toggle(self) -> None:
-        self._ensure_overlay()
+        self._ensure_desktop_status()
         self.query_one("#tabs", TabbedContent).active = "tab-record"
         self._toggle_recording(external=True)
 
@@ -231,14 +231,14 @@ class VoicePadApp(App[None]):
             self._external_session = True
             self._overlay_set("error")
 
-    def _ensure_overlay(self) -> None:
-        if self._overlay is None:
-            self._overlay = StatusOverlay(theme=self.config.theme)
-            self._overlay.start()
+    def _ensure_desktop_status(self) -> None:
+        if self._desktop_status is None:
+            self._desktop_status = DesktopStatus()
+            self._desktop_status.start()
 
-    def _overlay_set(self, state: OverlayState) -> None:
-        if self._external_session and self._overlay is not None:
-            self._overlay.set_state(state)
+    def _overlay_set(self, state: DesktopStatusState) -> None:
+        if self._external_session and self._desktop_status is not None:
+            self._desktop_status.set_state(state)
 
     @work(thread=True, exclusive=True, group="recording-start")
     def _start_recording(self) -> None:
@@ -376,9 +376,9 @@ class VoicePadApp(App[None]):
             self.query_one("#settings-status", Label).update(f"Settings error: {error}")
             return
         self.runtime.close()
-        if self._overlay is not None:
-            self._overlay.stop()
-            self._overlay = None
+        if self._desktop_status is not None:
+            self._desktop_status.stop()
+            self._desktop_status = None
         self.config = updated
         self.runtime = ApplicationRuntime(updated)
         self.theme = updated.theme

@@ -29,10 +29,10 @@ responsible for the microphone, durable WAV recording, and transcription.
 
 Press the shortcut once from any application to record. Press it again to stop,
 finalize the WAV, and transcribe. VoicePad switches its TUI to the Record tab and
-shows a small recording/transcribing/completion overlay above other applications.
-The overlay is centered near the bottom of the enabled monitor containing the
-pointer, rather than across the combined virtual desktop. Disabled displays are
-ignored.
+uses one transient desktop status card for recording, transcribing, completion,
+or errors. COSMIC renders and positions the card natively, updates it in place,
+and applies the desktop's current fonts and display scaling. VoicePad does not
+create an XWayland overlay window.
 
 COSMIC uses **Super+Space** for input-source switching by default. Replace or
 disable that existing binding if COSMIC reports a conflict.
