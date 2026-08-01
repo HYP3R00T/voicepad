@@ -18,7 +18,7 @@ from voicepad_core.planning import AdaptiveChunkPlanner
 from voicepad_core.preprocessing import DEFAULT_WAVEFORM_SPEC, AudioPreProcessor, PreprocessedAudio
 from voicepad_core.vad import PauseTracker, SileroVad, VadFrame, material_speech_regions
 
-from .aliases import AliasCorrectionResult, AliasRule, apply_aliases, ensure_terminal_punctuation
+from .aliases import AliasRule, apply_aliases
 from .assembly import ConservativeAssembler
 from .types import ChunkOutcome, FileTranscriptionResult
 
@@ -50,12 +50,10 @@ class FiniteFileTranscriber:
         vad: SequentialVad,
         *,
         aliases: tuple[AliasRule, ...] = (),
-        terminal_punctuation: bool = True,
     ) -> None:
         self._engine = engine
         self._vad = vad
         self._aliases = aliases
-        self._terminal_punctuation = terminal_punctuation
 
     def transcribe_file(
         self,
@@ -139,15 +137,10 @@ class FiniteFileTranscriber:
             outcome.error is None and not outcome.cancelled for outcome in outcomes
         )
         complete = all_chunks_terminal and assembler.protocol_valid and not gaps and not token.is_cancelled
-        aliases = apply_aliases(assembler.words, self._aliases)
-        terminal = (
-            ensure_terminal_punctuation(aliases.words)
-            if self._terminal_punctuation
-            else AliasCorrectionResult(aliases.words, ())
-        )
+        corrected = apply_aliases(assembler.words, self._aliases)
         return FileTranscriptionResult(
-            text=terminal.text,
-            words=terminal.words,
+            text=corrected.text,
+            words=corrected.words,
             tokens=assembler.tokens,
             duration_seconds=prepared.duration(),
             latency_seconds=time.perf_counter() - started,
@@ -155,7 +148,7 @@ class FiniteFileTranscriber:
             chunks=tuple(outcomes),
             speech_regions=speech,
             coverage_gaps=gaps,
-            corrections=(*aliases.corrections, *terminal.corrections),
+            corrections=corrected.corrections,
             warnings=tuple(warnings),
             complete=complete,
         )
@@ -166,11 +159,5 @@ def build_finite_file_transcriber(
     silero_model: Path,
     *,
     aliases: tuple[AliasRule, ...] = (),
-    terminal_punctuation: bool = True,
 ) -> FiniteFileTranscriber:
-    return FiniteFileTranscriber(
-        engine,
-        SileroVad(silero_model),
-        aliases=aliases,
-        terminal_punctuation=terminal_punctuation,
-    )
+    return FiniteFileTranscriber(engine, SileroVad(silero_model), aliases=aliases)

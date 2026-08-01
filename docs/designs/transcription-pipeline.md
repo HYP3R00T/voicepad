@@ -610,6 +610,9 @@ inference worker
 Queues store descriptors, not prepared audio arrays. At most one prepared model
 input exists. Slow inference creates a disk-backed backlog. The measured warm
 throughput is far above real time, but correctness does not rely on that speed.
+After each successful chunk, the growing job emits a provisional assembled-text
+update for presentation. The update may change when a later overlap observation
+arrives; only the terminal `FileTranscriptionResult` is authoritative.
 
 Recording stop means stop capture, drain persistence, mark the source final,
 plan the remaining speech, process terminal descriptors, assemble, persist, and
@@ -701,12 +704,6 @@ class TranscriptionIntent:
     language: str | None = None
     vocabulary: tuple[str, ...] = ()
 ```
-
-Initial supported post-assembly behavior includes deterministic terminal
-punctuation: when a complete result ends in an alphanumeric character, VoicePad
-appends a period and records that correction in result metadata. Existing
-terminal punctuation is preserved; incomplete results are not presented as
-complete merely by adding punctuation.
 
 Initial supported proper-noun behavior is deterministic alias correction after
 timestamp assembly. Configuration associates a canonical spelling only with

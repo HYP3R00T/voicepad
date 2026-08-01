@@ -5,15 +5,17 @@ three-tab workflow.
 
 ## Tabs
 
-- **Record** shows live elapsed recording time, the authoritative transcript,
-  processing metadata, and copy control.
+- **Record** shows live elapsed recording time, provisional chunk text,
+  authoritative final text, processing metadata, and copy control. The first
+  provisional update normally appears at the first confirmed pause after about
+  25 seconds; later updates follow each processed chunk.
 - **History** lists schema-1 Markdown results and displays the selected record.
 - **Settings** controls recording, Markdown, and artifact-cache paths; filename
-  prefix; theme; automatic copy; terminal punctuation; and explicit proper-noun
-  aliases. Saving reloads the verified resident deployment when necessary.
+  prefix; theme; automatic copy; and explicit proper-noun aliases. Saving reloads the verified resident deployment when necessary.
 
 The theme selector includes the built-in Textual palettes, with `tokyo-night` as
-the default.
+the default. The header intentionally reports the compact runtime identity
+`Parakeet v3 · NVIDIA CUDA · FP16` instead of the full physical GPU name.
 
 ## States
 

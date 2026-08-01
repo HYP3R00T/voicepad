@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
@@ -11,6 +12,7 @@ from voicepad_core.inference import ActiveDeployment, ResidentTranscriptionEngin
 from voicepad_core.pipeline import (
     FileTranscriptionResult,
     GrowingTranscriptionJob,
+    GrowingTranscriptionUpdate,
     build_finite_file_transcriber,
     build_growing_job,
 )
@@ -42,10 +44,13 @@ class ApplicationRuntime:
             self.engine,
             model,
             aliases=self.config.alias_rules,
-            terminal_punctuation=self.config.terminal_punctuation,
         ).transcribe_file(path)
 
-    def start_recording(self) -> tuple[MicrophoneStream, GrowingTranscriptionJob]:
+    def start_recording(
+        self,
+        *,
+        on_update: Callable[[GrowingTranscriptionUpdate], None] | None = None,
+    ) -> tuple[MicrophoneStream, GrowingTranscriptionJob]:
         model = self._require_silero()
         self.config.recordings_path.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
@@ -58,7 +63,7 @@ class ApplicationRuntime:
                 model,
                 microphone.growing_source,
                 aliases=self.config.alias_rules,
-                terminal_punctuation=self.config.terminal_punctuation,
+                on_update=on_update,
             )
             job.start()
         except Exception:

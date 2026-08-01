@@ -1,5 +1,5 @@
 import pytest
-from voicepad_core.pipeline import AliasRule, ObservedWord, apply_aliases, ensure_terminal_punctuation
+from voicepad_core.pipeline import AliasRule, ObservedWord, apply_aliases
 
 
 def word(text: str, start: int, end: int) -> ObservedWord:
@@ -25,19 +25,6 @@ def test_alias_correction_does_not_fuzzily_rewrite_other_words() -> None:
 
     assert result.words == words
     assert result.corrections == ()
-
-
-def test_complete_alphanumeric_text_receives_recorded_terminal_period() -> None:
-    result = ensure_terminal_punctuation((word("finished", 0, 10),))
-
-    assert result.text == "finished."
-    assert result.corrections[0].canonical == "."
-
-
-def test_existing_terminal_punctuation_is_preserved() -> None:
-    words = (word("finished!", 0, 10),)
-
-    assert ensure_terminal_punctuation(words).words == words
 
 
 def test_alias_rules_reject_duplicate_or_empty_alternatives() -> None:

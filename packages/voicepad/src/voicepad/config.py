@@ -37,7 +37,6 @@ class AppConfig:
     recording_prefix: str = "recording"
     input_device_index: int | None = None
     copy_complete_text: bool = True
-    terminal_punctuation: bool = True
     theme: str = DEFAULT_THEME
     proper_nouns: tuple[AliasConfiguration, ...] = ()
 
@@ -78,7 +77,6 @@ def load_config(path: Path | None = None) -> AppConfig:
         "recording_prefix",
         "input_device_index",
         "copy_complete_text",
-        "terminal_punctuation",
         "theme",
         "proper_nouns",
     }
@@ -101,9 +99,6 @@ def load_config(path: Path | None = None) -> AppConfig:
         copy_complete = raw["copy_complete_text"]
         if not isinstance(copy_complete, bool):
             raise TypeError("copy_complete_text must be a boolean")
-        terminal_punctuation = raw.get("terminal_punctuation", True)
-        if not isinstance(terminal_punctuation, bool):
-            raise TypeError("terminal_punctuation must be a boolean")
         theme = raw.get("theme", DEFAULT_THEME)
         if not isinstance(theme, str):
             raise TypeError("theme must be a string")
@@ -115,7 +110,6 @@ def load_config(path: Path | None = None) -> AppConfig:
             recording_prefix=_required_string(raw, "recording_prefix"),
             input_device_index=input_device,
             copy_complete_text=copy_complete,
-            terminal_punctuation=terminal_punctuation,
             theme=theme,
             proper_nouns=aliases,
         )

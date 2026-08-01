@@ -62,6 +62,13 @@ class ChunkOutcome:
 
 
 @dataclass(frozen=True, slots=True)
+class GrowingTranscriptionUpdate:
+    text: str
+    processed_chunks: int
+    processed_through_sample: int
+
+
+@dataclass(frozen=True, slots=True)
 class FileTranscriptionResult:
     text: str
     words: tuple[ObservedWord, ...]

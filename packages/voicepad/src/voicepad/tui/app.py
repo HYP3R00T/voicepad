@@ -24,7 +24,11 @@ from textual.widgets import (
     TextArea,
 )
 from voicepad_core.audio import MicrophoneStream
-from voicepad_core.pipeline import FileTranscriptionResult, GrowingTranscriptionJob
+from voicepad_core.pipeline import (
+    FileTranscriptionResult,
+    GrowingTranscriptionJob,
+    GrowingTranscriptionUpdate,
+)
 
 from voicepad.config import AliasConfiguration, AppConfig, load_config, save_config
 from voicepad.output import persist_markdown
@@ -115,11 +119,6 @@ class VoicePadApp(App[None]):
                 value=self.config.copy_complete_text,
                 id="setting-copy",
             )
-            yield Checkbox(
-                "append a recorded terminal period when Parakeet omits punctuation",
-                value=self.config.terminal_punctuation,
-                id="setting-terminal-punctuation",
-            )
             yield Label("proper-noun aliases — Canonical = alias | alias", classes="settings-key")
             yield TextArea(self._render_aliases(), id="setting-proper_nouns")
         with Static(id="settings-footer"):
@@ -161,9 +160,10 @@ class VoicePadApp(App[None]):
         label.update(f"{icons.get(state, '󰔟')}  {message}")
 
     def _set_ready(self, device_name: str) -> None:
+        del device_name
         self._state = "ready"
         self._set_status("ready", "ready")
-        self.query_one("#header-model", Label).update(f"[dim]model:[/] parakeet v3  [dim]device:[/] {device_name}")
+        self.query_one("#header-model", Label).update("[dim]model:[/] Parakeet v3  [dim]device:[/] NVIDIA CUDA · FP16")
 
     def _set_error(self, message: str) -> None:
         self._state = "error"
@@ -190,11 +190,24 @@ class VoicePadApp(App[None]):
     @work(thread=True, exclusive=True, group="recording-start")
     def _start_recording(self) -> None:
         try:
-            microphone, job = self.runtime.start_recording()
+            microphone, job = self.runtime.start_recording(on_update=self._receive_live_update)
         except Exception as error:
             self.call_from_thread(self._set_error, f"recording failed: {error}")
             return
         self.call_from_thread(self._recording_started, microphone, job)
+
+    def _receive_live_update(self, update: GrowingTranscriptionUpdate) -> None:
+        self.call_from_thread(self._show_live_update, update)
+
+    def _show_live_update(self, update: GrowingTranscriptionUpdate) -> None:
+        if self._state not in {"recording", "transcribing"}:
+            return
+        text = self.query_one("#tx-text", Label)
+        text.remove_class("placeholder")
+        text.update(update.text or "Listening…")
+        self.query_one("#tx-meta", Label).update(
+            f"live · {update.processed_chunks} chunks · through {update.processed_through_sample / 16_000:.1f}s"
+        )
 
     def _recording_started(self, microphone: MicrophoneStream, job: GrowingTranscriptionJob) -> None:
         self._microphone = microphone
@@ -293,7 +306,6 @@ class VoicePadApp(App[None]):
                 recording_prefix=self.query_one("#setting-prefix", Input).value,
                 input_device_index=self.config.input_device_index,
                 copy_complete_text=self.query_one("#setting-copy", Checkbox).value,
-                terminal_punctuation=self.query_one("#setting-terminal-punctuation", Checkbox).value,
                 theme=selected_theme,
                 proper_nouns=_parse_aliases(self.query_one("#setting-proper_nouns", TextArea).text),
             )

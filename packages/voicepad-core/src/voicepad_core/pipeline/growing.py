@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import logging
 import queue
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
@@ -13,13 +15,14 @@ from voicepad_core.planning import AdaptiveChunkPlanner, AudioChunk
 from voicepad_core.preprocessing import PreprocessedAudio
 from voicepad_core.vad import SAMPLE_RATE, PauseTracker, SileroVad, VadFrame, material_speech_regions
 
-from .aliases import AliasCorrectionResult, AliasRule, apply_aliases, ensure_terminal_punctuation
+from .aliases import AliasRule, apply_aliases
 from .assembly import ConservativeAssembler
 from .finite import ReadyEngine, SequentialVad
-from .types import ChunkOutcome, FileTranscriptionResult
+from .types import ChunkOutcome, FileTranscriptionResult, GrowingTranscriptionUpdate
 
 _FINISHED = object()
 VAD_READ_SAMPLES = SAMPLE_RATE
+logger = logging.getLogger(__name__)
 
 
 class GrowingPipelineError(RuntimeError):
@@ -37,7 +40,7 @@ class GrowingTranscriptionJob:
         *,
         intent: TranscriptionIntent | None = None,
         aliases: tuple[AliasRule, ...] = (),
-        terminal_punctuation: bool = True,
+        on_update: Callable[[GrowingTranscriptionUpdate], None] | None = None,
         descriptor_queue_size: int = 2,
     ) -> None:
         if source.sample_rate != SAMPLE_RATE or source.channels != 1:
@@ -52,7 +55,7 @@ class GrowingTranscriptionJob:
         self._source = source
         self._intent = intent or TranscriptionIntent()
         self._aliases = aliases
-        self._terminal_punctuation = terminal_punctuation
+        self._on_update = on_update
         self._active = active
         self._queue: queue.Queue[AudioChunk | object] = queue.Queue(descriptor_queue_size)
         self._cancellation = CancellationToken()
@@ -156,6 +159,7 @@ class GrowingTranscriptionJob:
                                 result.cancelled,
                             )
                         )
+                        self._publish_update(item)
                         if result.cancelled:
                             self._warnings.append(f"chunk {index} generation was cancelled")
                             self._cancellation.cancel()
@@ -178,6 +182,20 @@ class GrowingTranscriptionJob:
                     self._queue.task_done()
         finally:
             self._done.set()
+
+    def _publish_update(self, descriptor: AudioChunk) -> None:
+        if self._on_update is None:
+            return
+        corrected = apply_aliases(self._assembler.words, self._aliases)
+        update = GrowingTranscriptionUpdate(
+            corrected.text,
+            len(self._outcomes),
+            descriptor.logical_end_sample,
+        )
+        try:
+            self._on_update(update)
+        except Exception as error:
+            logger.warning("Growing transcription update callback failed: %s", error)
 
     def _put_descriptor(self, descriptor: AudioChunk) -> bool:
         while not self._cancellation.is_cancelled:
@@ -214,15 +232,10 @@ class GrowingTranscriptionJob:
             and self._assembler.protocol_valid
             and not gaps
         )
-        aliases = apply_aliases(self._assembler.words, self._aliases)
-        terminal = (
-            ensure_terminal_punctuation(aliases.words)
-            if self._terminal_punctuation
-            else AliasCorrectionResult(aliases.words, ())
-        )
+        corrected = apply_aliases(self._assembler.words, self._aliases)
         return FileTranscriptionResult(
-            text=terminal.text,
-            words=terminal.words,
+            text=corrected.text,
+            words=corrected.words,
             tokens=self._assembler.tokens,
             duration_seconds=self._source.committed_samples / SAMPLE_RATE,
             latency_seconds=time.perf_counter() - self._started_at,
@@ -230,7 +243,7 @@ class GrowingTranscriptionJob:
             chunks=tuple(self._outcomes),
             speech_regions=speech,
             coverage_gaps=gaps,
-            corrections=(*aliases.corrections, *terminal.corrections),
+            corrections=corrected.corrections,
             warnings=tuple(warnings),
             complete=complete,
         )
@@ -243,7 +256,7 @@ def build_growing_job(
     *,
     intent: TranscriptionIntent | None = None,
     aliases: tuple[AliasRule, ...] = (),
-    terminal_punctuation: bool = True,
+    on_update: Callable[[GrowingTranscriptionUpdate], None] | None = None,
 ) -> GrowingTranscriptionJob:
     return GrowingTranscriptionJob(
         engine,
@@ -251,5 +264,5 @@ def build_growing_job(
         source,
         intent=intent,
         aliases=aliases,
-        terminal_punctuation=terminal_punctuation,
+        on_update=on_update,
     )

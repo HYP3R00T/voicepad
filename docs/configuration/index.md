@@ -26,7 +26,6 @@ Supported fields are:
   "recording_prefix": "recording",
   "input_device_index": null,
   "copy_complete_text": true,
-  "terminal_punctuation": true,
   "theme": "tokyo-night",
   "proper_nouns": [
     {"canonical": "VoicePad", "aliases": ["voice pad"]}
@@ -39,8 +38,3 @@ not silently migrate or overwrite old configuration.
 
 Proper-noun aliases are deterministic word/phrase replacements after timestamp
 assembly. They are not decoder hotwords and never use fuzzy matching.
-
-When `terminal_punctuation` is enabled, a complete result ending in an
-alphanumeric character receives a recorded final-period correction. Existing
-terminal punctuation is preserved. This correction appears in result metadata
-rather than silently pretending it came from the model.

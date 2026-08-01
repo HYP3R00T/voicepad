@@ -50,7 +50,7 @@ def raw_audio() -> RawAudio:
 def test_finite_pipeline_returns_one_authoritative_complete_result() -> None:
     result = FiniteFileTranscriber(FakeEngine(), SpeechVad()).transcribe_audio(raw_audio())
 
-    assert result.text == "working."
+    assert result.text == "working"
     assert result.complete is True
     assert len(result.chunks) == 1
     assert len(result.speech_regions) == 1

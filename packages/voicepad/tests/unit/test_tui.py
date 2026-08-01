@@ -10,6 +10,7 @@ from voicepad.runtime import ApplicationRuntime
 from voicepad.tui.app import VoicePadApp
 from voicepad_core.deployments import PARAKEET_V3_CUDA, PARAKEET_V3_MANIFEST, HuggingFaceSource
 from voicepad_core.inference import ActiveDeployment
+from voicepad_core.pipeline import GrowingTranscriptionUpdate
 
 
 class FakeRuntime:
@@ -42,7 +43,7 @@ async def test_tui_activates_resident_nvidia_runtime(tmp_path: Path) -> None:
         async with app.run_test() as pilot:
             await pilot.pause()
             assert "ready" in str(app.query_one("#status").render())
-            assert "NVIDIA Test GPU" in str(app.query_one("#header-model").render())
+            assert "NVIDIA CUDA" in str(app.query_one("#header-model").render())
             assert app._state == "ready"
             assert app.query_one("#tab-record")
             assert app.query_one("#tab-history")
@@ -51,6 +52,10 @@ async def test_tui_activates_resident_nvidia_runtime(tmp_path: Path) -> None:
             assert app.query_one("#setting-theme", Select).value == app.config.theme
 
             app._state = "recording"
+            app._show_live_update(GrowingTranscriptionUpdate("provisional words", 1, 26 * 16_000))
+            assert "provisional words" in str(app.query_one("#tx-text").render())
+            assert "through 26.0s" in str(app.query_one("#tx-meta").render())
+
             app._record_started = time.monotonic() - 2.0
             app._update_timer()
             assert "2.0s" in str(app.query_one("#status").render())
