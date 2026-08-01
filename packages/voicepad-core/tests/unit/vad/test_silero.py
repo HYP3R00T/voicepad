@@ -2,7 +2,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from voicepad_core.vad import FRAME_SAMPLES, PauseTracker, SileroVad, VadError, VadFrame
+from voicepad_core.vad import FRAME_SAMPLES, PauseTracker, SileroVad, VadError, VadFrame, material_speech_regions
 
 
 class FakeSession:
@@ -58,3 +58,4 @@ def test_pause_tracker_confirms_speech_then_500ms_silence() -> None:
     assert len(pauses) == 1
     assert pauses[0].start_sample == 8 * 512
     assert pauses[0].end_sample == 24 * 512
+    assert material_speech_regions(tuple(frames))[0].end_sample == 8 * 512

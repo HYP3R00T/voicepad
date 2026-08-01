@@ -176,6 +176,14 @@ chunks legitimately differ near artificial boundaries. Production planning must
 prefer VAD-confirmed pauses, and assembly must preserve uncertainty rather than
 delete text to imitate the full-file result.
 
+The first production-path finite-file validation used official Silero-selected
+boundaries and six descriptors. Its longest complete model input was 35.744
+seconds. The resident pipeline processed the 141.792-second source in 6.2-6.5
+seconds including VAD, feature preparation, sequential inference, timestamp
+conversion, and assembly. It produced 321 timed words with no failed chunks,
+overlap warnings, or VAD coverage gaps. Independent offline processes produced
+the same result hash.
+
 ### Alternative runtime findings
 
 - Full-precision ONNX CUDA was extremely fast but consumed about 3.6-3.75 GiB

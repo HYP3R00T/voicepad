@@ -6,6 +6,12 @@ from .silero import FRAME_SAMPLES, SAMPLE_RATE, VadFrame
 
 
 @dataclass(frozen=True, slots=True)
+class SpeechRegion:
+    start_sample: int
+    end_sample: int
+
+
+@dataclass(frozen=True, slots=True)
 class NaturalPause:
     start_sample: int
     end_sample: int
@@ -73,6 +79,55 @@ class PauseTracker:
         self._silence_start = None
         self._silence_frames = 0
         return None
+
+
+def material_speech_regions(
+    frames: tuple[VadFrame, ...],
+    *,
+    speech_threshold: float = 0.5,
+    negative_threshold: float = 0.35,
+    minimum_speech_ms: int = 250,
+    minimum_silence_ms: int = 500,
+) -> tuple[SpeechRegion, ...]:
+    minimum_speech_frames = _duration_frames(minimum_speech_ms)
+    minimum_silence_frames = _duration_frames(minimum_silence_ms)
+    candidate_start: int | None = None
+    candidate_frames = 0
+    active_start: int | None = None
+    silence_start: int | None = None
+    silence_frames = 0
+    regions: list[SpeechRegion] = []
+    last_end = 0
+    for frame in frames:
+        last_end = frame.end_sample
+        if active_start is None:
+            if frame.speech_probability >= speech_threshold:
+                if candidate_start is None:
+                    candidate_start = frame.start_sample
+                candidate_frames += 1
+                if candidate_frames >= minimum_speech_frames:
+                    active_start = candidate_start
+            else:
+                candidate_start = None
+                candidate_frames = 0
+            continue
+        if frame.speech_probability < negative_threshold:
+            if silence_start is None:
+                silence_start = frame.start_sample
+            silence_frames += 1
+            if silence_frames >= minimum_silence_frames:
+                regions.append(SpeechRegion(active_start, silence_start))
+                active_start = None
+                candidate_start = None
+                candidate_frames = 0
+                silence_start = None
+                silence_frames = 0
+        else:
+            silence_start = None
+            silence_frames = 0
+    if active_start is not None:
+        regions.append(SpeechRegion(active_start, silence_start or last_end))
+    return tuple(regions)
 
 
 def _duration_frames(milliseconds: int) -> int:
