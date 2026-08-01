@@ -1,6 +1,11 @@
 # VoicePad Core contract boundaries
 
-This document records where model-related parameters belong.
+This document records where model-related parameters belong in the current implementation.
+
+!!! note "Approved replacement design"
+    The [transcribe.cpp GGUF transcription pipeline](designs/transcribe-cpp-pipeline.md)
+    describes the approved target architecture. This page remains authoritative
+    for current behavior until the migration is implemented.
 
 ## Contract layers
 
