@@ -1,0 +1,16 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro'
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, '')
+---
+
+<BaseLayout title="Page not found · VoicePad">
+  <section class="shell flex min-h-[68vh] items-center justify-center py-20 text-center">
+    <div>
+      <div class="eyebrow justify-center"><span></span> 404</div>
+      <h1 class="mt-5 font-display text-5xl font-medium tracking-[-0.05em] text-slate-100">That page went quiet.</h1>
+      <p class="mx-auto mt-4 max-w-md leading-7 text-slate-500">The page may have moved, or the address may be incomplete.</p>
+      <a class="button-primary mt-8" href={`${base}/`}>Back to VoicePad</a>
+    </div>
+  </section>
+</BaseLayout>

@@ -35,7 +35,7 @@ uv run voicepad transcribe path/to/recording.wav
 ```
 
 Package publication is currently frozen. See
-[`docs/designs/transcription-pipeline.md`](docs/designs/transcription-pipeline.md)
+[`docs/content/designs/transcription-pipeline.md`](docs/content/designs/transcription-pipeline.md)
 for the complete architecture and validation evidence.
 
 ## Quality gate
@@ -45,7 +45,8 @@ uv run ruff check
 uv run ruff format --check
 uv run ty check
 uv run pytest packages --cov=voicepad --cov=voicepad_core --cov-fail-under=70
-uv run zensical build --clean
+pnpm --dir docs install --frozen-lockfile
+pnpm --dir docs build
 ```
 
 ## License

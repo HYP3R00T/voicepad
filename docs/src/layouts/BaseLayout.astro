@@ -1,0 +1,51 @@
+---
+import '@fontsource-variable/inter'
+import '@fontsource-variable/jetbrains-mono'
+import '@fontsource-variable/space-grotesk'
+import '../styles/global.css'
+
+import Footer from '../components/Footer.astro'
+import Header from '../components/Header.astro'
+
+interface Props {
+  title?: string
+  description?: string
+  image?: string
+  hideFooter?: boolean
+}
+
+const {
+  title = 'VoicePad — private NVIDIA dictation',
+  description = 'Fast, private, local-first dictation for Linux, powered by NVIDIA Parakeet and CUDA.',
+  image,
+  hideFooter = false,
+} = Astro.props
+const canonical = new URL(Astro.url.pathname, Astro.site)
+const favicon = `${import.meta.env.BASE_URL.replace(/\/?$/, '/')}favicon.svg`
+---
+
+<!doctype html>
+<html lang="en" class="scroll-smooth">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width" />
+    <meta name="generator" content={Astro.generator} />
+    <meta name="theme-color" content="#090b11" />
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical} />
+    <link rel="icon" type="image/svg+xml" href={favicon} />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    {image && <meta property="og:image" content={new URL(image, Astro.site)} />}
+    <meta name="twitter:card" content={image ? 'summary_large_image' : 'summary'} />
+    <title>{title}</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Skip to content</a>
+    <Header />
+    <main id="main-content"><slot /></main>
+    {!hideFooter && <Footer />}
+  </body>
+</html>

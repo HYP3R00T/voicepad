@@ -8,6 +8,6 @@ transcription processing. Application configuration and presentation belong to
 the `voicepad` package.
 
 The current production deployment is documented in
-[`docs/designs/transcription-pipeline.md`](../../docs/designs/transcription-pipeline.md).
+[`docs/content/designs/transcription-pipeline.md`](../../docs/content/designs/transcription-pipeline.md).
 
 Package publication is currently frozen.

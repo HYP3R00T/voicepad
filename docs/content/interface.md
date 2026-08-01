@@ -43,7 +43,7 @@ The local `voicepad toggle` command sends the same start/stop action to a runnin
 TUI over a user-only Unix socket. Desktop environments may bind that command to
 a global shortcut. External toggles switch to the Record tab and update one
 native recording, transcribing, or completion status card while another
-application has focus. See [Global desktop shortcut](configuration/global-hotkey.md).
+application has focus. See [Global desktop shortcut](../configuration/global-hotkey/).
 
 While recording, the header displays elapsed time in seconds and then minutes.
 Incomplete text is displayed and persisted with metadata, but is not copied

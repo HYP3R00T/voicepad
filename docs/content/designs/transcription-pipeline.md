@@ -4,7 +4,7 @@ icon: lucide/workflow
 
 # Resident transcription pipeline
 
-> **Status:** Proposed for human review
+> **Status:** Implemented and validated on the maintained Linux/NVIDIA baseline
 >
 > **Primary target:** Linux x86_64 with an NVIDIA GPU
 >
@@ -867,7 +867,7 @@ uv run ruff check
 uv run ruff format --check
 uv run ty check
 uv run pytest packages --cov=voicepad --cov=voicepad_core --cov-fail-under=70
-uv run zensical build --clean
+pnpm --dir docs build
 ```
 
 Optional hardware checks are reported as passed, failed, or unavailable. They

@@ -1,0 +1,25 @@
+---
+import Logo from './Logo.astro'
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, '')
+---
+
+<footer class="border-t border-white/7 bg-[#080a10]">
+  <div class="shell grid gap-10 py-12 sm:grid-cols-[1fr_auto] sm:items-end">
+    <div>
+      <a href={`${base}/`} class="inline-flex rounded-lg focus-ring"><Logo /></a>
+      <p class="mt-4 max-w-md text-sm leading-6 text-slate-500">
+        Private, local-first dictation powered by NVIDIA Parakeet. Your audio stays on your machine.
+      </p>
+    </div>
+    <div class="flex flex-wrap gap-x-6 gap-y-3 text-sm text-slate-400">
+      <a class="footer-link" href={`${base}/docs/getting-started`}>Get started</a>
+      <a class="footer-link" href={`${base}/docs/designs/transcription-pipeline`}>Architecture</a>
+      <a class="footer-link" href="https://github.com/HYP3R00T/voicepad">Source</a>
+    </div>
+  </div>
+  <div class="shell flex flex-col gap-2 border-t border-white/6 py-5 text-xs text-slate-600 sm:flex-row sm:items-center sm:justify-between">
+    <span>VoicePad is currently an alpha for Linux x86_64 and NVIDIA GPUs.</span>
+    <span>MIT licensed · local by design</span>
+  </div>
+</footer>

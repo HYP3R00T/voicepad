@@ -1,6 +1,8 @@
 [tools]
 git-cliff = "latest"
 prek = "latest"
+node = "lts"
+pnpm = "latest"
 python = "3.13"
 rumdl = "latest"
 tombi = "latest"
@@ -20,8 +22,12 @@ _.file = ".env"  # for sensitive data
 UV_LINK_MODE = "copy"
 
 [tasks.docs]
-run = "zensical serve"
-description = "Serve the documentation locally"
+run = "pnpm --dir docs dev"
+description = "Serve the Astro documentation locally"
+
+[tasks.docs-build]
+run = "pnpm --dir docs build"
+description = "Type-check and build the Astro documentation"
 
 [tasks.sync]
 run = "uv sync --upgrade"

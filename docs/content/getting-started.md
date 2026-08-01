@@ -6,7 +6,10 @@ VoicePad currently requires Linux x86_64, a supported NVIDIA driver, and an
 NVIDIA CUDA GPU. The maintained hardware baseline is an RTX 3050 Laptop GPU with
 4 GB physical VRAM. CPU-only ASR, AMD GPUs, and macOS are not supported.
 
-## Install the project
+## Install from source
+
+Package publication is currently frozen while the NVIDIA backend is qualified.
+For now, run VoicePad from a reviewed checkout:
 
 ```bash
 mise install
@@ -14,7 +17,8 @@ uv sync --upgrade
 ```
 
 No separate CUDA toolkit is required; the locked PyTorch dependencies include
-the reviewed CUDA runtime libraries.
+the reviewed CUDA runtime libraries. A persistent local `uv tool` installation
+has also been qualified, but is not yet the public distribution path.
 
 ## Prepare the deployment
 
@@ -44,3 +48,10 @@ uv run voicepad transcribe path/to/existing.wav
 
 Existing input audio is opened read-only. Output collisions fail rather than
 overwrite prior data.
+
+## Dictate from another application
+
+Keep the TUI running, then bind `voicepad toggle` to a compositor-managed
+shortcut. Press it once to record and again to stop. See the
+[global desktop shortcut](../configuration/global-hotkey/) guide for COSMIC and
+other Wayland desktops.

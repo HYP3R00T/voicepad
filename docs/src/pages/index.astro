@@ -1,0 +1,153 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro'
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, '')
+---
+
+<BaseLayout>
+  <section class="hero-section overflow-hidden">
+    <div class="hero-glow" aria-hidden="true"></div>
+    <div class="shell relative grid items-center gap-16 py-20 lg:grid-cols-[1.02fr_.98fr] lg:py-28 xl:gap-24">
+      <div>
+        <div class="eyebrow"><span></span> Local-first NVIDIA dictation</div>
+        <h1 class="hero-title">Speak naturally.<br /><em>Keep it private.</em></h1>
+        <p class="hero-copy">
+          VoicePad turns speech into text on your own NVIDIA GPU. Durable audio, resident inference, and a global shortcut—without sending a word to the cloud.
+        </p>
+        <div class="mt-9 flex flex-wrap items-center gap-3">
+          <a class="button-primary" href={`${base}/docs/getting-started`}>
+            Get started
+            <svg viewBox="0 0 16 16" class="size-4" fill="none" aria-hidden="true"><path d="m6 3 5 5-5 5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg>
+          </a>
+          <a class="button-secondary" href="https://github.com/HYP3R00T/voicepad">
+            View source
+            <svg viewBox="0 0 16 16" class="size-4" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M8 .8a7.4 7.4 0 0 0-2.34 14.42c.37.07.5-.16.5-.36v-1.43c-2.07.45-2.5-.88-2.5-.88-.34-.86-.83-1.09-.83-1.09-.67-.46.05-.45.05-.45.75.05 1.14.77 1.14.77.66 1.14 1.74.81 2.16.62.07-.48.26-.81.47-1-1.65-.18-3.39-.82-3.39-3.67 0-.81.29-1.47.77-1.99-.08-.19-.33-.94.07-1.96 0 0 .63-.2 2.04.76A7.1 7.1 0 0 1 8 4.49c.63 0 1.26.08 1.86.25 1.41-.96 2.03-.76 2.03-.76.41 1.02.15 1.77.08 1.96.48.52.76 1.18.76 1.99 0 2.85-1.74 3.48-3.4 3.66.27.23.5.68.5 1.38v1.89c0 .2.14.43.51.36A7.4 7.4 0 0 0 8 .8Z" clip-rule="evenodd" /></svg>
+          </a>
+        </div>
+        <div class="mt-8 flex flex-wrap gap-x-6 gap-y-2 text-sm text-slate-500">
+          <span class="hero-check">Linux x86_64</span>
+          <span class="hero-check">NVIDIA CUDA</span>
+          <span class="hero-check">No cloud account</span>
+        </div>
+      </div>
+
+      <div class="product-stage" aria-label="VoicePad interface preview">
+        <div class="notification-card">
+          <span class="notification-icon">
+            <svg viewBox="0 0 20 20" fill="none"><rect x="7" y="2.5" width="6" height="10" rx="3" stroke="currentColor" stroke-width="1.5" /><path d="M4.8 9.5a5.2 5.2 0 0 0 10.4 0M10 14.7v2.8M7.5 17.5h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></svg>
+          </span>
+          <span><strong>VoicePad is listening · 00:18</strong><small>Press the global shortcut to stop</small></span>
+        </div>
+        <div class="terminal-card">
+          <div class="terminal-topbar">
+            <div class="terminal-dots"><i></i><i></i><i></i></div>
+            <span>VoicePad</span>
+            <span class="terminal-ready">● ready</span>
+          </div>
+          <div class="terminal-model"><span>Parakeet v3</span><span>NVIDIA CUDA · FP16</span></div>
+          <div class="terminal-tabs"><span class="active">record</span><span>history</span><span>settings</span></div>
+          <div class="terminal-body">
+            <span class="terminal-label">transcription</span>
+            <p>Dictation should feel immediate, private, and dependable. Your audio stays here while the model turns every phrase into text.</p>
+            <div class="terminal-meta"><span>live · 2 chunks · through 31.4s</span><span>copy</span></div>
+          </div>
+          <div class="terminal-footer"><span><b>space</b> record / stop</span><span><b>c</b> copy</span><span><b>q</b> quit</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="border-y border-white/7 bg-white/[0.018]">
+    <div class="shell stats-grid">
+      <div><strong>141.8s</strong><span>sample recording</span></div>
+      <div><strong>~6.3s</strong><span>finite pipeline</span></div>
+      <div><strong>4 GB</strong><span>tested GPU class</span></div>
+      <div><strong>100%</strong><span>local processing</span></div>
+    </div>
+  </section>
+
+  <section class="shell section-space">
+    <div class="section-heading">
+      <div class="eyebrow"><span></span> Designed for dependable dictation</div>
+      <h2>Fast is useful.<br />Trustworthy is essential.</h2>
+      <p>VoicePad keeps capture, inference, and presentation separate so a slow model—or a failed job—never gets to decide whether your recording survives.</p>
+    </div>
+    <div class="feature-grid mt-14">
+      <article class="feature-card feature-card-accent">
+        <span class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M12 3 5 6v5c0 4.6 2.8 8.4 7 10 4.2-1.6 7-5.4 7-10V6l-7-3Z" stroke="currentColor" stroke-width="1.5"/><path d="m9 12 2 2 4-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </span>
+        <span class="feature-number">01</span>
+        <h3>Private by architecture</h3>
+        <p>Microphone audio, model artifacts, and transcripts remain on your machine. No account, API key, or remote inference endpoint.</p>
+      </article>
+      <article class="feature-card">
+        <span class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M5 4h11l3 3v13H5V4Z" stroke="currentColor" stroke-width="1.5"/><path d="M8 4v6h8V4M8 17h8" stroke="currentColor" stroke-width="1.5"/></svg>
+        </span>
+        <span class="feature-number">02</span>
+        <h3>Audio first, always</h3>
+        <p>Canonical WAV audio is written continuously. Existing recordings are never overwritten, modified, or deleted automatically.</p>
+      </article>
+      <article class="feature-card">
+        <span class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M4 7h16v11H4V7Z" stroke="currentColor" stroke-width="1.5"/><path d="M8 11h.01M12 11h.01M16 11h.01M8 14h8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </span>
+        <span class="feature-number">03</span>
+        <h3>One shortcut away</h3>
+        <p>Let your Wayland compositor own the global key. VoicePad receives a secure local toggle and reports state through native notifications.</p>
+      </article>
+    </div>
+  </section>
+
+  <section class="pipeline-section">
+    <div class="shell section-space grid gap-16 lg:grid-cols-[.8fr_1.2fr] lg:items-center">
+      <div class="section-heading">
+        <div class="eyebrow"><span></span> Resident pipeline</div>
+        <h2>Ready before you are.</h2>
+        <p>Parakeet loads and warms once, then stays resident while the TUI is open. CPU-side VAD finds natural boundaries; CUDA handles transcription.</p>
+        <a class="text-link mt-7" href={`${base}/docs/designs/transcription-pipeline`}>Explore the architecture <span>→</span></a>
+      </div>
+      <div class="pipeline-card">
+        <div class="pipeline-row"><span class="pipeline-dot recording"></span><div><small>01 · capture</small><strong>Persist canonical WAV</strong><p>Disk-backed from the first sample.</p></div><span class="pipeline-status">continuous</span></div>
+        <div class="pipeline-connector"></div>
+        <div class="pipeline-row"><span class="pipeline-dot planning"></span><div><small>02 · plan</small><strong>Find semantic pauses</strong><p>Silero VAD on lightweight CPU frames.</p></div><span class="pipeline-status">bounded</span></div>
+        <div class="pipeline-connector"></div>
+        <div class="pipeline-row"><span class="pipeline-dot inference"></span><div><small>03 · infer</small><strong>Transcribe on CUDA</strong><p>Official Parakeet FP16 safetensors.</p></div><span class="pipeline-status">resident</span></div>
+        <div class="pipeline-connector"></div>
+        <div class="pipeline-row"><span class="pipeline-dot complete"></span><div><small>04 · assemble</small><strong>Publish authoritative text</strong><p>Conservative overlap reconciliation.</p></div><span class="pipeline-status">complete</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="shell section-space">
+    <div class="requirements-card">
+      <div>
+        <div class="eyebrow"><span></span> Current production target</div>
+        <h2>Built for Linux.<br />Measured on NVIDIA.</h2>
+        <p>VoicePad currently prioritizes one reliable deployment over a matrix of silent fallbacks. Unsupported hardware fails clearly before recording starts.</p>
+      </div>
+      <div class="requirements-list">
+        <div><span>Operating system</span><strong>Linux x86_64</strong></div>
+        <div><span>GPU</span><strong>NVIDIA CUDA · 4 GB class+</strong></div>
+        <div><span>Runtime</span><strong>Python 3.13 · PyTorch FP16</strong></div>
+        <div><span>Model</span><strong>Parakeet TDT 0.6B v3</strong></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="shell pb-24 pt-4 lg:pb-32">
+    <div class="cta-card">
+      <div class="cta-glow" aria-hidden="true"></div>
+      <div class="relative">
+        <span class="eyebrow justify-center"><span></span> Alpha, open for review</span>
+        <h2>Make your next thought local.</h2>
+        <p>Prepare the verified deployment, keep VoicePad resident, and dictate from anywhere on your desktop.</p>
+        <div class="mt-8 flex flex-wrap justify-center gap-3">
+          <a class="button-primary" href={`${base}/docs/getting-started`}>Read the guide <span>→</span></a>
+          <a class="button-secondary" href={`${base}/docs`}>Browse documentation</a>
+        </div>
+      </div>
+    </div>
+  </section>
+</BaseLayout>
