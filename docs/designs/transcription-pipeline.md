@@ -702,6 +702,12 @@ class TranscriptionIntent:
     vocabulary: tuple[str, ...] = ()
 ```
 
+Initial supported post-assembly behavior includes deterministic terminal
+punctuation: when a complete result ends in an alphanumeric character, VoicePad
+appends a period and records that correction in result metadata. Existing
+terminal punctuation is preserved; incomplete results are not presented as
+complete merely by adding punctuation.
+
 Initial supported proper-noun behavior is deterministic alias correction after
 timestamp assembly. Configuration associates a canonical spelling only with
 explicit alternatives approved by the user. Replacement is word/phrase aware,

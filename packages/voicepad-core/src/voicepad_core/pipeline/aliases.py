@@ -30,6 +30,22 @@ class AliasCorrectionResult:
         return " ".join(word.text for word in self.words).strip()
 
 
+def ensure_terminal_punctuation(words: tuple[ObservedWord, ...]) -> AliasCorrectionResult:
+    if not words or not words[-1].text.rstrip() or not words[-1].text.rstrip()[-1].isalnum():
+        return AliasCorrectionResult(words, ())
+    last = words[-1]
+    punctuated = ObservedWord(
+        f"{last.text}.",
+        last.start_sample,
+        last.end_sample,
+        last.chunk_index,
+        last.physical_start_sample,
+        last.physical_end_sample,
+    )
+    correction = AppliedCorrection(".", last.text, last.start_sample, last.end_sample)
+    return AliasCorrectionResult((*words[:-1], punctuated), (correction,))
+
+
 def apply_aliases(words: tuple[ObservedWord, ...], rules: tuple[AliasRule, ...]) -> AliasCorrectionResult:
     alternatives = sorted(
         ((tuple(_normalized_phrase(alias).split()), rule.canonical) for rule in rules for alias in rule.aliases),

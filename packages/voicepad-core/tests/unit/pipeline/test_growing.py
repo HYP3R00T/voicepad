@@ -59,7 +59,7 @@ def test_growing_job_waits_for_persistence_finalization(tmp_path: Path) -> None:
     assert artifact.path.exists()
     assert result.complete is True
     assert result.duration_seconds == 2.0
-    assert result.text == "growing"
+    assert result.text == "growing."
     assert engine.calls == 1
 
 
