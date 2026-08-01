@@ -46,7 +46,10 @@ def start_recording(
             microphone, job = runtime.start_recording()
 
         typer.secho("Recording…", fg=typer.colors.RED, bold=True)
-        _wait_for_stop(duration)
+        try:
+            _wait_for_stop(duration)
+        except KeyboardInterrupt:
+            typer.echo("\nStop requested; finalizing audio…")
         if no_transcribe:
             assert microphone is not None
             artifact = microphone.stop()
@@ -71,6 +74,10 @@ def start_recording(
         if microphone is not None and microphone.is_recording:
             with contextlib.suppress(Exception):
                 microphone.stop()
+        if job is not None:
+            job.cancel()
+            with contextlib.suppress(Exception):
+                job.finish(timeout=30)
         typer.secho(f"VoicePad failed: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from error
     finally:
