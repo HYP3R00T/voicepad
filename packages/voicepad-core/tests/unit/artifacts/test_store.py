@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 from voicepad_core.artifacts import ArtifactIntegrityError, ArtifactStore
-from voicepad_core.deployments import ArtifactFile, ArtifactManifest, HuggingFaceSource
+from voicepad_core.deployments import ArtifactFile, ArtifactManifest, ArtifactSource, HuggingFaceSource
 
 CONTENT = b"official immutable artifact"
 
@@ -17,12 +17,13 @@ class FakeAcquirer:
 
     def acquire(
         self,
-        source: HuggingFaceSource,
+        source: ArtifactSource,
         artifact: ArtifactFile,
         destination: Path,
         operation_dir: Path,
     ) -> None:
         self.calls += 1
+        assert isinstance(source, HuggingFaceSource)
         assert source.revision == "a" * 40
         assert operation_dir.parent.name == "cache"
         destination.write_bytes(self.content)

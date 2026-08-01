@@ -5,9 +5,12 @@ from .store import (
     ArtifactIntegrityError,
     ArtifactNotPreparedError,
     ArtifactStore,
+    CuratedAcquirer,
+    HttpAcquirer,
     HuggingFaceAcquirer,
     ProgressCallback,
 )
+from .wheel import WheelExtractor
 
 __all__ = [
     "ArtifactAcquirer",
@@ -16,6 +19,9 @@ __all__ = [
     "ArtifactIntegrityError",
     "ArtifactNotPreparedError",
     "ArtifactStore",
+    "CuratedAcquirer",
+    "HttpAcquirer",
     "HuggingFaceAcquirer",
     "ProgressCallback",
+    "WheelExtractor",
 ]

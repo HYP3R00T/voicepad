@@ -11,7 +11,12 @@ import numpy as np
 import torch
 from transformers import AutoModelForTDT, AutoProcessor, StoppingCriteria, StoppingCriteriaList
 
-from voicepad_core.deployments import ArtifactManifest, DeclaredCapabilities, DeploymentDefinition
+from voicepad_core.deployments import (
+    ArtifactManifest,
+    DeclaredCapabilities,
+    DeploymentDefinition,
+    HuggingFaceSource,
+)
 from voicepad_core.preprocessing import PreprocessedAudio
 
 from .cuda import CudaDevice
@@ -62,6 +67,8 @@ class TransformersParakeetTDTSession:
         self._lock = Lock()
         self._processor: Any | None = None
         self._model: Any | None = None
+        if not isinstance(manifest.source, HuggingFaceSource):
+            raise InferenceError("Parakeet requires a pinned Hugging Face artifact source.")
         self._active = ActiveDeployment(
             definition=definition,
             snapshot_revision=manifest.source.revision,

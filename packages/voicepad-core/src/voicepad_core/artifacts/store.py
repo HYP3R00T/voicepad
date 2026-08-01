@@ -5,12 +5,13 @@ import json
 import os
 import shutil
 import tempfile
+import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 from threading import RLock
 from typing import Protocol
 
-from voicepad_core.deployments import ArtifactFile, ArtifactManifest, HuggingFaceSource
+from voicepad_core.deployments import ArtifactFile, ArtifactManifest, ArtifactSource, HttpSource, HuggingFaceSource
 
 ProgressCallback = Callable[[int, int], None]
 PROVENANCE_FILE = "voicepad-artifact.json"
@@ -33,10 +34,14 @@ class ArtifactAcquisitionError(ArtifactError):
     """Raised when an immutable source cannot be acquired."""
 
 
+class BinaryReader(Protocol):
+    def read(self, size: int = -1, /) -> bytes: ...
+
+
 class ArtifactAcquirer(Protocol):
     def acquire(
         self,
-        source: HuggingFaceSource,
+        source: ArtifactSource,
         artifact: ArtifactFile,
         destination: Path,
         operation_dir: Path,
@@ -48,11 +53,13 @@ class HuggingFaceAcquirer:
 
     def acquire(
         self,
-        source: HuggingFaceSource,
+        source: ArtifactSource,
         artifact: ArtifactFile,
         destination: Path,
         operation_dir: Path,
     ) -> None:
+        if not isinstance(source, HuggingFaceSource):
+            raise ArtifactAcquisitionError("Hugging Face acquirer received a non-Hugging-Face source.")
         try:
             from huggingface_hub import hf_hub_download
 
@@ -74,13 +81,57 @@ class HuggingFaceAcquirer:
             ) from error
 
 
+class HttpAcquirer:
+    """Download one immutable HTTPS artifact with an exact byte bound."""
+
+    def acquire(
+        self,
+        source: ArtifactSource,
+        artifact: ArtifactFile,
+        destination: Path,
+        operation_dir: Path,
+    ) -> None:
+        del operation_dir
+        if not isinstance(source, HttpSource):
+            raise ArtifactAcquisitionError("HTTP acquirer received a non-HTTP source.")
+        request = urllib.request.Request(source.url, headers={"User-Agent": "VoicePad artifact preparation"})
+        try:
+            with urllib.request.urlopen(request) as response:  # noqa: S310 - curated HTTPS URL
+                content_length = response.headers.get("Content-Length")
+                if content_length is not None and int(content_length) != artifact.size:
+                    raise ArtifactIntegrityError(f"HTTP artifact size does not match: {artifact.path}")
+                _write_stream_bounded(response, destination, artifact.size)
+        except ArtifactError:
+            raise
+        except Exception as error:
+            raise ArtifactAcquisitionError(f"Could not acquire {source.url}: {error}") from error
+
+
+class CuratedAcquirer:
+    def __init__(self) -> None:
+        self._hugging_face = HuggingFaceAcquirer()
+        self._http = HttpAcquirer()
+
+    def acquire(
+        self,
+        source: ArtifactSource,
+        artifact: ArtifactFile,
+        destination: Path,
+        operation_dir: Path,
+    ) -> None:
+        if isinstance(source, HuggingFaceSource):
+            self._hugging_face.acquire(source, artifact, destination, operation_dir)
+            return
+        self._http.acquire(source, artifact, destination, operation_dir)
+
+
 class ArtifactStore:
     """Prepare and verify curated snapshots without consulting legacy caches."""
 
     def __init__(self, root: Path, acquirer: ArtifactAcquirer | None = None) -> None:
         self.root = root.expanduser().resolve()
         self._snapshots = self.root / "snapshots"
-        self._acquirer = acquirer or HuggingFaceAcquirer()
+        self._acquirer = acquirer or CuratedAcquirer()
         self._lock = RLock()
 
     def snapshot_path(self, manifest: ArtifactManifest) -> Path:
@@ -153,13 +204,20 @@ class ArtifactStore:
 
 
 def _copy_bounded(source: Path, destination: Path, maximum_size: int) -> None:
+    with source.open("rb") as input_file:
+        _write_stream_bounded(input_file, destination, maximum_size)
+
+
+def _write_stream_bounded(input_file: BinaryReader, destination: Path, maximum_size: int) -> None:
     copied = 0
-    with source.open("rb") as input_file, destination.open("xb") as output_file:
+    with destination.open("xb") as output_file:
         while chunk := input_file.read(COPY_BUFFER_SIZE):
             copied += len(chunk)
             if copied > maximum_size:
                 raise ArtifactIntegrityError(f"Artifact exceeds declared size: {destination.name}")
             output_file.write(chunk)
+        if copied != maximum_size:
+            raise ArtifactIntegrityError(f"Artifact size does not match: {destination.name}")
         output_file.flush()
         os.fsync(output_file.fileno())
 
@@ -179,14 +237,18 @@ def _verify_file(path: Path, artifact: ArtifactFile) -> None:
 
 
 def _provenance(manifest: ArtifactManifest) -> dict[str, object]:
-    return {
-        "schema": 1,
-        "manifest_id": manifest.id,
-        "source": {
+    if isinstance(manifest.source, HuggingFaceSource):
+        source: dict[str, object] = {
             "kind": "huggingface",
             "repository": manifest.source.repository,
             "revision": manifest.source.revision,
-        },
+        }
+    else:
+        source = {"kind": "https", "url": manifest.source.url}
+    return {
+        "schema": 1,
+        "manifest_id": manifest.id,
+        "source": source,
         "license": manifest.license,
         "files": [
             {"path": artifact.path, "size": artifact.size, "sha256": artifact.sha256} for artifact in manifest.files

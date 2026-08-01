@@ -5,11 +5,13 @@ from .types import (
     ArtifactManifest,
     DeclaredCapabilities,
     DeploymentDefinition,
+    HttpSource,
     HuggingFaceSource,
     Precision,
     ProcessingProfile,
     ResourceProfile,
     TimestampGranularity,
+    WheelExtraction,
 )
 
 PARAKEET_V3_MANIFEST = ArtifactManifest(
@@ -51,6 +53,32 @@ PARAKEET_V3_MANIFEST = ArtifactManifest(
             "0b2fe0037599ee335f0b972fa682bf0ece74e4ccfec755cb7daa3405d3d3e874",
         ),
     ),
+)
+
+SILERO_VAD_WHEEL_MANIFEST = ArtifactManifest(
+    id="official-silero-vad-6.2.1-wheel",
+    source=HttpSource(
+        "https://files.pythonhosted.org/packages/0b/2b/48566f29a8b53d856ceb1994f209122749b3fda0a733a07e82047257de7a/"
+        "silero_vad-6.2.1-py3-none-any.whl"
+    ),
+    license="MIT",
+    files=(
+        ArtifactFile(
+            "silero_vad-6.2.1-py3-none-any.whl",
+            9_146_242,
+            "09de93c4d874bb19c53e62a47dd38be5f163cedad2b5599583231f2a84ef79cb",
+        ),
+    ),
+)
+
+SILERO_VAD_ONNX_EXTRACTION = WheelExtraction(
+    id="official-silero-vad-6.2.1-onnx",
+    wheel_manifest_id=SILERO_VAD_WHEEL_MANIFEST.id,
+    entry_path="silero_vad/data/silero_vad.onnx",
+    output_name="silero_vad.onnx",
+    size=2_327_524,
+    compressed_size=1_946_042,
+    sha256="1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3",
 )
 
 PARAKEET_V3_CUDA = DeploymentDefinition(
@@ -105,7 +133,10 @@ PARAKEET_V3_CUDA = DeploymentDefinition(
     recommended=True,
 )
 
-MANIFESTS = {PARAKEET_V3_MANIFEST.id: PARAKEET_V3_MANIFEST}
+MANIFESTS = {
+    PARAKEET_V3_MANIFEST.id: PARAKEET_V3_MANIFEST,
+    SILERO_VAD_WHEEL_MANIFEST.id: SILERO_VAD_WHEEL_MANIFEST,
+}
 DEPLOYMENTS = {PARAKEET_V3_CUDA.id: PARAKEET_V3_CUDA}
 
 

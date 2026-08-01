@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import PurePosixPath
+from urllib.parse import urlparse
 
 
 class Precision(StrEnum):
@@ -50,9 +51,22 @@ class HuggingFaceSource:
 
 
 @dataclass(frozen=True, slots=True)
+class HttpSource:
+    url: str
+
+    def __post_init__(self) -> None:
+        parsed = urlparse(self.url)
+        if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
+            raise ValueError("artifact URL must be an unauthenticated absolute HTTPS URL")
+
+
+ArtifactSource = HuggingFaceSource | HttpSource
+
+
+@dataclass(frozen=True, slots=True)
 class ArtifactManifest:
     id: str
-    source: HuggingFaceSource
+    source: ArtifactSource
     license: str
     files: tuple[ArtifactFile, ...]
 
@@ -68,6 +82,25 @@ class ArtifactManifest:
     @property
     def total_size(self) -> int:
         return sum(file.size for file in self.files)
+
+
+@dataclass(frozen=True, slots=True)
+class WheelExtraction:
+    id: str
+    wheel_manifest_id: str
+    entry_path: str
+    output_name: str
+    size: int
+    compressed_size: int
+    sha256: str
+
+    def __post_init__(self) -> None:
+        ArtifactFile(self.entry_path, self.size, self.sha256)
+        output = PurePosixPath(self.output_name)
+        if output.is_absolute() or len(output.parts) != 1 or str(output) != self.output_name:
+            raise ValueError("extracted artifact output must be one normalized filename")
+        if self.compressed_size <= 0:
+            raise ValueError("compressed artifact size must be positive")
 
 
 @dataclass(frozen=True, slots=True)

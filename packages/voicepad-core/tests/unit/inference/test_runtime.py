@@ -3,7 +3,12 @@ from pathlib import Path
 import numpy as np
 import pytest
 from voicepad_core.artifacts import ProgressCallback
-from voicepad_core.deployments import PARAKEET_V3_CUDA, PARAKEET_V3_MANIFEST, ArtifactManifest
+from voicepad_core.deployments import (
+    PARAKEET_V3_CUDA,
+    PARAKEET_V3_MANIFEST,
+    ArtifactManifest,
+    HuggingFaceSource,
+)
 from voicepad_core.inference import (
     ActiveDeployment,
     BackendResult,
@@ -34,9 +39,11 @@ class FakeStore:
 
 class FakeSession:
     def __init__(self, *, failure: Exception | None = None) -> None:
+        source = PARAKEET_V3_MANIFEST.source
+        assert isinstance(source, HuggingFaceSource)
         self.deployment = ActiveDeployment(
             PARAKEET_V3_CUDA,
-            PARAKEET_V3_MANIFEST.source.revision,
+            source.revision,
             "GPU-test",
             "NVIDIA Test GPU",
             4_000_000_000,
