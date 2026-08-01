@@ -14,6 +14,8 @@ import logging
 import threading
 from typing import TYPE_CHECKING, Any, Literal, cast
 
+from voicepad.tui.monitors import active_monitors, bottom_center_position, select_monitor
+
 if TYPE_CHECKING:
     import tkinter as tk
 
@@ -215,13 +217,18 @@ class StatusOverlay:
             return
         try:
             self._root.update_idletasks()
-            sw = self._root.winfo_screenwidth()
-            sh = self._root.winfo_screenheight()
-            w = self._root.winfo_reqwidth()
-            h = self._root.winfo_reqheight()
-            x = (sw - w) // 2
-            y = sh - h - 60  # 60px from bottom
-            self._root.geometry(f"{w}x{h}+{x}+{y}")
+            width = self._root.winfo_reqwidth()
+            height = self._root.winfo_reqheight()
+            pointer = self._root.winfo_pointerxy()
+            monitor = select_monitor(active_monitors(), pointer)
+            if monitor is None:
+                screen_width = self._root.winfo_screenwidth()
+                screen_height = self._root.winfo_screenheight()
+                x = (screen_width - width) // 2
+                y = screen_height - height - 60
+            else:
+                x, y = bottom_center_position(monitor, (width, height))
+            self._root.geometry(f"{width}x{height}{x:+d}{y:+d}")
         except Exception:
             pass
 
