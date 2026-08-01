@@ -20,7 +20,7 @@ def toggle_command() -> str:
     executable = shutil.which("voicepad")
     if executable is None:
         executable = str(Path(sys.executable).with_name("voicepad"))
-    return f"{Path(executable).resolve()} toggle"
+    return f"{Path(executable).absolute()} toggle"
 
 
 def desktop_shortcut_status() -> DesktopShortcutStatus:

@@ -4,7 +4,14 @@ from pathlib import Path
 from unittest.mock import patch
 
 from pytest import MonkeyPatch
-from voicepad.tui.shortcut import desktop_shortcut_status
+from voicepad.tui.shortcut import desktop_shortcut_status, toggle_command
+
+
+def test_toggle_command_preserves_uv_public_executable_path() -> None:
+    with patch("voicepad.tui.shortcut.shutil.which", return_value="/home/user/.local/bin/voicepad"):
+        command = toggle_command()
+
+    assert command == "/home/user/.local/bin/voicepad toggle"
 
 
 def test_cosmic_shortcut_status_detects_toggle_command(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
