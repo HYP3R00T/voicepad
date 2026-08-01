@@ -1,6 +1,19 @@
 # User interface
 
-The TUI intentionally exposes one production path.
+The TUI keeps one production transcription path while restoring the polished
+three-tab workflow.
+
+## Tabs
+
+- **Record** shows live elapsed recording time, the authoritative transcript,
+  processing metadata, and copy control.
+- **History** lists schema-1 Markdown results and displays the selected record.
+- **Settings** controls recording, Markdown, and artifact-cache paths; filename
+  prefix; theme; automatic copy; terminal punctuation; and explicit proper-noun
+  aliases. Saving reloads the verified resident deployment when necessary.
+
+The theme selector includes the built-in Textual palettes, with `tokyo-night` as
+the default.
 
 ## States
 
@@ -19,11 +32,13 @@ The TUI intentionally exposes one production path.
 |---|---|
 | **Space** | Start or stop recording |
 | **C** | Copy the last complete transcription |
+| **S** | Save settings from the Settings tab |
 | **Q** | Quit safely |
 
 The local `voicepad toggle` command sends the same start/stop action to a running
 TUI over a user-only Unix socket. Desktop environments may bind that command to
 a global shortcut.
 
+While recording, the header displays elapsed time in seconds and then minutes.
 Incomplete text is displayed and persisted with metadata, but is not copied
 automatically. The WAV remains the durable source for later retranscription.

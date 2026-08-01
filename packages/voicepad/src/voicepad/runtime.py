@@ -42,6 +42,7 @@ class ApplicationRuntime:
             self.engine,
             model,
             aliases=self.config.alias_rules,
+            terminal_punctuation=self.config.terminal_punctuation,
         ).transcribe_file(path)
 
     def start_recording(self) -> tuple[MicrophoneStream, GrowingTranscriptionJob]:
@@ -57,6 +58,7 @@ class ApplicationRuntime:
                 model,
                 microphone.growing_source,
                 aliases=self.config.alias_rules,
+                terminal_punctuation=self.config.terminal_punctuation,
             )
             job.start()
         except Exception:

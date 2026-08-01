@@ -10,6 +10,8 @@ from typing import cast
 from voicepad_core.deployments import PARAKEET_V3_CUDA
 from voicepad_core.pipeline import AliasRule
 
+from voicepad.tui.theme import DEFAULT_THEME, THEMES
+
 CONFIG_SCHEMA = 1
 
 
@@ -35,6 +37,8 @@ class AppConfig:
     recording_prefix: str = "recording"
     input_device_index: int | None = None
     copy_complete_text: bool = True
+    terminal_punctuation: bool = True
+    theme: str = DEFAULT_THEME
     proper_nouns: tuple[AliasConfiguration, ...] = ()
 
     def __post_init__(self) -> None:
@@ -42,6 +46,8 @@ class AppConfig:
             raise ConfigurationError(f"Unsupported deployment_id: {self.deployment_id}")
         if not self.recording_prefix or any(separator in self.recording_prefix for separator in ("/", "\\")):
             raise ConfigurationError("recording_prefix must be a nonempty filename prefix")
+        if self.theme not in THEMES:
+            raise ConfigurationError(f"Unsupported Textual theme: {self.theme}")
 
     @property
     def alias_rules(self) -> tuple[AliasRule, ...]:
@@ -72,6 +78,8 @@ def load_config(path: Path | None = None) -> AppConfig:
         "recording_prefix",
         "input_device_index",
         "copy_complete_text",
+        "terminal_punctuation",
+        "theme",
         "proper_nouns",
     }
     unknown = set(raw) - expected
@@ -93,6 +101,12 @@ def load_config(path: Path | None = None) -> AppConfig:
         copy_complete = raw["copy_complete_text"]
         if not isinstance(copy_complete, bool):
             raise TypeError("copy_complete_text must be a boolean")
+        terminal_punctuation = raw.get("terminal_punctuation", True)
+        if not isinstance(terminal_punctuation, bool):
+            raise TypeError("terminal_punctuation must be a boolean")
+        theme = raw.get("theme", DEFAULT_THEME)
+        if not isinstance(theme, str):
+            raise TypeError("theme must be a string")
         return AppConfig(
             deployment_id=_required_string(raw, "deployment_id"),
             recordings_path=Path(_required_string(raw, "recordings_path")).expanduser(),
@@ -101,6 +115,8 @@ def load_config(path: Path | None = None) -> AppConfig:
             recording_prefix=_required_string(raw, "recording_prefix"),
             input_device_index=input_device,
             copy_complete_text=copy_complete,
+            terminal_punctuation=terminal_punctuation,
+            theme=theme,
             proper_nouns=aliases,
         )
     except (KeyError, TypeError, ValueError) as error:
