@@ -1,558 +1,165 @@
-"""VoicePad Textual TUI application."""
-
 from __future__ import annotations
 
-import atexit
 import contextlib
-import logging
-import signal
-import sys
-import time
-from importlib.metadata import version as _pkg_version
 from pathlib import Path
-from typing import Any
 
 from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.reactive import reactive
-from textual.widgets import (
-    Button,
-    Checkbox,
-    Label,
-    Markdown,
-    OptionList,
-    Select,
-    TabbedContent,
-)
-from voicepad_core import (
-    ChunkResult,
-    RawAudio,
-    StreamingTranscriber,
-    WavArtifact,
-    begin_transcription_session,
-    configure_global_logging,
-    end_transcription_session,
-    get_config,
-    log_transcription_end,
-    log_transcription_start,
-)
-from voicepad_core.config import Config
+from textual.widgets import Button, Footer, Header, Static
+from voicepad_core.audio import MicrophoneStream
+from voicepad_core.pipeline import FileTranscriptionResult, GrowingTranscriptionJob
 
-from voicepad.tui.components import VoiceButton
-from voicepad.tui.config import TUIConfig, load_tui_config, save_tui_config
+from voicepad.config import AppConfig, load_config
+from voicepad.output import persist_markdown
+from voicepad.runtime import ApplicationRuntime
 from voicepad.tui.control import ControlServer
-from voicepad.tui.managers import (
-    LayoutBuilder,
-    LifecycleManager,
-    ModelManager,
-    TabManager,
-    TimerManager,
-)
-from voicepad.tui.modals import InfoModal
-from voicepad.tui.models import SessionEntry
-from voicepad.tui.utils.markdown import format_markdown as _format_markdown  # noqa: F401 (re-exported for tests)
-from voicepad.tui.workers import ModelWarmResult, RecordingSession
-
-logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Version — read dynamically from package metadata
-# ---------------------------------------------------------------------------
-
-try:
-    _APP_VERSION = f"v{_pkg_version('voicepad')}"
-except Exception:
-    _APP_VERSION = "dev"
-
-# ---------------------------------------------------------------------------
-# Graceful shutdown handling
-# ---------------------------------------------------------------------------
-
-_app_instance: VoicePadApp | None = None
-
-
-def _cleanup_on_exit() -> None:
-    """Clean up resources on program exit."""
-    if _app_instance is not None:
-        logger.info("Cleaning up resources on exit...")
-        # Flush all logging handlers
-        for handler in logging.root.handlers:
-            handler.flush()
-
-
-def _signal_handler(signum: int, frame: Any) -> None:
-    """Handle interrupt signals (Ctrl+C, SIGTERM).
-
-    Args:
-        signum: Signal number
-        frame: Current stack frame
-    """
-    logger.info(f"Received signal {signum}, initiating graceful shutdown...")
-    _cleanup_on_exit()
-    sys.exit(0)
-
-
-# Register cleanup handlers
-atexit.register(_cleanup_on_exit)
-signal.signal(signal.SIGINT, _signal_handler)
-signal.signal(signal.SIGTERM, _signal_handler)
-
-# ---------------------------------------------------------------------------
-# App
-# ---------------------------------------------------------------------------
+from voicepad.tui.utils.clipboard import copy_to_clipboard
 
 
 class VoicePadApp(App[None]):
-    """VoicePad — local dictation with Whisper."""
+    """Small resident-model dictation interface."""
 
     TITLE = "VoicePad"
     CSS_PATH = "app.tcss"
-
     BINDINGS = [
-        # Global
-        Binding("q", "quit", "Quit", show=True),
-        Binding("i", "show_info", "Info", show=True, key_display="i"),
-        # Record tab
-        Binding("space", "toggle_recording", "Record / Stop", show=True),
-        Binding("c", "copy_transcription", "Copy", show=True),
-        # History tab
-        Binding("t", "retranscribe_entry", "Retranscribe", show=True),
-        Binding("d", "delete_entry", "Delete", show=True),
-        Binding("v", "open_recording", "Open recording", show=True),
-        Binding("m", "open_markdown", "Open markdown", show=True),
-        Binding("o", "toggle_sort_order", "Sort", show=True),
-        # Settings tab
-        Binding("s", "save_settings", "Save", show=True),
-        Binding("p", "open_config_dir", "Open config dir", show=True),
-        # Hidden utility
-        Binding("r", "reload_model", "Reload model", show=False),
+        Binding("space", "toggle_recording", "Record / stop"),
+        Binding("c", "copy", "Copy"),
+        Binding("q", "quit", "Quit"),
     ]
 
-    _model_ready: reactive[bool] = reactive(False)
-    _recording: reactive[bool] = reactive(False)
-    _transcribing: reactive[bool] = reactive(False)
-    _sort_ascending: reactive[bool] = reactive(True)
-
-    def __init__(self, config: Config) -> None:
+    def __init__(self, config: AppConfig | None = None, runtime: ApplicationRuntime | None = None) -> None:
         super().__init__()
-        global _app_instance
-        _app_instance = self
-
-        self.config = config
-        self.tui_config: TUIConfig = load_tui_config()
-        self._session: RecordingSession | None = None
-        self._streamer: StreamingTranscriber | None = None
-        self._stream_chunks: list[ChunkResult] = []
-        self._entries: list[SessionEntry] = []
-        self._record_start: float = 0.0
-        self._timer_thread: Any = None
-        self._warm_result: ModelWarmResult | None = None
-        self._current_text: str = ""
-        self._selected_entry_idx: int | None = None
-        self._hotkey_listener: Any = None  # GlobalHotkeyListener
-        self._hotkey_pending_copy: bool = False
-        self._overlay: Any = None  # StatusOverlay
-
-        # Initialize managers
-        self._layout_builder = LayoutBuilder(self, _APP_VERSION)
-        self._lifecycle_manager = LifecycleManager(self)
-        self._model_manager = ModelManager(self)
-        self._timer_manager = TimerManager(self)
-        self._tab_manager = TabManager(self)
-
-        # Initialize handlers
-        from voicepad.tui.handlers.history_handler import HistoryHandler
-        from voicepad.tui.handlers.hotkey_handler import HotkeyHandler
-        from voicepad.tui.handlers.recording_handler import RecordingHandler
-        from voicepad.tui.handlers.settings_handler import SettingsHandler
-
-        self._settings_handler = SettingsHandler(self)
-        self._recording_handler = RecordingHandler(self)
-        self._history_handler = HistoryHandler(self)
-        self._hotkey_handler = HotkeyHandler(self)
-        self._control_server = ControlServer(on_toggle=self._hotkey_handler.hotkey_on_toggle)
-
-    # ------------------------------------------------------------------
-    # Layout
-    # ------------------------------------------------------------------
+        self.config = config or load_config()
+        self.runtime = runtime or ApplicationRuntime(self.config)
+        self._state = "loading"
+        self._microphone: MicrophoneStream | None = None
+        self._job: GrowingTranscriptionJob | None = None
+        self._last_result: FileTranscriptionResult | None = None
+        self._last_wav: Path | None = None
+        self._control = ControlServer(lambda: self.call_from_thread(self.action_toggle_recording))
 
     def compose(self) -> ComposeResult:
-        """Build the UI layout."""
-        yield from self._layout_builder.compose()
+        yield Header()
+        yield Static("Loading verified NVIDIA deployment…", id="status")
+        yield Static("Your transcription will appear here.", id="transcript")
+        yield Static("", id="metadata")
+        yield Button("Record", id="record", variant="primary", disabled=True)
+        yield Footer()
 
     def on_mount(self) -> None:
-        """Initialize the app after mounting."""
-        self._layout_builder.mount_widgets()
-        self._lifecycle_manager.on_mount()
+        self._control.start()
+        self._activate()
 
     def on_unmount(self) -> None:
-        """Clean up resources when the app exits."""
-        self._lifecycle_manager.on_unmount()
+        self._control.stop()
+        if self._microphone is not None and self._microphone.is_recording:
+            with contextlib.suppress(Exception):
+                self._microphone.stop()
+        if self._job is not None:
+            self._job.cancel()
+            with contextlib.suppress(Exception):
+                self._job.finish(timeout=30)
+        with contextlib.suppress(Exception):
+            self.runtime.close()
 
-    def watch_theme(self, theme: str) -> None:
-        """Auto-save theme to TUI config whenever it changes (palette or settings)."""
-        if self.tui_config.theme != theme:
-            new_tui = TUIConfig(theme=theme)
-            object.__setattr__(self, "tui_config", new_tui)
-            save_tui_config(new_tui)
+    @work(thread=True, exclusive=True, group="activation")
+    def _activate(self) -> None:
+        try:
+            active = self.runtime.activate()
+        except Exception as error:
+            self.call_from_thread(self._set_error, f"Activation failed: {error}")
+            return
+        self.call_from_thread(self._set_ready, active.device_name)
 
-    # ------------------------------------------------------------------
-    # Global hotkey listener
-    # ------------------------------------------------------------------
+    def _set_ready(self, device_name: str) -> None:
+        self._state = "ready"
+        self.query_one("#status", Static).update(f"Ready — {device_name}")
+        self.query_one("#record", Button).disabled = False
 
-    def _start_hotkey_listener(self) -> None:
-        """Start the system-wide hotkey listener and status overlay."""
-        self._hotkey_handler.start_hotkey_listener()
+    def _set_error(self, message: str) -> None:
+        self._state = "error"
+        self.query_one("#status", Static).update(message)
+        self.query_one("#record", Button).disabled = True
 
-    def _overlay_set(self, state: str) -> None:
-        """Update the floating overlay state if it exists."""
-        self._hotkey_handler.overlay_set(state)
-
-    # ------------------------------------------------------------------
-    # Settings tab
-    # ------------------------------------------------------------------
-
-    def _populate_settings(self) -> None:
-        """Build the settings form — only user-facing fields shown."""
-        self._settings_handler.populate_settings()
-
-    def _get_hotkey_from_picker(self) -> str:
-        """Return the Windows hotkey selected in the settings picker."""
-        return self._settings_handler.get_hotkey_from_picker()
-
-    def _refresh_settings_values(self) -> None:
-        """Update settings form widget values to match the current config in-place."""
-        self._settings_handler.refresh_settings_values()
-
-    def _refresh_config_path_label(self) -> None:
-        """Update the settings config path label to reflect current file state."""
-        self._settings_handler.refresh_config_path_label()
-
-    @on(Checkbox.Changed, ".hotkey-checkbox")
-    def on_hotkey_checkbox_changed(self) -> None:
-        self._settings_handler.on_hotkey_checkbox_changed()
-
-    @on(Select.Changed, "#hotkey-key-select")
-    def on_hotkey_key_changed(self) -> None:
-        self._settings_handler.on_hotkey_key_changed()
-
-    @on(Button.Pressed, "#settings-save-btn")
-    def on_settings_save(self) -> None:
-        """Read user-facing inputs, merge with existing config, write to voicepad.yaml."""
-        self._settings_handler.on_settings_save()
-
-    # ------------------------------------------------------------------
-    # Model warm-up
-    # ------------------------------------------------------------------
-
-    @work(thread=True, exclusive=True, name="model-warm")
-    def _warm_model_worker_impl(self) -> None:
-        """Warm up the transcription model in a background thread (implementation)."""
-        from voicepad.tui.workers import warm_model
-
-        result = warm_model(self.config)
-        self.call_from_thread(self._model_manager.on_model_ready, result)
-
-    def _warm_model_worker(self) -> None:
-        """Warm up the transcription model in a background thread."""
-        self._warm_model_worker_impl()
-
-    def _set_status(self, state: str, message: str) -> None:
-        """Update the status label with icon and message."""
-        self._model_manager.set_status(state, message)
-
-    # ------------------------------------------------------------------
-    # Tab-aware binding gating
-    # ------------------------------------------------------------------
-
-    def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
-        """Refresh footer bindings whenever the active tab changes."""
-        self._tab_manager.on_tab_activated(event)
-
-    def check_action(self, action: str, parameters: tuple) -> bool | None:
-        """Show/enable bindings only for the relevant tab and context."""
-        return self._tab_manager.check_action(action, parameters)
-
-    # ------------------------------------------------------------------
-    # Record / stop
-    # ------------------------------------------------------------------
+    @on(Button.Pressed, "#record")
+    def record_pressed(self) -> None:
+        self.action_toggle_recording()
 
     def action_toggle_recording(self) -> None:
-        self._recording_handler.action_toggle_recording()
+        if self._state == "ready":
+            self._state = "starting"
+            self.query_one("#status", Static).update("Starting recording…")
+            self._start_recording()
+        elif self._state == "recording":
+            self._state = "transcribing"
+            self.query_one("#status", Static).update("Finalizing WAV and transcription…")
+            self.query_one("#record", Button).disabled = True
+            self._stop_recording()
 
+    @work(thread=True, exclusive=True, group="recording-start")
     def _start_recording(self) -> None:
-        self._recording_handler.start_recording()
+        try:
+            microphone, job = self.runtime.start_recording()
+        except Exception as error:
+            self.call_from_thread(self._set_error, f"Recording failed: {error}")
+            return
+        self.call_from_thread(self._recording_started, microphone, job)
 
+    def _recording_started(self, microphone: MicrophoneStream, job: GrowingTranscriptionJob) -> None:
+        self._microphone = microphone
+        self._job = job
+        self._state = "recording"
+        self.query_one("#status", Static).update("Recording… press Space to stop")
+        self.query_one("#record", Button).label = "Stop"
+
+    @work(thread=True, exclusive=True, group="recording-stop")
     def _stop_recording(self) -> None:
-        self._recording_handler.stop_recording()
-
-    # ------------------------------------------------------------------
-    # Streaming transcription
-    # ------------------------------------------------------------------
-
-    @work(thread=True, name="finalize")
-    def _finalize_worker(self, audio: WavArtifact) -> None:
-        """Stop the streamer (transcribes tail) then save the full recording."""
-        self._recording_handler.finalize_worker(audio)
-
-    def _on_stream_chunk(self, chunk: ChunkResult) -> None:
-        """Called from the streaming thread for each transcribed chunk."""
-        self._recording_handler.on_stream_chunk(chunk)
-
-    # ------------------------------------------------------------------
-    # History
-    # ------------------------------------------------------------------
-
-    def _load_history_from_disk(self) -> None:
-        self._history_handler.load_history_from_disk()
-
-    def _add_history_entry(self, entry: SessionEntry) -> None:
-        self._history_handler.add_history_entry(entry)
-
-    @on(OptionList.OptionSelected, "#history-options")
-    def on_history_option_selected(self, event: OptionList.OptionSelected) -> None:
-        """Handle selection of a history entry."""
-        self._history_handler.on_history_option_selected(event)
-
-    @work(name="md-view")
-    async def _load_history_viewer(self, md_path: Path) -> None:
-        """Load and display markdown content in the history viewer."""
-        import contextlib
-
-        from textual.widgets import MarkdownViewer
-
-        viewer = self.query_one("#history-viewer", MarkdownViewer)
+        microphone = self._microphone
+        job = self._job
+        if microphone is None or job is None:
+            self.call_from_thread(self._set_error, "Recording state is incomplete.")
+            return
         try:
-            raw = md_path.read_text(encoding="utf-8")
-            lines = raw.splitlines()
+            artifact, result = self.runtime.stop_recording(microphone, job)
+            markdown = persist_markdown(artifact.path, result, self.config.markdown_path)
+            if result.complete and result.text and self.config.copy_complete_text:
+                copy_to_clipboard(result.text)
+        except Exception as error:
+            self.call_from_thread(self._set_error, f"Transcription failed: {error}")
+            return
+        self.call_from_thread(self._recording_finished, artifact.path, markdown, result)
 
-            # Parse YAML front matter into per-transcription metadata
-            fm_meta: dict[int, dict] = {}
-            wav_name = ""
-            body_lines: list[str] = lines
-
-            if lines and lines[0].strip() == "---":
-                fm_end = next((idx for idx, ln in enumerate(lines[1:], 1) if ln.strip() == "---"), None)
-                if fm_end is not None:
-                    current: dict | None = None
-                    for fl in lines[1:fm_end]:
-                        s = fl.strip()
-                        if s.startswith("file:"):
-                            wav_name = s.split(":", 1)[-1].strip()
-                        elif s.startswith("- n:"):
-                            with contextlib.suppress(Exception):
-                                current = {"n": int(s.split(":")[-1].strip())}
-                        elif current is not None and ":" in s:
-                            k, _, v = s.partition(":")
-                            current[k.strip()] = v.strip()
-                            fm_meta[current["n"]] = current
-                    body_lines = lines[fm_end + 1 :]
-
-            # Rebuild display content: inject metadata after each ## Transcription N heading
-            out: list[str] = []
-            if wav_name:
-                out += [f"**File:** `{wav_name}`", ""]
-
-            in_segments = False
-            for line in body_lines:
-                stripped = line.strip()
-
-                # Skip segments section entirely
-                if stripped.startswith("## Segments") or stripped.startswith("### Segments"):
-                    in_segments = True
-                    continue
-                elif stripped.startswith("## ") or stripped.startswith("### "):
-                    in_segments = False
-
-                if in_segments:
-                    continue
-
-                out.append(line)
-                if stripped.startswith("## Transcription "):
-                    with contextlib.suppress(Exception):
-                        n = int(stripped.split()[-1])
-                        meta = fm_meta.get(n, {})
-                        if meta:
-                            parts = []
-                            if "model" in meta:
-                                parts.append(f"**model:** {meta['model']}")
-                            if "language" in meta:
-                                parts.append(f"**language:** {meta['language']}")
-                            if "duration" in meta:
-                                parts.append(f"**duration:** {meta['duration']}")
-                            if "latency" in meta:
-                                parts.append(f"**latency:** {meta['latency']}")
-                            if "timestamp" in meta:
-                                parts.append(f"**timestamp:** {meta['timestamp']}")
-                            if parts:
-                                out.append("")
-                                out.append(" · ".join(parts))
-
-            await viewer.document.update("\n".join(out))
-        except Exception as e:
-            import logging
-
-            logger = logging.getLogger(__name__)
-            logger.error(f"Failed to parse markdown {md_path}: {e}")
-            # Fallback to direct file loading
-            await viewer.go(md_path.resolve())
-
-    @on(Markdown.LinkClicked)
-    def on_markdown_link_clicked(self, event: Markdown.LinkClicked) -> None:
-        """Handle link clicks in the markdown viewer by opening them in the system browser."""
-        self._history_handler.on_markdown_link_clicked(event)
-
-    # ------------------------------------------------------------------
-    # Retranscribe (history tab)
-    # ------------------------------------------------------------------
-
-    @work(thread=True, name="retranscribe")
-    def _retranscribe_file(self, wav_path: Path, md_path: Path | None) -> None:
-        """Retranscribe a WAV file and prepend the result to the markdown."""
-        import soundfile as sf
-        from voicepad_core import transcribe
-
-        self.call_from_thread(self._set_status, "transcribing", f"retranscribing {wav_path.name}…")
-        session_id = f"retranscribe_{wav_path.stem}_{time.strftime('%Y%m%d_%H%M%S')}"
-        session_logger, _log_file = begin_transcription_session(
-            logs_path=self.config.logs_path,
-            log_level=self.config.log_level,
-            session_id=session_id,
+    def _recording_finished(
+        self,
+        wav_path: Path,
+        markdown_path: Path,
+        result: FileTranscriptionResult,
+    ) -> None:
+        self._microphone = None
+        self._job = None
+        self._last_wav = wav_path
+        self._last_result = result
+        self.query_one("#transcript", Static).update(result.text or "No speech detected.")
+        self.query_one("#metadata", Static).update(
+            f"{result.duration_seconds:.1f}s · {len(result.chunks)} chunks · "
+            f"{'complete' if result.complete else 'incomplete'} · {markdown_path.name}"
         )
-        try:
-            samples, sample_rate = sf.read(str(wav_path), dtype="float32", always_2d=False)
-            audio = RawAudio(
-                samples,
-                sample_rate=sample_rate,
-                channels=1 if samples.ndim == 1 else samples.shape[1],
-            )
+        self.query_one("#record", Button).label = "Record"
+        self.query_one("#record", Button).disabled = False
+        if result.complete:
+            self._set_ready(result.deployment.device_name)
+        else:
+            self._state = "ready"
+            self.query_one("#status", Static).update("Incomplete result saved; audio is preserved.")
 
-            log_transcription_start(
-                session_logger,
-                audio.duration(),
-                self.config.transcription_model,
-                self.config.transcription_device,
-                self.config.transcription_compute_type,
-            )
-            result = transcribe(
-                audio,
-                model_name=self.config.transcription_model,
-                device=self.config.transcription_device,
-                compute_type=self.config.transcription_compute_type,
-                language=self.config.language,
-                word_timestamps=False,
-                config=self.config,
-            )
-            log_transcription_end(
-                session_logger,
-                success=True,
-                latency_ms=result.latency_ms,
-                text_length=len(result.text or ""),
-            )
-            error: str | None = None
-        except Exception as e:
-            log_transcription_end(session_logger, success=False, error=str(e))
-            result = None
-            error = str(e)
-        finally:
-            end_transcription_session()
-
-        self.call_from_thread(self._history_handler.on_retranscribe_done, wav_path, md_path, result, error)
-
-    # ------------------------------------------------------------------
-    # Timer
-    # ------------------------------------------------------------------
-
-    def _start_timer(self) -> None:
-        self._timer_manager.start_timer()
-
-    def _stop_timer(self) -> None:
-        self._timer_manager.stop_timer()
-
-    # ------------------------------------------------------------------
-    # Actions
-    # ------------------------------------------------------------------
-
-    def action_show_info(self) -> None:
-        """Show the info modal with app details and sponsor information."""
-        self.push_screen(InfoModal())
-
-    def action_reload_model(self) -> None:
-        """Re-download (if needed) and reload the current model."""
-        self._model_manager.reload_model()
-
-    def action_delete_entry(self) -> None:
-        """Show delete confirmation for the selected history entry."""
-        self._history_handler.action_delete_entry()
-
-    def action_retranscribe_entry(self) -> None:
-        """Retranscribe the selected history entry via keyboard shortcut."""
-        self._history_handler.action_retranscribe_entry()
-
-    def action_open_recording(self) -> None:
-        """Open the selected recording in the default audio app."""
-        self._history_handler.action_open_recording()
-
-    def action_open_markdown(self) -> None:
-        """Open the selected markdown in the default editor."""
-        self._history_handler.action_open_markdown()
-
-    def action_save_settings(self) -> None:
-        """Save settings via keyboard shortcut."""
-        self.query_one("#settings-save-btn", VoiceButton).press()
-
-    def action_open_config_dir(self) -> None:
-        """Open the config directory in the system file explorer."""
-        import platform
-        import subprocess
-
-        from utilityhub_config import get_config_path
-
-        try:
-            config_path = get_config_path("voicepad", format="yaml")
-            config_dir = config_path.parent
-
-            # Ensure directory exists
-            config_dir.mkdir(parents=True, exist_ok=True)
-
-            # Open in file explorer based on OS
-            system = platform.system()
-            if system == "Windows":
-                subprocess.run(["explorer", str(config_dir)], check=False)
-            elif system == "Darwin":  # macOS
-                subprocess.run(["open", str(config_dir)], check=False)
-            else:  # Linux and others
-                subprocess.run(["xdg-open", str(config_dir)], check=False)
-
-        except Exception as e:
-            # Show error in status if available
-            with contextlib.suppress(Exception):
-                status = self.query_one("#settings-status", Label)
-                status.update(f"[red]\U000f0156  Failed to open directory: {e}[/]")
-
-    def action_copy_transcription(self) -> None:
-        self._history_handler.action_copy_transcription()
-
-    def action_toggle_sort_order(self) -> None:
-        """Toggle the sort order (ascending/descending) for history entries."""
-        self._history_handler.toggle_sort_order()
-
-    @on(Button.Pressed, "#tx-copy-btn")
-    def on_copy_btn_pressed(self) -> None:
-        self._history_handler.on_copy_btn_pressed()
+    def action_copy(self) -> None:
+        if self._last_result is not None and self._last_result.complete and self._last_result.text:
+            if copy_to_clipboard(self._last_result.text):
+                self.notify("Copied transcription")
+            else:
+                self.notify("Clipboard is unavailable", severity="warning")
 
 
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
-
-
-def run() -> None:
-    """Launch the VoicePad TUI."""
-    config = get_config()
-    log_file = configure_global_logging(config.log_level, config.logs_path, console=False)
-    logger.info("Logs directory: %s", config.logs_path)
-    logger.info("Application session log: %s", log_file)
-    app = VoicePadApp(config)
-    app.run()
+def run(config: AppConfig | None = None) -> None:
+    VoicePadApp(config).run()

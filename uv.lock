@@ -560,15 +560,6 @@ wheels = [
 ]
 
 [[package]]
-name = "keyboard"
-version = "0.13.5"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/79/75/c969f2258e908c39aadfc57d1cb78247dc49e6d36371bb3a48c194640c01/keyboard-0.13.5.zip", hash = "sha256:63ed83305955939ca5c9a73755e5cc43e8242263f5ad5fd3bb7e0b032f3d308b", size = 71798, upload-time = "2020-03-23T21:47:06.614Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/55/88/287159903c5b3fc6d47b651c7ab65a54dcf9c9916de546188a7f62870d6d/keyboard-0.13.5-py3-none-any.whl", hash = "sha256:8e9c2422f1217e0bd84489b9ecd361027cc78415828f4fe4f88dd4acd587947b", size = 58098, upload-time = "2020-03-23T21:47:05.023Z" },
-]
-
-[[package]]
 name = "lazy-loader"
 version = "0.5"
 source = { registry = "https://pypi.org/simple" }
@@ -1869,9 +1860,7 @@ name = "voicepad"
 version = "0.2.1"
 source = { editable = "packages/voicepad" }
 dependencies = [
-    { name = "keyboard", marker = "sys_platform == 'win32'" },
     { name = "pyperclip" },
-    { name = "rich" },
     { name = "textual" },
     { name = "typer" },
     { name = "voicepad-core" },
@@ -1879,9 +1868,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "keyboard", marker = "sys_platform == 'win32'", specifier = ">=0.13.5" },
     { name = "pyperclip", specifier = ">=1.9.0" },
-    { name = "rich", specifier = ">=13.0.0" },
     { name = "textual", specifier = ">=8.2.4" },
     { name = "typer", specifier = ">=0.23.1" },
     { name = "voicepad-core", editable = "packages/voicepad-core" },

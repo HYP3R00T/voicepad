@@ -7,11 +7,13 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def copy_to_clipboard(text: str) -> None:
-    """Copy text to the system clipboard using pyperclip (cross-platform)."""
+def copy_to_clipboard(text: str) -> bool:
+    """Copy text and report whether the desktop clipboard accepted it."""
     try:
         import pyperclip
 
         pyperclip.copy(text)
-    except Exception as e:
-        logger.warning(f"Clipboard copy failed: {e}")
+    except Exception as error:
+        logger.warning("Clipboard copy failed: %s", error)
+        return False
+    return True

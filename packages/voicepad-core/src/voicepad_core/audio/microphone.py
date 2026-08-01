@@ -55,6 +55,14 @@ class MicrophoneStream:
         with self._lock:
             return self._recording
 
+    @property
+    def growing_source(self) -> LiveWavRecording:
+        """Return the active disk-backed source for transcription workers."""
+        with self._lock:
+            if self._live_recording is None:
+                raise AudioStreamStateError("MicrophoneStream has no active recording writer.")
+            return self._live_recording
+
     def start(self) -> None:
         with self._lifecycle_lock:
             with self._lock:

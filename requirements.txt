@@ -354,10 +354,6 @@ joblib==1.5.3 \
     # via
     #   librosa
     #   scikit-learn
-keyboard==0.13.5 ; sys_platform == 'win32' \
-    --hash=sha256:63ed83305955939ca5c9a73755e5cc43e8242263f5ad5fd3bb7e0b032f3d308b \
-    --hash=sha256:8e9c2422f1217e0bd84489b9ecd361027cc78415828f4fe4f88dd4acd587947b
-    # via voicepad
 lazy-loader==0.5 \
     --hash=sha256:717f9179a0dbed357012ddad50a5ad3d5e4d9a0b8712680d4e687f5e6e6ed9b3 \
     --hash=sha256:ab0ea149e9c554d4ffeeb21105ac60bed7f3b4fd69b1d2360a4add51b170b005
@@ -881,7 +877,6 @@ rich==15.0.0 \
     # via
     #   textual
     #   typer
-    #   voicepad
 ruff==0.16.1 \
     --hash=sha256:07bf434b1c95f4e093be4532068ef4fcf00924eb2ade8796075980902d6fd54a \
     --hash=sha256:09b05e8b90c2cb06ad63464350e7a45e8e44a2dfe52072ebfba6666ca8d3f596 \

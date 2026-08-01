@@ -1,7 +1,7 @@
 [project]
 name = "voicepad"
 version = "0.2.1"
-description = "Command-line interface for voice recording and GPU-accelerated transcription."
+description = "Linux TUI and CLI for local NVIDIA Parakeet dictation."
 readme = "README.md"
 requires-python = ">=3.13"
 license = "MIT"
@@ -15,7 +15,6 @@ keywords = [
   "speech-to-text",
   "transcription",
   "voice",
-  "whisper",
 ]
 classifiers = [
   "Development Status :: 3 - Alpha",
@@ -23,7 +22,7 @@ classifiers = [
   "Intended Audience :: Developers",
   "Intended Audience :: End Users/Desktop",
   "License :: OSI Approved :: MIT License",
-  "Operating System :: OS Independent",
+  "Operating System :: POSIX :: Linux",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.13",
@@ -33,9 +32,7 @@ classifiers = [
   "Typing :: Typed",
 ]
 dependencies = [
-  "keyboard>=0.13.5; sys_platform == 'win32'",
   "pyperclip>=1.9.0",
-  "rich>=13.0.0",
   "textual>=8.2.4",
   "typer>=0.23.1",
   "voicepad-core>=0.2.1",

@@ -1,119 +1,39 @@
----
-icon: lucide/settings
----
-
 # Configuration
 
-VoicePad stores its configuration in a YAML file. You can edit this file directly or change settings from the **Settings** tab in the interface.
+VoicePad owns a strict schema-1 JSON configuration at:
 
-## Config File Location
-
-The global config file lives at:
-
-```sh
-~/.config/voicepad/voicepad.yaml
+```text
+~/.config/voicepad/config-v2.json
 ```
 
-On Windows, this expands to `C:\Users\<YourName>\.config\voicepad\voicepad.yaml`.
+Inspect or initialize it with:
 
-This file is created automatically when you save settings from the interface.
-If the file is missing or invalid, VoicePad shows onboarding again and rebuilds the configuration from your selections.
-
-## Settings
-
-```yaml
-recordings_path: ~/.config/voicepad/data/recordings
-markdown_path: ~/.config/voicepad/data/markdown
-model_cache_path: ~/.config/voicepad/models
-vad_model_path: ~/.config/voicepad/models/vad
-logs_path: ~/.config/voicepad/logs
-log_level: INFO
-
-input_device_index: null
-recording_prefix: recording
-
-global_hotkey: ctrl+alt+v
-
-transcription_model: turbo
-transcription_device: auto
-transcription_compute_type: auto
-language: en
-beam_size: 1
-transcription_vad_filter: false
-initial_prompt: "Hello. This is a transcription with proper punctuation, capitalization, and grammar."
-proper_nouns:
-  - Mise
-  - VoicePad
-text_postprocessing_enabled: false
-no_speech_threshold: 0.6
-hallucination_silence_threshold: 2.0
-hallucination_max_repetitions: 3
-min_audio_duration_s: 0.5
-min_fresh_speech_duration_s: 0.25
-trim_trailing_silence_rms_threshold: 0.01
-trim_trailing_silence_frame_ms: 20
-
-silence_threshold_ms: 1000
-min_chunk_s: 15.0
-max_chunk_s: 29.0
-overlap_s: 0.5
-stream_poll_interval_s: 0.3
-stream_context_chars: 200
-
-dedup_prev_tail_words: 50
-dedup_full_duplicate_threshold: 0.8
-dedup_min_overlap_words_for_partial: 3
-dedup_partial_lead_words: 5
-
-vad_threshold: 0.5
-vad_min_speech_duration_ms: 250
-vad_speech_pad_ms: 30
-vad_download_chunk_size: 8192
-
-local_agreement_file: true
+```bash
+voicepad config path
+voicepad config show
+voicepad config init
 ```
 
-!!! tip "Global Hotkey Format"
-    The `global_hotkey` setting uses natural hotkey strings like `ctrl+shift+space`, `alt+v`, or `f9`.
-    VoicePad registers this value directly on Windows. Linux users configure their desktop to run `voicepad toggle`.
-    See [Global Hotkey](global-hotkey.md) for setup instructions.
+Supported fields are:
 
-!!! note "Linux microphone selection"
-    On Linux, VoicePad always opens the shared system-default input through the
-    active audio stack (normally PipeWire or PulseAudio). Choose the microphone
-    in the desktop's Sound settings. Numeric `input_device_index` values are
-    ignored on Linux so VoicePad can record alongside applications such as OBS.
+```json
+{
+  "schema": 1,
+  "deployment_id": "parakeet-v3.transformers-fp16-cuda",
+  "recordings_path": "~/.config/voicepad/data/recordings",
+  "markdown_path": "~/.config/voicepad/data/markdown",
+  "artifact_cache_path": "~/.cache/voicepad-v2/artifacts",
+  "recording_prefix": "recording",
+  "input_device_index": null,
+  "copy_complete_text": true,
+  "proper_nouns": [
+    {"canonical": "VoicePad", "aliases": ["voice pad"]}
+  ]
+}
+```
 
-!!! note "Settings visibility"
-    Not all settings are shown in the Settings tab interface. Advanced runtime tuning such as inference thresholds, VAD behavior, overlap deduplication, text post-processing, final-chunk speech gating, and model download locations can be changed by editing the YAML file directly.
+Unknown fields and obsolete schemas fail with an actionable error. VoicePad does
+not silently migrate or overwrite old configuration.
 
-## Notes on Advanced Settings
-
-- `proper_nouns`
-  Adds vocabulary hints for names, tools, and other terms that the selected model may otherwise mishear. Enter one
-  term per line in the Settings tab. Faster Whisper passes them as native hotwords. Parakeet tokenizes them with its
-  official tokenizer and applies contextual biasing during modified beam search. The hints bias recognition but do
-  not rewrite the transcript or guarantee a match.
-- `text_postprocessing_enabled`
-  Keeps raw model text by default. When set to `true`, VoicePad re-enables its lightweight text cleanup pipeline.
-- `min_fresh_speech_duration_s`
-  Controls how much new VAD-confirmed speech must exist in the final tail of a recording before VoicePad sends that tail to Whisper. This helps avoid hallucinated last-word or last-phrase endings.
-
-For details on individual settings, see:
-
-- [Whisper Models](models.md): choose the right model for your hardware
-- [Input Device](input-device.md): configure the shared system microphone
-- [Global Hotkey](global-hotkey.md): configure system-wide record and stop shortcuts
-- [Output Paths](output-paths.md): change where recordings and transcriptions are saved
-- [GPU Acceleration](gpu.md): NVIDIA GPU requirements and performance
-
-## Changing Settings
-
-The easiest way to configure VoicePad is through the interface:
-
-1. Open VoicePad: `uvx voicepad`
-2. Go to the **Settings** tab
-3. Change any value
-4. Press **Save**
-
-Changes take effect immediately. If you change the transcription model, VoicePad reloads it automatically.
+Proper-noun aliases are deterministic word/phrase replacements after timestamp
+assembly. They are not decoder hotwords and never use fuzzy matching.
