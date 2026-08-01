@@ -184,6 +184,12 @@ conversion, and assembly. It produced 321 timed words with no failed chunks,
 overlap warnings, or VAD coverage gaps. Independent offline processes produced
 the same result hash.
 
+A growing-source validation wrote canonical blocks through the bounded WAV
+persistence queue while planner and inference workers consumed disk ranges. Stop
+finalized the user WAV and drained six descriptors in 5.783 seconds with no
+failures, warnings, or coverage gaps. Its authoritative result hash matched the
+finite-file path exactly.
+
 ### Alternative runtime findings
 
 - Full-precision ONNX CUDA was extremely fast but consumed about 3.6-3.75 GiB
@@ -465,13 +471,14 @@ VoicePad does not depend on a network request after preparation.
 One source protocol covers immutable files and growing recordings:
 
 ```python
-class AudioSource(Protocol):
+class GrowingAudioSource(Protocol):
     sample_rate: int
     channels: int
+    committed_samples: int
+    is_final: bool
 
-    def committed_samples(self) -> int: ...
-    def is_final(self) -> bool: ...
-    def read(self, start_sample: int, end_sample: int) -> AudioWindow: ...
+    def read_range(self, start_sample: int, end_sample: int) -> AudioWindow: ...
+    def wait_for_update(self, after_sample: int, timeout: float | None) -> tuple[int, bool]: ...
 ```
 
 The microphone callback copies buffers only into the bounded persistence queue.
@@ -501,9 +508,11 @@ contiguous one-dimensional array
 ```
 
 The adapter's processor creates model features and moves them to CUDA FP16.
-VoicePad downmixes and resamples with deterministic source/runtime sample
-mapping. It does not peak-normalize by default. Timestamps map back to absolute
-source samples without cumulative floating-point drift.
+VoicePad downmixes and resamples immutable file sources with deterministic
+source/runtime sample mapping. Live Linux capture requests mono 16 kHz from the
+shared sound server so growing persisted sample positions are already canonical.
+It does not peak-normalize by default. Timestamps map back to absolute source
+samples without cumulative floating-point drift.
 
 ## CPU VAD and adaptive planning
 

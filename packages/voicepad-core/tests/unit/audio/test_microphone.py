@@ -12,36 +12,11 @@ from voicepad_core.audio import AudioStreamStateError, AudioWindow, MicrophoneSt
 
 
 @patch("voicepad_core.audio.microphone.sd.query_devices")
-def test_linux_uses_shared_system_default(mock_query: Mock, tmp_path: Path) -> None:
-    mock_query.return_value = {"default_samplerate": 48_000}
-
+def test_capture_uses_canonical_sample_rate_without_device_query(mock_query: Mock, tmp_path: Path) -> None:
     stream = MicrophoneStream(tmp_path / "recording.wav", device_index=2)
 
-    mock_query.assert_called_once_with(None, kind="input")
-    assert stream.sample_rate == 48_000
-
-
-@patch("voicepad_core.audio.microphone.sys.platform", "win32")
-@patch("voicepad_core.audio.microphone.sd.query_devices")
-def test_non_linux_uses_configured_device(mock_query: Mock, tmp_path: Path) -> None:
-    mock_query.return_value = {"default_samplerate": 48_000}
-
-    MicrophoneStream(tmp_path / "recording.wav", device_index=2)
-
-    mock_query.assert_called_once_with(2, kind="input")
-
-
-@pytest.mark.parametrize("rate", [0, -1])
-@patch("voicepad_core.audio.microphone.sd.query_devices")
-def test_invalid_device_rate_falls_back(mock_query: Mock, tmp_path: Path, rate: int) -> None:
-    mock_query.return_value = {"default_samplerate": rate}
-
-    assert MicrophoneStream(tmp_path / "recording.wav").sample_rate == 16_000
-
-
-@patch("voicepad_core.audio.microphone.sd.query_devices", side_effect=RuntimeError("device failed"))
-def test_device_query_failure_falls_back(mock_query: Mock, tmp_path: Path) -> None:
-    assert MicrophoneStream(tmp_path / "recording.wav").sample_rate == 16_000
+    mock_query.assert_not_called()
+    assert stream.sample_rate == 16_000
 
 
 @patch("voicepad_core.audio.microphone.LiveWavRecording")
@@ -59,10 +34,10 @@ def test_start_opens_writer_before_microphone(
 
     stream.start()
 
-    recording_type.assert_called_once_with(tmp_path / "recording.wav", 48_000, 1)
+    recording_type.assert_called_once_with(tmp_path / "recording.wav", 16_000, 1)
     recording_type.return_value.start.assert_called_once_with()
     input_stream_type.assert_called_once_with(
-        samplerate=48_000,
+        samplerate=16_000,
         channels=1,
         dtype="float32",
         device=None,
