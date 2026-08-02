@@ -2,8 +2,8 @@ import tailwindcss from '@tailwindcss/vite'
 import { defineConfig } from 'astro/config'
 
 export default defineConfig({
-  site: 'https://hyp3r00t.github.io',
-  base: '/voicepad',
+  site: 'https://voicepad.hyperoot.dev',
+  base: '/',
   prefetch: true,
   compressHTML: true,
   markdown: {
