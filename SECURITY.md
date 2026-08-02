@@ -29,4 +29,4 @@ Keep details confidential until a fix, mitigation, or coordinated disclosure pla
 
 ## Security releases
 
-A security fix that requires package publication follows the same protected release-PR workflow as any other release. Prepare and review repository release state before publication, merge it explicitly, and let the post-merge job publish from that reviewed commit. Do not bypass branch protection, publish from an ordinary issue pull request, or add, expose, or change publishing credentials as part of an unrelated fix.
+A security fix that requires package publication follows the same explicitly dispatched release-PR workflow as any other release. Required CI must pass before the workflow performs a normal merge and publishes from that merge commit. Do not bypass branch protection, publish from an ordinary issue pull request, or add, expose, or change publishing credentials as part of an unrelated fix.

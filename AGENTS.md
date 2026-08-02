@@ -59,7 +59,7 @@ Coverage threshold: **70%** (enforced in CI and `mise.toml` `test` task).
 - **Commits:** use conventional commits (`cz commit` if available); planned work uses `issue-<number>-<slug>` branches and pull requests linked to an approved issue.
 - **Reviews:** `main` requires a pull request, current `CI (uv)`, and resolved review conversations; merging remains an explicit human action.
 - **Secrets:** never commit credentials; `.env` is gitignored and local-only. User recordings, private logs, and model binaries must not enter Git or GitHub.
-- **Publishing:** package releases must use the reviewed release-PR workflow. Ordinary issue delivery must not dispatch releases, publish packages, create package tags/releases, expose credentials, or bypass the human merge gate.
+- **Publishing:** package releases must use an explicit maintainer dispatch. The release workflow may normally merge only its generated PR after required CI; ordinary issue delivery must not dispatch releases, publish packages, create package tags/releases, expose credentials, or bypass protection.
 
 ## Agent behavior
 

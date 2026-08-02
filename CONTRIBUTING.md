@@ -129,11 +129,11 @@ After merge, verify that the reviewed and checked head was integrated, close the
 
 ## Release packages
 
-Package publication uses the manually dispatched **Release Packages** workflow. Select the package and bump type from `main`; the prepare job updates the version, changelog, lock, and export files on a deterministic release branch, opens a release pull request, and dispatches the required `CI (uv)` check. It does not publish, tag, approve, merge, or push directly to `main`.
+Package publication uses the manually dispatched **Release Packages** workflow. Selecting the package and bump type from the current `main` head is explicit release approval. The prepare job updates the version, changelog, lock, and export files on a deterministic release branch, opens a release pull request, dispatches and waits for required `CI (uv)`, and then performs a normal exact-head merge. It does not approve the pull request, enable GitHub auto-merge, bypass protection, publish, tag, or push directly to `main`.
 
-Review the generated release pull request like any other protected change. Merging that exact same-repository release pull request is explicit approval for the post-merge job to tag the reviewed merge commit, publish only the selected package artifacts, and create the GitHub release. Release `voicepad-core` before a `voicepad` version that raises its core requirement. Failed runs may be rerun only when the workflow reports matching tag, PyPI, and GitHub Release state; conflicting state requires investigation.
+After that protected merge succeeds, a separate job rebuilds the selected package from the merge commit, creates or validates its package tag, publishes with `uv publish --check-url`, and creates the GitHub release. Release `voicepad-core` before a dependent `voicepad` version. If tagging, publication, or release creation fails, rerun only the failed publish job so matching uploads are skipped safely.
 
-Ordinary issue pull requests and merges must never publish packages, create package tags/releases, or expose publishing credentials. Do not add a branch-protection bypass, approve or merge a generated release pull request automatically, or dispatch a release from a non-`main` ref.
+Ordinary issue pull requests and merges must never publish packages, create package tags/releases, or expose publishing credentials. Do not add a branch-protection bypass or dispatch a release from a non-`main` ref.
 
 ## Code of Conduct
 

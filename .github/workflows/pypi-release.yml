@@ -24,9 +24,6 @@ on:
           - rc
           - post
           - dev
-  pull_request:
-    branches: [main]
-    types: [closed]
 
 concurrency:
   group: release-packages
@@ -36,21 +33,26 @@ permissions: {}
 
 jobs:
   prepare:
-    name: Prepare release PR
-    if: github.event_name == 'workflow_dispatch'
+    name: Prepare, check, and merge release PR
     runs-on: ubuntu-latest
     permissions:
-      actions: write # Dispatch CI for the generated release commit.
-      contents: write # Push only the generated release branch.
-      pull-requests: write # Open the generated release PR.
+      actions: write # Dispatch required CI for the generated head.
+      contents: write # Push the release branch and perform its normal merge.
+      pull-requests: write # Create and merge the generated release PR.
+    outputs:
+      merge_sha: ${{ steps.merge.outputs.merge_sha }}
+      package: ${{ steps.release.outputs.package }}
+      prerelease: ${{ steps.release.outputs.prerelease }}
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
 
     steps:
-      - name: Require a current main dispatch
+      - name: Require a main dispatch
         env:
           DISPATCH_REF: ${{ github.ref }}
         run: |
           test "$DISPATCH_REF" = "refs/heads/main" || {
-            echo "Release preparation must be dispatched from main, not $DISPATCH_REF"
+            echo "Releases must be dispatched from main, not $DISPATCH_REF"
             exit 1
           }
 
@@ -61,15 +63,14 @@ jobs:
           persist-credentials: false
           ref: ${{ github.sha }}
 
-      - name: Verify main has not advanced
+      - name: Require the current main head
         env:
           DISPATCH_SHA: ${{ github.sha }}
           GH_TOKEN: ${{ github.token }}
         run: |
           MAIN_SHA=$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .commit.sha)
-          test -n "$MAIN_SHA"
           test "$DISPATCH_SHA" = "$MAIN_SHA" || {
-            echo "main advanced from $DISPATCH_SHA to $MAIN_SHA; dispatch a new release run"
+            echo "main advanced from $DISPATCH_SHA to $MAIN_SHA; start a new release run"
             exit 1
           }
 
@@ -78,31 +79,42 @@ jobs:
         with:
           version: "0.12.1"
 
-      - name: Install release tools
+      - name: Install changelog tooling
         uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4
         with:
           install: true
 
-      - name: Bump and validate package metadata
+      - name: Bump package version
         id: release
         env:
           BUMP: ${{ inputs.bump }}
           PACKAGE: ${{ inputs.package }}
         run: |
-          python scripts/release.py validate-input --package "$PACKAGE" --bump "$BUMP"
+          case "$PACKAGE" in
+            voicepad-core|voicepad) ;;
+            *) echo "Unsupported package: $PACKAGE"; exit 1 ;;
+          esac
+          case "$BUMP" in
+            patch|minor|major|stable|alpha|beta|rc|post|dev) ;;
+            *) echo "Unsupported bump: $BUMP"; exit 1 ;;
+          esac
+
           (
             cd "packages/$PACKAGE"
             uv version --bump "$BUMP" --no-sync
           )
-          python scripts/release.py sync-core-dependency --package "$PACKAGE"
-          VERSION=$(python scripts/release.py version --package "$PACKAGE")
-          BRANCH="release/$PACKAGE-v$VERSION"
-          python scripts/release.py validate-version --branch "$BRANCH"
+          VERSION=$(cd "packages/$PACKAGE" && uv version --short)
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+((a|b|rc)[0-9]+)?(\.post[0-9]+)?(\.dev[0-9]+)?$ ]]
+          PRERELEASE=false
+          if [[ "$VERSION" =~ (a|b|rc)[0-9]+|\.dev[0-9]+ ]]; then
+            PRERELEASE=true
+          fi
           {
+            echo "branch=release/$PACKAGE-v$VERSION"
             echo "package=$PACKAGE"
-            echo "version=$VERSION"
-            echo "branch=$BRANCH"
+            echo "prerelease=$PRERELEASE"
             echo "tag=$PACKAGE-v$VERSION"
+            echo "version=$VERSION"
           } >> "$GITHUB_OUTPUT"
 
       - name: Generate package changelog
@@ -127,328 +139,175 @@ jobs:
           uv lock
           uv export --frozen --quiet --output-file=requirements.txt
 
-      - name: Build isolated package artifacts
+      - name: Build before repository mutation
         env:
+          PACKAGE: ${{ steps.release.outputs.package }}
+        run: uv build --out-dir "$RUNNER_TEMP/release-dist" "packages/$PACKAGE"
+
+      - name: Validate and commit release files
+        id: commit
+        env:
+          BRANCH: ${{ steps.release.outputs.branch }}
+          GH_TOKEN: ${{ github.token }}
           PACKAGE: ${{ steps.release.outputs.package }}
           VERSION: ${{ steps.release.outputs.version }}
         run: |
-          DIST="$RUNNER_TEMP/release-dist"
-          rm -rf "$DIST"
-          uv build --out-dir "$DIST" "packages/$PACKAGE"
-          PYPI_STATE=$(python scripts/release.py pypi-status \
-            --package "$PACKAGE" \
-            --version "$VERSION" \
-            --dist "$DIST")
-          test "$PYPI_STATE" = absent || {
-            echo "The selected version already exists on PyPI"
-            exit 1
-          }
-
-      - name: Validate and stage the release diff
-        id: tree
-        env:
-          BRANCH: ${{ steps.release.outputs.branch }}
-        run: |
-          mapfile -t FILES < <(
-            {
-              git diff --name-only
-              git ls-files --others --exclude-standard
-            } | sort -u
-          )
-          ARGS=()
+          mapfile -t FILES < <({ git diff --name-only; git ls-files --others --exclude-standard; } | sort -u)
           for FILE in "${FILES[@]}"; do
-            ARGS+=(--file "$FILE")
+            case "$FILE" in
+              "packages/$PACKAGE/CHANGELOG.md"|"packages/$PACKAGE/pyproject.toml"|requirements.txt|uv.lock) ;;
+              *) echo "Unexpected release file: $FILE"; exit 1 ;;
+            esac
           done
-          python scripts/release.py validate-files --branch "$BRANCH" "${ARGS[@]}"
+          printf '%s\n' "${FILES[@]}" | grep -Fx "packages/$PACKAGE/CHANGELOG.md"
+          printf '%s\n' "${FILES[@]}" | grep -Fx "packages/$PACKAGE/pyproject.toml"
           git diff --check
           git add -- "${FILES[@]}"
-          test -n "$(git diff --cached --name-only)"
-          echo "expected_tree=$(git write-tree)" >> "$GITHUB_OUTPUT"
 
-      - name: Create or validate release branch
-        id: branch
-        env:
-          BRANCH: ${{ steps.release.outputs.branch }}
-          EXPECTED_TREE: ${{ steps.tree.outputs.expected_tree }}
-          GH_TOKEN: ${{ github.token }}
-          MAIN_SHA: ${{ github.sha }}
-          PACKAGE: ${{ steps.release.outputs.package }}
-          VERSION: ${{ steps.release.outputs.version }}
-        run: |
           gh auth setup-git
-          REMOTE_SHA=$(git ls-remote --heads origin "refs/heads/$BRANCH" | awk '{print $1}')
-          if test -n "$REMOTE_SHA"; then
-            git fetch origin "refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
-            test "$(git rev-parse "$REMOTE_SHA^")" = "$MAIN_SHA" || {
-              echo "Existing release branch is not based on the dispatched main commit"
-              exit 1
-            }
-            test "$(git rev-parse "$REMOTE_SHA^{tree}")" = "$EXPECTED_TREE" || {
-              echo "Existing release branch conflicts with the generated release tree"
-              exit 1
-            }
-          else
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git switch -c "$BRANCH"
-            git commit -m "chore(release): $PACKAGE v$VERSION"
-            git push --set-upstream origin "$BRANCH"
-            REMOTE_SHA=$(git rev-parse HEAD)
-          fi
-          echo "head_sha=$REMOTE_SHA" >> "$GITHUB_OUTPUT"
+          test -z "$(git ls-remote --heads origin "refs/heads/$BRANCH")" || {
+            echo "Release branch already exists: $BRANCH"
+            exit 1
+          }
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$BRANCH"
+          git commit -m "chore(release): $PACKAGE v$VERSION"
+          git push --set-upstream origin "$BRANCH"
+          echo "head_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: Create or validate release PR
+      - name: Open release PR
         id: pull_request
         env:
           BRANCH: ${{ steps.release.outputs.branch }}
-          EXPECTED_HEAD: ${{ steps.branch.outputs.head_sha }}
           GH_TOKEN: ${{ github.token }}
           PACKAGE: ${{ steps.release.outputs.package }}
           VERSION: ${{ steps.release.outputs.version }}
         run: |
-          PRS=$(gh pr list --state all --head "$BRANCH" \
-            --json number,state,baseRefName,headRefOid,headRepository \
-            --jq '[.[] | select(.headRepository.nameWithOwner == env.GITHUB_REPOSITORY)]')
-          PR_COUNT=$(jq length <<< "$PRS")
-          if test "$PR_COUNT" -eq 0; then
-            BODY="$RUNNER_TEMP/release-pr.md"
-            cat > "$BODY" <<EOF
+          BODY="$RUNNER_TEMP/release-pr.md"
+          cat > "$BODY" <<EOF
           ## Package release
 
           - Package: \`$PACKAGE\`
           - Version: \`$VERSION\`
-          - Generated branch: \`$BRANCH\`
 
-          Merging this reviewed PR is explicit approval to tag and publish this package version to PyPI.
-
-          <!-- voicepad-generated-release package=$PACKAGE version=$VERSION -->
+          This PR was generated by **Release Packages**. Required CI must pass before the workflow performs a normal merge and publishes the reviewed merge commit.
           EOF
-            PR_URL=$(gh pr create \
-              --base main \
-              --head "$BRANCH" \
-              --title "chore(release): $PACKAGE v$VERSION" \
-              --body-file "$BODY")
-            PR_NUMBER=${PR_URL##*/}
-          elif test "$PR_COUNT" -eq 1; then
-            PR_NUMBER=$(jq -r '.[0].number' <<< "$PRS")
-            PR_MATCH=$(jq -r --arg head "$EXPECTED_HEAD" \
-              '.[0] | .state == "OPEN" and .baseRefName == "main" and .headRefOid == $head' <<< "$PRS")
-            test "$PR_MATCH" = true || {
-              echo "Existing release PR is not the expected open delivery"
-              exit 1
-            }
-          else
-            echo "Multiple pull requests claim $BRANCH"
-            exit 1
-          fi
-          echo "number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+          PR_URL=$(gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "chore(release): $PACKAGE v$VERSION" \
+            --body-file "$BODY")
+          echo "number=${PR_URL##*/}" >> "$GITHUB_OUTPUT"
 
-      - name: Dispatch required CI on the generated commit
+      - name: Dispatch required CI
         env:
           BRANCH: ${{ steps.release.outputs.branch }}
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run ci.yml --ref "$BRANCH"
 
-      - name: Report review handoff
+      - name: Wait for required CI
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ steps.pull_request.outputs.number }}
         run: |
-          gh pr view "$PR_NUMBER" --json url --jq '"Review and merge the generated release PR: \(.url)"'
+          FOUND=false
+          for _ATTEMPT in {1..60}; do
+            CHECK_COUNT=$(gh pr view "$PR_NUMBER" --json statusCheckRollup \
+              --jq '[.statusCheckRollup[] | select(.name == "CI (uv)")] | length')
+            if test "$CHECK_COUNT" -gt 0; then
+              FOUND=true
+              break
+            fi
+            sleep 2
+          done
+          test "$FOUND" = true || {
+            echo "CI (uv) was not registered for the release PR"
+            exit 1
+          }
+          gh pr checks "$PR_NUMBER" --required --watch --interval 10
+
+      - name: Merge through normal branch protection
+        id: merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ steps.commit.outputs.head_sha }}
+          PR_NUMBER: ${{ steps.pull_request.outputs.number }}
+        run: |
+          gh pr merge "$PR_NUMBER" --merge --match-head-commit "$HEAD_SHA"
+          MERGE_SHA=$(gh pr view "$PR_NUMBER" --json mergeCommit,state \
+            --jq 'select(.state == "MERGED") | .mergeCommit.oid')
+          test -n "$MERGE_SHA"
+          echo "merge_sha=$MERGE_SHA" >> "$GITHUB_OUTPUT"
 
   publish:
-    name: Publish merged release
-    if: >-
-      github.event_name == 'pull_request' &&
-      github.event.action == 'closed' &&
-      github.event.pull_request.merged == true &&
-      github.event.pull_request.base.ref == 'main' &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      startsWith(github.event.pull_request.head.ref, 'release/')
+    name: Tag and publish reviewed merge
+    needs: prepare
     runs-on: ubuntu-latest
     permissions:
-      contents: write # Push the reviewed package tag and create its release.
-      pull-requests: read # Verify the merged release PR file allowlist.
+      contents: write # Push the package tag and create its GitHub release.
 
     steps:
-      - name: Checkout the reviewed merge commit
+      - name: Checkout reviewed merge
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
           persist-credentials: false
-          ref: ${{ github.event.pull_request.merge_commit_sha }}
-
-      - name: Derive and validate release metadata
-        id: release
-        env:
-          BRANCH: ${{ github.event.pull_request.head.ref }}
-          GH_TOKEN: ${{ github.token }}
-          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
-          PR_BODY: ${{ github.event.pull_request.body }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
-        run: |
-          PACKAGE=$(python scripts/release.py branch-field --branch "$BRANCH" --field package)
-          VERSION=$(python scripts/release.py branch-field --branch "$BRANCH" --field version)
-          TAG=$(python scripts/release.py branch-field --branch "$BRANCH" --field tag)
-          PRERELEASE=$(python scripts/release.py branch-field --branch "$BRANCH" --field prerelease)
-          test "$PR_TITLE" = "chore(release): $PACKAGE v$VERSION"
-          grep -Fqx "<!-- voicepad-generated-release package=$PACKAGE version=$VERSION -->" <<< "$PR_BODY"
-          test "$(git rev-parse HEAD)" = "$MERGE_SHA"
-          gh auth setup-git
-          git fetch origin main:refs/remotes/origin/main --tags
-          git merge-base --is-ancestor "$MERGE_SHA" refs/remotes/origin/main
-          python scripts/release.py validate-version --branch "$BRANCH"
-          {
-            echo "package=$PACKAGE"
-            echo "version=$VERSION"
-            echo "tag=$TAG"
-            echo "prerelease=$PRERELEASE"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Validate reviewed release files
-        env:
-          BRANCH: ${{ github.event.pull_request.head.ref }}
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          mapfile -t FILES < <(
-            gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files" --jq '.[].filename'
-          )
-          ARGS=()
-          for FILE in "${FILES[@]}"; do
-            ARGS+=(--file "$FILE")
-          done
-          python scripts/release.py validate-files --branch "$BRANCH" "${ARGS[@]}"
+          ref: ${{ needs.prepare.outputs.merge_sha }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
         with:
           version: "0.12.1"
 
-      - name: Validate dependency publication order
-        if: steps.release.outputs.package == 'voicepad'
-        run: python scripts/release.py validate-core-dependency --require-published
-
-      - name: Build isolated reviewed artifacts
-        id: artifacts
+      - name: Build reviewed package
         env:
-          PACKAGE: ${{ steps.release.outputs.package }}
-          VERSION: ${{ steps.release.outputs.version }}
-        run: |
-          DIST="$RUNNER_TEMP/release-dist"
-          rm -rf "$DIST"
-          uv build --out-dir "$DIST" "packages/$PACKAGE"
-          PYPI_STATE=$(python scripts/release.py pypi-status \
-            --package "$PACKAGE" \
-            --version "$VERSION" \
-            --dist "$DIST")
-          mapfile -t PUBLISH_FILES < <(python scripts/release.py pypi-files \
-            --package "$PACKAGE" \
-            --version "$VERSION" \
-            --dist "$DIST")
-          {
-            echo "directory=$DIST"
-            echo "pypi_state=$PYPI_STATE"
-            echo "publish_files<<EOF"
-            printf '%s\n' "${PUBLISH_FILES[@]}"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
+          PACKAGE: ${{ needs.prepare.outputs.package }}
+        run: uv build --out-dir "$RUNNER_TEMP/release-dist" "packages/$PACKAGE"
 
-      - name: Validate resumable tag and release state
-        id: state
+      - name: Create or validate package tag
         env:
           GH_TOKEN: ${{ github.token }}
-          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
-          PYPI_STATE: ${{ steps.artifacts.outputs.pypi_state }}
-          PRERELEASE: ${{ steps.release.outputs.prerelease }}
-          TAG: ${{ steps.release.outputs.tag }}
-        run: |
-          TAG_STATE=absent
-          if git rev-parse --verify --quiet "refs/tags/$TAG" >/dev/null; then
-            test "$(git rev-list -n 1 "$TAG")" = "$MERGE_SHA" || {
-              echo "Tag $TAG points to a conflicting commit"
-              exit 1
-            }
-            TAG_STATE=matching
-          fi
-
-          RELEASE_STATE=absent
-          if gh release view "$TAG" --json tagName,isDraft,isPrerelease > "$RUNNER_TEMP/release.json" 2>/dev/null; then
-            jq -e --arg tag "$TAG" --argjson prerelease "$PRERELEASE" \
-              '.tagName == $tag and (.isDraft | not) and .isPrerelease == $prerelease' \
-              "$RUNNER_TEMP/release.json" >/dev/null || {
-              echo "GitHub release $TAG has conflicting metadata"
-              exit 1
-            }
-            RELEASE_STATE=matching
-          fi
-
-          if test "$PYPI_STATE" != absent && test "$TAG_STATE" != matching; then
-            echo "PyPI contains all or part of this version without its required matching tag"
-            exit 1
-          fi
-          if test "$RELEASE_STATE" = matching && { test "$TAG_STATE" != matching || test "$PYPI_STATE" != matching; }; then
-            echo "GitHub release exists without matching tag and PyPI state"
-            exit 1
-          fi
-          {
-            echo "tag_state=$TAG_STATE"
-            echo "release_state=$RELEASE_STATE"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Create immutable package tag
-        if: steps.state.outputs.tag_state == 'absent'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PACKAGE: ${{ steps.release.outputs.package }}
-          TAG: ${{ steps.release.outputs.tag }}
-          VERSION: ${{ steps.release.outputs.version }}
+          MERGE_SHA: ${{ needs.prepare.outputs.merge_sha }}
+          PACKAGE: ${{ needs.prepare.outputs.package }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           gh auth setup-git
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "$TAG" -m "$PACKAGE v$VERSION"
-          git push origin "refs/tags/$TAG"
+          git fetch origin --tags
+          if git rev-parse --verify --quiet "refs/tags/$TAG" >/dev/null; then
+            test "$(git rev-list -n 1 "$TAG")" = "$MERGE_SHA" || {
+              echo "Tag $TAG points to a different commit"
+              exit 1
+            }
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$TAG" -m "$PACKAGE v$VERSION"
+            git push origin "refs/tags/$TAG"
+          fi
 
-      - name: Publish missing selected-package artifacts to PyPI
-        if: steps.artifacts.outputs.pypi_state != 'matching'
+      - name: Publish package to PyPI
         env:
-          PUBLISH_FILES: ${{ steps.artifacts.outputs.publish_files }}
           UV_PUBLISH_TOKEN: ${{ secrets.UV_PUBLISH_TOKEN }}
         run: |
-          mapfile -t FILES <<< "$PUBLISH_FILES"
-          test "${#FILES[@]}" -gt 0
-          uv publish "${FILES[@]}"
+          uv publish \
+            --check-url https://pypi.org/simple \
+            "$RUNNER_TEMP"/release-dist/*.whl \
+            "$RUNNER_TEMP"/release-dist/*.tar.gz
 
-      - name: Verify complete PyPI publication
-        env:
-          DIST: ${{ steps.artifacts.outputs.directory }}
-          PACKAGE: ${{ steps.release.outputs.package }}
-          VERSION: ${{ steps.release.outputs.version }}
-        run: |
-          for ATTEMPT in {1..10}; do
-            PYPI_STATE=$(python scripts/release.py pypi-status \
-              --package "$PACKAGE" \
-              --version "$VERSION" \
-              --dist "$DIST")
-            if test "$PYPI_STATE" = matching; then
-              exit 0
-            fi
-            echo "Waiting for complete PyPI artifact visibility (attempt $ATTEMPT)"
-            sleep 3
-          done
-          echo "PyPI did not expose the complete reviewed artifact set"
-          exit 1
-
-      - name: Create GitHub release
-        if: steps.state.outputs.release_state == 'absent'
+      - name: Create GitHub release if missing
         env:
           GH_TOKEN: ${{ github.token }}
-          PACKAGE: ${{ steps.release.outputs.package }}
-          PRERELEASE: ${{ steps.release.outputs.prerelease }}
-          TAG: ${{ steps.release.outputs.tag }}
-          VERSION: ${{ steps.release.outputs.version }}
+          PACKAGE: ${{ needs.prepare.outputs.package }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "GitHub release already exists: $TAG"
+            exit 0
+          fi
           ARGS=()
           if test "$PRERELEASE" = true; then
             ARGS+=(--prerelease)
