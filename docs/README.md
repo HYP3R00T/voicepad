@@ -15,4 +15,5 @@ pnpm --dir docs build
 - `public/` contains static assets.
 - `dist/` is generated and must not be edited or committed.
 
-The production build uses the `/voicepad` base path for GitHub Pages.
+The production build is served from the root of the GitHub Pages custom domain
+`https://voicepad.hyperoot.dev`.
