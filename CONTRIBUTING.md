@@ -127,11 +127,13 @@ VoicePad is currently solo-maintained, so another person's approval is not requi
 
 After merge, verify that the reviewed and checked head was integrated, close the resolved issue, update its Project status to `Done`, and preserve any dirty worktree or unpushed branch.
 
-## Publication freeze
+## Release packages
 
-Publishing `voicepad` or `voicepad-core` to PyPI is frozen during the backend migration. The release workflow must remain disabled, and no publishing credential may be added or used without a separate, explicit maintainer decision.
+Package publication uses the manually dispatched **Release Packages** workflow. Selecting the package and bump type from the current `main` head is explicit release approval. The prepare job updates the version, changelog, lock, and export files on a deterministic release branch, opens a release pull request, dispatches and waits for required `CI (uv)`, and then performs a normal exact-head merge. It does not approve the pull request, enable GitHub auto-merge, bypass protection, publish, tag, or push directly to `main`.
 
-Ordinary pull requests and merges must never publish packages, create release tags, or create public releases.
+After that protected merge succeeds, a separate job rebuilds the selected package from the merge commit, creates or validates its package tag, publishes with `uv publish --check-url`, and creates the GitHub release. Release `voicepad-core` before a dependent `voicepad` version. If tagging, publication, or release creation fails, rerun only the failed publish job so matching uploads are skipped safely.
+
+Ordinary issue pull requests and merges must never publish packages, create package tags/releases, or expose publishing credentials. Do not add a branch-protection bypass or dispatch a release from a non-`main` ref.
 
 ## Code of Conduct
 

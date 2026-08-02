@@ -24,92 +24,296 @@ on:
           - rc
           - post
           - dev
-jobs:
-  release:
-    runs-on: ubuntu-latest
 
+concurrency:
+  group: release-packages
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  prepare:
+    name: Prepare, check, and merge release PR
+    runs-on: ubuntu-latest
     permissions:
-      contents: write
+      actions: write # Dispatch required CI for the generated head.
+      contents: write # Push the release branch and perform its normal merge.
+      pull-requests: write # Create and merge the generated release PR.
+    outputs:
+      merge_sha: ${{ steps.merge.outputs.merge_sha }}
+      package: ${{ steps.release.outputs.package }}
+      prerelease: ${{ steps.release.outputs.prerelease }}
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0 # Fetch all history for changelog generation
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-
-      - name: Install mise
-        uses: jdx/mise-action@v4
-        with:
-          install: true
-
-      - name: Validate package exists
+      - name: Require a main dispatch
+        env:
+          DISPATCH_REF: ${{ github.ref }}
         run: |
-          test -d "packages/${{ inputs.package }}" || {
-            echo "Package packages/${{ inputs.package }} not found"
+          test "$DISPATCH_REF" = "refs/heads/main" || {
+            echo "Releases must be dispatched from main, not $DISPATCH_REF"
             exit 1
           }
 
-      - name: Bump version
-        id: version
-        working-directory: packages/${{ inputs.package }}
-        run: |
-          uv version --bump ${{ inputs.bump }}
-          VERSION=$(uv version --short)
-          echo "new_version=$VERSION" >> $GITHUB_OUTPUT
+      - name: Checkout the dispatched commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.sha }}
 
-      - name: Generate changelog
+      - name: Require the current main head
+        env:
+          DISPATCH_SHA: ${{ github.sha }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          PREV_TAG=$(git tag --list "${{ inputs.package }}-v*" --sort=-version:refname | head -n 1)
-          if [ -z "$PREV_TAG" ]; then
-            git cliff \
-              --include-path "packages/${{ inputs.package }}/**" \
-              --tag-pattern "${{ inputs.package }}-v*" \
-              --tag "${{ inputs.package }}-v${{ steps.version.outputs.new_version }}" \
-              --output "packages/${{ inputs.package }}/CHANGELOG.md"
+          MAIN_SHA=$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .commit.sha)
+          test "$DISPATCH_SHA" = "$MAIN_SHA" || {
+            echo "main advanced from $DISPATCH_SHA to $MAIN_SHA; start a new release run"
+            exit 1
+          }
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: "0.12.1"
+
+      - name: Install changelog tooling
+        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4
+        with:
+          install: true
+
+      - name: Bump package version
+        id: release
+        env:
+          BUMP: ${{ inputs.bump }}
+          PACKAGE: ${{ inputs.package }}
+        run: |
+          case "$PACKAGE" in
+            voicepad-core|voicepad) ;;
+            *) echo "Unsupported package: $PACKAGE"; exit 1 ;;
+          esac
+          case "$BUMP" in
+            patch|minor|major|stable|alpha|beta|rc|post|dev) ;;
+            *) echo "Unsupported bump: $BUMP"; exit 1 ;;
+          esac
+
+          (
+            cd "packages/$PACKAGE"
+            uv version --bump "$BUMP" --no-sync
+          )
+          VERSION=$(cd "packages/$PACKAGE" && uv version --short)
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+((a|b|rc)[0-9]+)?(\.post[0-9]+)?(\.dev[0-9]+)?$ ]]
+          PRERELEASE=false
+          if [[ "$VERSION" =~ (a|b|rc)[0-9]+|\.dev[0-9]+ ]]; then
+            PRERELEASE=true
+          fi
+          {
+            echo "branch=release/$PACKAGE-v$VERSION"
+            echo "package=$PACKAGE"
+            echo "prerelease=$PRERELEASE"
+            echo "tag=$PACKAGE-v$VERSION"
+            echo "version=$VERSION"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Generate package changelog
+        env:
+          PACKAGE: ${{ steps.release.outputs.package }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          PREVIOUS_TAG=$(git tag --list "$PACKAGE-v*" --sort=-version:refname | head -n 1)
+          RANGE=()
+          if test -n "$PREVIOUS_TAG"; then
+            RANGE=("$PREVIOUS_TAG..HEAD")
+          fi
+          git cliff \
+            --include-path "packages/$PACKAGE/**" \
+            --tag-pattern "$PACKAGE-v*" \
+            --tag "$TAG" \
+            "${RANGE[@]}" \
+            --output "packages/$PACKAGE/CHANGELOG.md"
+
+      - name: Update lock and export files
+        run: |
+          uv lock
+          uv export --frozen --quiet --output-file=requirements.txt
+
+      - name: Build before repository mutation
+        env:
+          PACKAGE: ${{ steps.release.outputs.package }}
+        run: uv build --out-dir "$RUNNER_TEMP/release-dist" "packages/$PACKAGE"
+
+      - name: Validate and commit release files
+        id: commit
+        env:
+          BRANCH: ${{ steps.release.outputs.branch }}
+          GH_TOKEN: ${{ github.token }}
+          PACKAGE: ${{ steps.release.outputs.package }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          mapfile -t FILES < <({ git diff --name-only; git ls-files --others --exclude-standard; } | sort -u)
+          for FILE in "${FILES[@]}"; do
+            case "$FILE" in
+              "packages/$PACKAGE/CHANGELOG.md"|"packages/$PACKAGE/pyproject.toml"|requirements.txt|uv.lock) ;;
+              *) echo "Unexpected release file: $FILE"; exit 1 ;;
+            esac
+          done
+          printf '%s\n' "${FILES[@]}" | grep -Fx "packages/$PACKAGE/CHANGELOG.md"
+          printf '%s\n' "${FILES[@]}" | grep -Fx "packages/$PACKAGE/pyproject.toml"
+          git diff --check
+          git add -- "${FILES[@]}"
+
+          gh auth setup-git
+          test -z "$(git ls-remote --heads origin "refs/heads/$BRANCH")" || {
+            echo "Release branch already exists: $BRANCH"
+            exit 1
+          }
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$BRANCH"
+          git commit -m "chore(release): $PACKAGE v$VERSION"
+          git push --set-upstream origin "$BRANCH"
+          echo "head_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Open release PR
+        id: pull_request
+        env:
+          BRANCH: ${{ steps.release.outputs.branch }}
+          GH_TOKEN: ${{ github.token }}
+          PACKAGE: ${{ steps.release.outputs.package }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          BODY="$RUNNER_TEMP/release-pr.md"
+          cat > "$BODY" <<EOF
+          ## Package release
+
+          - Package: \`$PACKAGE\`
+          - Version: \`$VERSION\`
+
+          This PR was generated by **Release Packages**. Required CI must pass before the workflow performs a normal merge and publishes the reviewed merge commit.
+          EOF
+          PR_URL=$(gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "chore(release): $PACKAGE v$VERSION" \
+            --body-file "$BODY")
+          echo "number=${PR_URL##*/}" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch required CI
+        env:
+          BRANCH: ${{ steps.release.outputs.branch }}
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run ci.yml --ref "$BRANCH"
+
+      - name: Wait for required CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.pull_request.outputs.number }}
+        run: |
+          FOUND=false
+          for _ATTEMPT in {1..60}; do
+            CHECK_COUNT=$(gh pr view "$PR_NUMBER" --json statusCheckRollup \
+              --jq '[.statusCheckRollup[] | select(.name == "CI (uv)")] | length')
+            if test "$CHECK_COUNT" -gt 0; then
+              FOUND=true
+              break
+            fi
+            sleep 2
+          done
+          test "$FOUND" = true || {
+            echo "CI (uv) was not registered for the release PR"
+            exit 1
+          }
+          gh pr checks "$PR_NUMBER" --required --watch --interval 10
+
+      - name: Merge through normal branch protection
+        id: merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ steps.commit.outputs.head_sha }}
+          PR_NUMBER: ${{ steps.pull_request.outputs.number }}
+        run: |
+          gh pr merge "$PR_NUMBER" --merge --match-head-commit "$HEAD_SHA"
+          MERGE_SHA=$(gh pr view "$PR_NUMBER" --json mergeCommit,state \
+            --jq 'select(.state == "MERGED") | .mergeCommit.oid')
+          test -n "$MERGE_SHA"
+          echo "merge_sha=$MERGE_SHA" >> "$GITHUB_OUTPUT"
+
+  publish:
+    name: Tag and publish reviewed merge
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Push the package tag and create its GitHub release.
+
+    steps:
+      - name: Checkout reviewed merge
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ needs.prepare.outputs.merge_sha }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: "0.12.1"
+
+      - name: Build reviewed package
+        env:
+          PACKAGE: ${{ needs.prepare.outputs.package }}
+        run: uv build --out-dir "$RUNNER_TEMP/release-dist" "packages/$PACKAGE"
+
+      - name: Create or validate package tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MERGE_SHA: ${{ needs.prepare.outputs.merge_sha }}
+          PACKAGE: ${{ needs.prepare.outputs.package }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          gh auth setup-git
+          git fetch origin --tags
+          if git rev-parse --verify --quiet "refs/tags/$TAG" >/dev/null; then
+            test "$(git rev-list -n 1 "$TAG")" = "$MERGE_SHA" || {
+              echo "Tag $TAG points to a different commit"
+              exit 1
+            }
           else
-            git cliff \
-              --include-path "packages/${{ inputs.package }}/**" \
-              --tag-pattern "${{ inputs.package }}-v*" \
-              --tag "${{ inputs.package }}-v${{ steps.version.outputs.new_version }}" \
-              "${PREV_TAG}..HEAD" \
-              --output "packages/${{ inputs.package }}/CHANGELOG.md"
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$TAG" -m "$PACKAGE v$VERSION"
+            git push origin "refs/tags/$TAG"
           fi
 
-      - name: Build package
-        run: uv build packages/${{ inputs.package }}/
-
-      - name: Publish to PyPI
+      - name: Publish package to PyPI
         env:
           UV_PUBLISH_TOKEN: ${{ secrets.UV_PUBLISH_TOKEN }}
-        run: uv publish
-
-      - name: Generate requirements.txt
-        run: uv export --frozen --output-file=requirements.txt
-
-      - name: Commit version bump and changelog
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add packages/${{ inputs.package }}/pyproject.toml
-          git add packages/${{ inputs.package }}/CHANGELOG.md
-          git add uv.lock
-          git add requirements.txt
-          git commit -m "chore(release): ${{ inputs.package }} v${{ steps.version.outputs.new_version }}"
-          git push
+          uv publish \
+            --check-url https://pypi.org/simple \
+            "$RUNNER_TEMP"/release-dist/*.whl \
+            "$RUNNER_TEMP"/release-dist/*.tar.gz
 
-      - name: Create git tag
+      - name: Create GitHub release if missing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PACKAGE: ${{ needs.prepare.outputs.package }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
-          git tag "${{ inputs.package }}-v${{ steps.version.outputs.new_version }}"
-          git push origin "${{ inputs.package }}-v${{ steps.version.outputs.new_version }}"
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
-        with:
-          tag_name: "${{ inputs.package }}-v${{ steps.version.outputs.new_version }}"
-          name: "${{ inputs.package }} v${{ steps.version.outputs.new_version }}"
-          body_path: packages/${{ inputs.package }}/CHANGELOG.md
-          draft: false
-          prerelease: false
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "GitHub release already exists: $TAG"
+            exit 0
+          fi
+          ARGS=()
+          if test "$PRERELEASE" = true; then
+            ARGS+=(--prerelease)
+          fi
+          gh release create "$TAG" \
+            --verify-tag \
+            --title "$PACKAGE v$VERSION" \
+            --notes-file "packages/$PACKAGE/CHANGELOG.md" \
+            "${ARGS[@]}"

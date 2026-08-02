@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Before the next package release, the current `main` branch is the supported development version. Published package versions may not receive fixes during the backend migration and publication freeze.
+The current `main` branch is the supported development version. Published package support follows the latest reviewed PyPI release; older versions may not receive fixes.
 
 ## Report a vulnerability
 
@@ -27,6 +27,6 @@ The maintainer will make a reasonable effort to acknowledge the report, assess i
 
 Keep details confidential until a fix, mitigation, or coordinated disclosure plan is available. Accepted reports may be managed through a private GitHub security advisory.
 
-## Publication freeze
+## Security releases
 
-The PyPI release workflow is disabled and package publication is frozen during the backend migration. A security fix that requires a package release needs an explicit maintainer decision and a reviewed release plan; do not re-enable publishing or add credentials as part of an unrelated fix.
+A security fix that requires package publication follows the same explicitly dispatched release-PR workflow as any other release. Required CI must pass before the workflow performs a normal merge and publishes from that merge commit. Do not bypass branch protection, publish from an ordinary issue pull request, or add, expose, or change publishing credentials as part of an unrelated fix.
