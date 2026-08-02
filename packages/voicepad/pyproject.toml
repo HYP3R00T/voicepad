@@ -1,6 +1,6 @@
 [project]
 name = "voicepad"
-version = "0.2.1"
+version = "0.2.2"
 description = "Linux TUI and CLI for local NVIDIA Parakeet dictation."
 readme = "README.md"
 requires-python = ">=3.13"
