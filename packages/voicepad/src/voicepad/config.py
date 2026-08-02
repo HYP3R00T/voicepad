@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import cast
 
 from voicepad_core.deployments import PARAKEET_V3_CUDA
-from voicepad_core.pipeline import AliasRule
 
 from voicepad.tui.theme import DEFAULT_THEME, THEMES
 
@@ -17,15 +16,6 @@ CONFIG_SCHEMA = 1
 
 class ConfigurationError(ValueError):
     """Raised when VoicePad configuration is obsolete or invalid."""
-
-
-@dataclass(frozen=True, slots=True)
-class AliasConfiguration:
-    canonical: str
-    aliases: tuple[str, ...]
-
-    def to_rule(self) -> AliasRule:
-        return AliasRule(self.canonical, self.aliases)
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,7 +28,6 @@ class AppConfig:
     input_device_index: int | None = None
     copy_complete_text: bool = True
     theme: str = DEFAULT_THEME
-    proper_nouns: tuple[AliasConfiguration, ...] = ()
 
     def __post_init__(self) -> None:
         if self.deployment_id != PARAKEET_V3_CUDA.id:
@@ -47,10 +36,6 @@ class AppConfig:
             raise ConfigurationError("recording_prefix must be a nonempty filename prefix")
         if self.theme not in THEMES:
             raise ConfigurationError(f"Unsupported Textual theme: {self.theme}")
-
-    @property
-    def alias_rules(self) -> tuple[AliasRule, ...]:
-        return tuple(item.to_rule() for item in self.proper_nouns)
 
 
 def config_path() -> Path:
@@ -68,6 +53,7 @@ def load_config(path: Path | None = None) -> AppConfig:
     if not isinstance(loaded, dict):
         raise ConfigurationError("VoicePad configuration must be a JSON object")
     raw = cast(dict[str, object], loaded)
+    raw.pop("proper_nouns", None)
     expected = {
         "schema",
         "deployment_id",
@@ -78,7 +64,6 @@ def load_config(path: Path | None = None) -> AppConfig:
         "input_device_index",
         "copy_complete_text",
         "theme",
-        "proper_nouns",
     }
     unknown = set(raw) - expected
     if unknown:
@@ -89,10 +74,6 @@ def load_config(path: Path | None = None) -> AppConfig:
     if raw.get("schema") != CONFIG_SCHEMA:
         raise ConfigurationError(f"Unsupported configuration schema: {raw.get('schema')!r}")
     try:
-        proper_nouns = raw.get("proper_nouns", [])
-        if not isinstance(proper_nouns, list):
-            raise TypeError("proper_nouns must be a list")
-        aliases = tuple(_parse_alias(item) for item in proper_nouns)
         input_device = raw.get("input_device_index")
         if input_device is not None and (not isinstance(input_device, int) or isinstance(input_device, bool)):
             raise TypeError("input_device_index must be an integer or null")
@@ -111,7 +92,6 @@ def load_config(path: Path | None = None) -> AppConfig:
             input_device_index=input_device,
             copy_complete_text=copy_complete,
             theme=theme,
-            proper_nouns=aliases,
         )
     except (KeyError, TypeError, ValueError) as error:
         raise ConfigurationError("VoicePad configuration schema 1 is invalid") from error
@@ -122,17 +102,6 @@ def _required_string(raw: dict[str, object], key: str) -> str:
     if not isinstance(value, str):
         raise TypeError(f"{key} must be a string")
     return value
-
-
-def _parse_alias(value: object) -> AliasConfiguration:
-    if not isinstance(value, dict):
-        raise TypeError("proper noun entry must be an object")
-    item = cast(dict[str, object], value)
-    canonical = _required_string(item, "canonical")
-    aliases = item["aliases"]
-    if not isinstance(aliases, list) or not all(isinstance(alias, str) for alias in aliases):
-        raise TypeError("proper noun aliases must be strings")
-    return AliasConfiguration(canonical, tuple(cast(list[str], aliases)))
 
 
 def save_config(config: AppConfig, path: Path | None = None) -> Path:

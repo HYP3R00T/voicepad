@@ -37,14 +37,6 @@ class ObservedWord:
 
 
 @dataclass(frozen=True, slots=True)
-class AppliedCorrection:
-    canonical: str
-    observed: str
-    start_sample: int
-    end_sample: int
-
-
-@dataclass(frozen=True, slots=True)
 class CoverageGap:
     speech: SpeechRegion
     reason: str
@@ -79,6 +71,5 @@ class FileTranscriptionResult:
     chunks: tuple[ChunkOutcome, ...]
     speech_regions: tuple[SpeechRegion, ...]
     coverage_gaps: tuple[CoverageGap, ...]
-    corrections: tuple[AppliedCorrection, ...]
     warnings: tuple[str, ...]
     complete: bool

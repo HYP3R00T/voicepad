@@ -3,15 +3,15 @@ from __future__ import annotations
 import contextlib
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from importlib.metadata import version
 from pathlib import Path
 
 from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import VerticalScroll
+from textual.containers import Horizontal, VerticalScroll
 from textual.widgets import (
-    Checkbox,
     Footer,
     Input,
     Label,
@@ -19,9 +19,9 @@ from textual.widgets import (
     OptionList,
     Select,
     Static,
+    Switch,
     TabbedContent,
     TabPane,
-    TextArea,
 )
 from voicepad_core.audio import MicrophoneStream
 from voicepad_core.pipeline import (
@@ -30,7 +30,7 @@ from voicepad_core.pipeline import (
     GrowingTranscriptionUpdate,
 )
 
-from voicepad.config import AliasConfiguration, AppConfig, load_config, save_config
+from voicepad.config import AppConfig, load_config, save_config
 from voicepad.output import persist_markdown
 from voicepad.runtime import ApplicationRuntime
 from voicepad.tui.components import VoiceButton
@@ -102,42 +102,70 @@ class VoicePadApp(App[None]):
                     history_list.border_title = "recordings"
                     yield OptionList(id="history-options")
                 with Static(id="history-view-pane") as history_view:
-                    history_view.border_title = "transcription"
-                    yield Markdown("# No recording selected", id="history-viewer")
+                    history_view.border_title = "transcript"
+                    with Static(id="history-detail"):
+                        yield Label("No recordings yet", id="history-detail-title")
+                        yield Label("Your completed dictations will appear here.", id="history-detail-meta")
+                    yield Markdown("_Record something to begin your local history._", id="history-viewer")
             with TabPane("  settings  ", id="tab-settings"):
                 yield from self._compose_settings()
         yield Footer()
 
     def _compose_settings(self) -> ComposeResult:
         with VerticalScroll(id="settings-scroll"), Static(id="settings-fields"):
-            yield Label("recordings path", classes="settings-key")
-            yield Input(str(self.config.recordings_path), id="setting-recordings", classes="settings-input")
-            yield Label("markdown path", classes="settings-key")
-            yield Input(str(self.config.markdown_path), id="setting-markdown", classes="settings-input")
-            yield Label("model artifact cache", classes="settings-key")
-            yield Input(str(self.config.artifact_cache_path), id="setting-artifacts", classes="settings-input")
-            yield Label("recording filename prefix", classes="settings-key")
-            yield Input(self.config.recording_prefix, id="setting-prefix", classes="settings-input")
-            yield Label("theme", classes="settings-key")
-            yield Select.from_values(THEMES, value=self.config.theme, id="setting-theme", classes="settings-input")
-            yield Checkbox(
-                "copy complete transcription automatically",
-                value=self.config.copy_complete_text,
-                id="setting-copy",
-            )
-            yield Label("proper-noun aliases — Canonical = alias | alias", classes="settings-key")
-            yield TextArea(self._render_aliases(), id="setting-proper_nouns")
-            yield Label("global desktop shortcut", classes="settings-key")
-            yield Label(
-                f"{self._shortcut.hint} · {'configured' if self._shortcut.configured else 'setup required'}",
-                id="shortcut-status",
-            )
-            yield Input(self._shortcut.command, id="shortcut-command", disabled=True)
-            yield VoiceButton("󰆏  copy toggle command", id="shortcut-copy-btn")
-            yield VoiceButton("󰍜  open keyboard settings", id="shortcut-settings-btn")
+            with Static(classes="settings-group"):
+                yield Label("Storage", classes="settings-section-title")
+                yield Label(
+                    "Choose where durable audio, results, and verified model files live.",
+                    classes="settings-section-copy",
+                )
+                with Static(classes="settings-item"):
+                    yield Label("Recordings", classes="settings-key")
+                    yield Label("Canonical WAV audio", classes="settings-help")
+                    yield Input(str(self.config.recordings_path), id="setting-recordings", classes="settings-input")
+                with Static(classes="settings-item"):
+                    yield Label("Transcripts", classes="settings-key")
+                    yield Label("Schema-1 Markdown results", classes="settings-help")
+                    yield Input(str(self.config.markdown_path), id="setting-markdown", classes="settings-input")
+                with Static(classes="settings-item"):
+                    yield Label("Model cache", classes="settings-key")
+                    yield Label("Verified Parakeet and Silero artifacts", classes="settings-help")
+                    yield Input(str(self.config.artifact_cache_path), id="setting-artifacts", classes="settings-input")
+
+            with Static(classes="settings-group"):
+                yield Label("Experience", classes="settings-section-title")
+                yield Label(
+                    "Tune naming, appearance, and what happens after a complete result.",
+                    classes="settings-section-copy",
+                )
+                with Static(classes="settings-item"):
+                    yield Label("Recording prefix", classes="settings-key")
+                    yield Input(self.config.recording_prefix, id="setting-prefix", classes="settings-input")
+                with Static(classes="settings-item"):
+                    yield Label("Theme accents", classes="settings-key")
+                    yield Select.from_values(
+                        THEMES, value=self.config.theme, id="setting-theme", classes="settings-input"
+                    )
+                with Horizontal(classes="settings-toggle-row"):
+                    with Static(classes="settings-toggle-copy"):
+                        yield Label("Copy automatically", classes="settings-key")
+                        yield Label("Put complete transcriptions on the clipboard", classes="settings-help")
+                    yield Switch(value=self.config.copy_complete_text, id="setting-copy")
+
+            with Static(classes="settings-group", id="shortcut-group"):
+                yield Label("Desktop shortcut", classes="settings-section-title")
+                yield Label(
+                    f"{self._shortcut.hint} · {'configured' if self._shortcut.configured else 'setup required'}",
+                    id="shortcut-status",
+                    classes="settings-section-copy",
+                )
+                yield Static(self._shortcut.command, id="shortcut-command")
+                with Horizontal(id="shortcut-actions"):
+                    yield VoiceButton("󰆏  copy command", id="shortcut-copy-btn")
+                    yield VoiceButton("󰍜  keyboard settings", id="shortcut-settings-btn")
         with Static(id="settings-footer"):
             yield Label("", id="settings-status")
-            yield VoiceButton("󰉋  save", role="primary", id="settings-save-btn")
+            yield VoiceButton("󰉋  save changes", role="primary", id="settings-save-btn")
 
     def on_mount(self) -> None:
         self._control.start()
@@ -337,28 +365,42 @@ class VoicePadApp(App[None]):
         else:
             self.notify("Clipboard is unavailable", severity="warning")
 
-    @on(OptionList.OptionSelected, "#history-options")
-    def history_selected(self, event: OptionList.OptionSelected) -> None:
-        if 0 <= event.option_index < len(self._history):
-            self.query_one("#history-viewer", Markdown).update(
-                self._history[event.option_index].markdown.read_text(encoding="utf-8")
-            )
+    @on(OptionList.OptionHighlighted, "#history-options")
+    def history_highlighted(self, event: OptionList.OptionHighlighted) -> None:
+        self._show_history_entry(event.option_index)
+
+    def _show_history_entry(self, index: int) -> None:
+        if not 0 <= index < len(self._history):
+            return
+        entry = self._history[index]
+        recorded_at = _recorded_at(entry.markdown.stem)
+        title = recorded_at.strftime("%A, %B %d · %H:%M:%S") if recorded_at is not None else entry.markdown.stem
+        status = "Complete" if entry.complete else "Incomplete"
+        audio = "WAV available" if entry.audio is not None else "audio unavailable"
+        self.query_one("#history-detail-title", Label).update(title)
+        self.query_one("#history-detail-meta", Label).update(
+            f"{entry.duration_seconds:.1f} seconds  ·  {status}  ·  {audio}"
+        )
+        self.query_one("#history-viewer", Markdown).update(entry.text or "_No speech detected._")
 
     def _load_history(self, select: Path | None = None) -> None:
         self._history = _read_history(self.config)
         options = self.query_one("#history-options", OptionList)
         options.clear_options()
+        self.query_one("#history-list-pane", Static).border_title = f"recordings · {len(self._history)}"
         selected_index = None
         for index, entry in enumerate(self._history):
-            marker = "✓" if entry.complete else "!"
-            options.add_option(f"{marker}  {entry.markdown.stem}  {entry.duration_seconds:.1f}s")
+            options.add_option(_history_label(entry))
             if select == entry.markdown:
                 selected_index = index
-        if selected_index is not None:
+        if self._history:
+            selected_index = selected_index if selected_index is not None else 0
             options.highlighted = selected_index
-            self.query_one("#history-viewer", Markdown).update(
-                self._history[selected_index].markdown.read_text(encoding="utf-8")
-            )
+            self._show_history_entry(selected_index)
+        else:
+            self.query_one("#history-detail-title", Label).update("No recordings yet")
+            self.query_one("#history-detail-meta", Label).update("Your completed dictations will appear here.")
+            self.query_one("#history-viewer", Markdown).update("_Record something to begin your local history._")
 
     def action_save_settings(self) -> None:
         if self._state in {"recording", "starting", "transcribing"}:
@@ -375,9 +417,8 @@ class VoicePadApp(App[None]):
                 artifact_cache_path=Path(self.query_one("#setting-artifacts", Input).value).expanduser(),
                 recording_prefix=self.query_one("#setting-prefix", Input).value,
                 input_device_index=self.config.input_device_index,
-                copy_complete_text=self.query_one("#setting-copy", Checkbox).value,
+                copy_complete_text=self.query_one("#setting-copy", Switch).value,
                 theme=selected_theme,
-                proper_nouns=_parse_aliases(self.query_one("#setting-proper_nouns", TextArea).text),
             )
             save_config(updated)
         except Exception as error:
@@ -395,21 +436,24 @@ class VoicePadApp(App[None]):
         self._load_history()
         self._activate()
 
-    def _render_aliases(self) -> str:
-        return "\n".join(f"{item.canonical} = {' | '.join(item.aliases)}" for item in self.config.proper_nouns)
+
+def _recorded_at(stem: str) -> datetime | None:
+    parts = stem.rsplit("_", 4)
+    if len(parts) != 5:
+        return None
+    try:
+        return datetime.strptime("".join(parts[1:4]), "%Y%m%d%H%M%S%f")
+    except ValueError:
+        return None
 
 
-def _parse_aliases(value: str) -> tuple[AliasConfiguration, ...]:
-    parsed = []
-    for line_number, line in enumerate(value.splitlines(), start=1):
-        if not line.strip():
-            continue
-        if "=" not in line:
-            raise ValueError(f"Alias line {line_number} must contain '='.")
-        canonical, alternatives = line.split("=", 1)
-        aliases = tuple(alias.strip() for alias in alternatives.split("|") if alias.strip())
-        parsed.append(AliasConfiguration(canonical.strip(), aliases))
-    return tuple(parsed)
+def _history_label(entry: HistoryEntry) -> str:
+    recorded_at = _recorded_at(entry.markdown.stem)
+    identity = recorded_at.strftime("%b %d  %H:%M:%S") if recorded_at is not None else entry.markdown.stem
+    if len(identity) > 22:
+        identity = f"{identity[:21]}…"
+    marker = "✓" if entry.complete else "!"
+    return f"{marker}  {identity}  {entry.duration_seconds:>6.1f}s"
 
 
 def _read_history(config: AppConfig) -> list[HistoryEntry]:

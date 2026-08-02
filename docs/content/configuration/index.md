@@ -26,15 +26,10 @@ Supported fields are:
   "recording_prefix": "recording",
   "input_device_index": null,
   "copy_complete_text": true,
-  "theme": "tokyo-night",
-  "proper_nouns": [
-    {"canonical": "VoicePad", "aliases": ["voice pad"]}
-  ]
+  "theme": "tokyo-night"
 }
 ```
 
 Unknown fields and obsolete schemas fail with an actionable error. VoicePad does
-not silently migrate or overwrite old configuration.
-
-Proper-noun aliases are deterministic word/phrase replacements after timestamp
-assembly. They are not decoder hotwords and never use fuzzy matching.
+not silently migrate or overwrite old configuration. The retired `proper_nouns`
+field is ignored for compatibility and omitted the next time settings are saved.

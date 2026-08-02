@@ -9,11 +9,12 @@ three-tab workflow.
   authoritative final text, processing metadata, and copy control. The first
   provisional update normally appears at the first confirmed pause after about
   25 seconds; later updates follow each processed chunk.
-- **History** lists schema-1 Markdown results and displays the selected record.
+- **History** presents recordings as a compact timestamp timeline, selects the
+  newest entry automatically, and keeps status/duration metadata separate from
+  the transcript text.
 - **Settings** controls recording, Markdown, and artifact-cache paths; filename
-  prefix; theme; automatic copy; explicit proper-noun aliases; and the
-  compositor-managed global shortcut. Saving reloads the verified resident
-  deployment when necessary.
+  prefix; theme; automatic copy; and the compositor-managed global shortcut.
+  Saving reloads the verified resident deployment when necessary.
 
 The theme selector includes the built-in Textual palettes, with `tokyo-night` as
 the default. The header intentionally reports the compact runtime identity

@@ -136,95 +136,244 @@ TabPane {
 }
 
 #history-list-pane {
+    width: 36%;
+    min-width: 34;
+    max-width: 44;
+    height: 1fr;
+    margin-right: 2;
     border: round $border-blurred;
     border-title-color: $primary;
-    width: 55;
-    height: 1fr;
+    border-title-style: bold;
     background: transparent;
-    margin-right: 1;
 }
 
 #history-view-pane {
-    border: round $border-blurred;
-    border-title-color: $primary;
-    border-title-align: left;
     width: 1fr;
     height: 1fr;
-    background: transparent;
     layout: vertical;
+    border: round $border-blurred;
+    border-title-color: $primary;
+    border-title-style: bold;
+    background: transparent;
 }
 
 #history-options {
     width: 1fr;
     height: 1fr;
-    background: transparent;
+    padding: 1 1;
     border: none;
-    padding: 0;
-}
-
-#history-viewer {
-    width: 1fr;
-    height: 1fr;
     background: transparent;
     scrollbar-gutter: stable;
     scrollbar-size-vertical: 1;
 }
 
-/* Consistent padding inside the viewer — top/left/right, not bottom (retranscribe btn is there) */
-#history-view-pane MarkdownViewer > Markdown {
-    padding: 1 1 0 2;
+#history-options > .option-list--option {
+    padding: 0 1;
+    color: $text-muted;
+}
+
+#history-options > .option-list--option-highlighted {
+    padding: 0 1;
+    color: $foreground;
+    background: $primary 18%;
+    text-style: bold;
+}
+
+#history-options:focus > .option-list--option-highlighted {
+    color: $foreground;
+    background: $primary 28%;
+    text-style: bold;
+}
+
+#history-options > .option-list--option-hover {
+    padding: 0 1;
+    background: $primary 10%;
+}
+
+#history-detail {
+    width: 100%;
+    height: 4;
+    padding: 1 2 0 2;
+    border-bottom: solid $border-blurred;
+    background: transparent;
+}
+
+#history-detail-title {
+    width: 100%;
+    height: 1;
+    color: $foreground;
+    text-style: bold;
+}
+
+#history-detail-meta {
+    width: 100%;
+    height: 1;
+    color: $text-muted;
+}
+
+#history-viewer {
+    width: 1fr;
+    height: 1fr;
+    padding: 2 3;
+    background: transparent;
+    scrollbar-gutter: stable;
+    scrollbar-size-vertical: 1;
 }
 
 /* ── settings tab ── */
 #settings-scroll {
     height: 1fr;
     width: 1fr;
+    align-horizontal: center;
 }
 
 #settings-fields {
     layout: vertical;
     height: auto;
-    width: 1fr;
-    padding: 0 1;
+    width: 100%;
+    max-width: 110;
+    padding: 1 2 3 2;
 }
 
-#settings-config-path {
-    height: 1;
-    color: $text-muted;
-    background: transparent;
-    border-left: tall $border-blurred;
-    margin-bottom: 2;
-    padding: 0 2;
-}
-
-.settings-row {
+.settings-group {
     layout: vertical;
     height: auto;
-    width: 1fr;
+    width: 100%;
+    margin-bottom: 3;
+}
+
+.settings-section-title {
+    height: 1;
+    color: $primary;
+    text-style: bold;
+}
+
+.settings-section-copy {
+    height: auto;
+    color: $text-muted;
     margin-bottom: 1;
-    padding-bottom: 1;
+}
+
+.settings-item {
+    layout: vertical;
+    height: auto;
+    width: 100%;
+    margin-top: 1;
 }
 
 .settings-key {
     height: 1;
-    color: $primary;
-    margin-bottom: 0;
+    color: $foreground;
+    text-style: bold;
+}
+
+.settings-help {
+    height: 1;
+    color: $text-disabled;
 }
 
 .settings-input {
-    width: 1fr;
+    width: 100%;
+    height: 2;
     margin-top: 0;
+    padding: 0 1;
+    border: none;
+    border-bottom: solid $border-blurred;
+    background: transparent;
 }
 
-#setting-proper_nouns {
-    height: 6;
+.settings-input:focus {
+    border: none;
+    border-bottom: solid $primary;
+    background: transparent;
+}
+
+Select.settings-input {
+    padding: 0;
+}
+
+Select.settings-input > SelectCurrent {
+    height: 2;
+    padding: 0 1;
+    border: none;
+    border-bottom: solid $border-blurred;
+    background: transparent;
+}
+
+Select.settings-input:focus > SelectCurrent {
+    border: none;
+    border-bottom: solid $primary;
+    background: transparent;
+    background-tint: transparent;
+}
+
+Select.settings-input > SelectOverlay {
+    border: round $border;
+    background: $surface;
+}
+
+.settings-toggle-row {
+    width: 100%;
+    height: 3;
+    margin-top: 2;
+    align: left middle;
+}
+
+.settings-toggle-copy {
+    width: 1fr;
+    height: 2;
+}
+
+#setting-copy {
+    width: auto;
+    height: 1;
+    margin-top: 1;
+    padding: 0;
+    border: none;
+    background: transparent;
+}
+
+#setting-copy:focus {
+    border: none;
+    background: transparent;
+}
+
+#shortcut-group {
+    margin-bottom: 1;
+}
+
+#shortcut-status {
+    margin-bottom: 0;
+}
+
+#shortcut-command {
+    width: 100%;
+    height: 3;
+    margin-top: 1;
+    padding: 0 2;
+    border-left: tall $primary;
+    background: transparent;
+    color: $text;
+    content-align: left middle;
+}
+
+#shortcut-actions {
+    width: 100%;
+    height: 2;
+    margin-top: 1;
+}
+
+#shortcut-copy-btn {
+    margin-right: 2;
 }
 
 #settings-footer {
     layout: horizontal;
     height: 3;
     align: right middle;
-    padding: 0 2;
+    padding: 1 3 0 3;
+    border-top: solid $border-blurred;
+    background: transparent;
 }
 
 #settings-status {
@@ -233,9 +382,8 @@ TabPane {
     color: $text-muted;
 }
 
-/* ── settings save button — inherits VoiceButton primary role ── */
 #settings-save-btn {
-    /* no overrides needed */
+    width: auto;
 }
 
 /* ── info modal ── */

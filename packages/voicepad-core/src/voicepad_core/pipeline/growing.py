@@ -15,7 +15,6 @@ from voicepad_core.planning import AdaptiveChunkPlanner, AudioChunk
 from voicepad_core.preprocessing import PreprocessedAudio
 from voicepad_core.vad import SAMPLE_RATE, PauseTracker, SileroVad, VadFrame, material_speech_regions
 
-from .aliases import AliasRule, apply_aliases
 from .assembly import ConservativeAssembler
 from .finite import ReadyEngine, SequentialVad
 from .types import ChunkOutcome, FileTranscriptionResult, GrowingTranscriptionUpdate
@@ -39,7 +38,6 @@ class GrowingTranscriptionJob:
         source: GrowingAudioSource,
         *,
         intent: TranscriptionIntent | None = None,
-        aliases: tuple[AliasRule, ...] = (),
         on_update: Callable[[GrowingTranscriptionUpdate], None] | None = None,
         descriptor_queue_size: int = 2,
     ) -> None:
@@ -54,7 +52,6 @@ class GrowingTranscriptionJob:
         self._vad = vad
         self._source = source
         self._intent = intent or TranscriptionIntent()
-        self._aliases = aliases
         self._on_update = on_update
         self._active = active
         self._queue: queue.Queue[AudioChunk | object] = queue.Queue(descriptor_queue_size)
@@ -186,9 +183,8 @@ class GrowingTranscriptionJob:
     def _publish_update(self, descriptor: AudioChunk) -> None:
         if self._on_update is None:
             return
-        corrected = apply_aliases(self._assembler.words, self._aliases)
         update = GrowingTranscriptionUpdate(
-            corrected.text,
+            self._assembler.text,
             len(self._outcomes),
             descriptor.logical_end_sample,
         )
@@ -232,10 +228,9 @@ class GrowingTranscriptionJob:
             and self._assembler.protocol_valid
             and not gaps
         )
-        corrected = apply_aliases(self._assembler.words, self._aliases)
         return FileTranscriptionResult(
-            text=corrected.text,
-            words=corrected.words,
+            text=self._assembler.text,
+            words=self._assembler.words,
             tokens=self._assembler.tokens,
             duration_seconds=self._source.committed_samples / SAMPLE_RATE,
             latency_seconds=time.perf_counter() - self._started_at,
@@ -243,7 +238,6 @@ class GrowingTranscriptionJob:
             chunks=tuple(self._outcomes),
             speech_regions=speech,
             coverage_gaps=gaps,
-            corrections=corrected.corrections,
             warnings=tuple(warnings),
             complete=complete,
         )
@@ -255,7 +249,6 @@ def build_growing_job(
     source: GrowingAudioSource,
     *,
     intent: TranscriptionIntent | None = None,
-    aliases: tuple[AliasRule, ...] = (),
     on_update: Callable[[GrowingTranscriptionUpdate], None] | None = None,
 ) -> GrowingTranscriptionJob:
     return GrowingTranscriptionJob(
@@ -263,6 +256,5 @@ def build_growing_job(
         SileroVad(silero_model),
         source,
         intent=intent,
-        aliases=aliases,
         on_update=on_update,
     )

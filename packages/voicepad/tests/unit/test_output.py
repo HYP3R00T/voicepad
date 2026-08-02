@@ -11,7 +11,7 @@ def result() -> FileTranscriptionResult:
     source = PARAKEET_V3_MANIFEST.source
     assert isinstance(source, HuggingFaceSource)
     active = ActiveDeployment(PARAKEET_V3_CUDA, source.revision, "GPU-test", "NVIDIA GPU", 4_000_000_000)
-    return FileTranscriptionResult("hello", (), (), 1.0, 0.1, active, (), (), (), (), (), True)
+    return FileTranscriptionResult("hello", (), (), 1.0, 0.1, active, (), (), (), (), True)
 
 
 def test_markdown_uses_authoritative_result_metadata(tmp_path: Path) -> None:

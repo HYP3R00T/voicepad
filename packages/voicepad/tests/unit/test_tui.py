@@ -4,13 +4,21 @@ from typing import cast
 from unittest.mock import patch
 
 import pytest
-from textual.widgets import Input, Select, Static, TabPane
+from textual.widgets import Input, Label, Markdown, OptionList, Select, Static, Switch, TabPane
 from voicepad.config import AppConfig
 from voicepad.runtime import ApplicationRuntime
-from voicepad.tui.app import VoicePadApp
+from voicepad.tui.app import HistoryEntry, VoicePadApp, _history_label, _recorded_at
 from voicepad_core.deployments import PARAKEET_V3_CUDA, PARAKEET_V3_MANIFEST, HuggingFaceSource
 from voicepad_core.inference import ActiveDeployment
 from voicepad_core.pipeline import GrowingTranscriptionUpdate
+
+
+def test_history_entries_have_compact_human_readable_labels(tmp_path: Path) -> None:
+    markdown = tmp_path / "daily_note_20260802_120053_314883_8c5b4a12.md"
+    entry = HistoryEntry(markdown, None, 30.5, True, "hello")
+
+    assert _recorded_at(markdown.stem) is not None
+    assert _history_label(entry) == "✓  Aug 02  12:00:53    30.5s"
 
 
 class FakeDesktopStatus:
@@ -53,6 +61,10 @@ class FakeRuntime:
 async def test_tui_activates_resident_nvidia_runtime(tmp_path: Path) -> None:
     runtime = FakeRuntime()
     config = AppConfig(recordings_path=tmp_path / "recordings", markdown_path=tmp_path / "markdown")
+    config.markdown_path.mkdir()
+    (config.markdown_path / "recording_20260802_120053_314883_8c5b4a12.md").write_text(
+        "---\naudio: recording.wav\nduration_seconds: 30.5\ncomplete: true\n---\n\nhello from history\n"
+    )
     app = VoicePadApp(config, runtime=cast(ApplicationRuntime, runtime))
 
     with (
@@ -70,6 +82,15 @@ async def test_tui_activates_resident_nvidia_runtime(tmp_path: Path) -> None:
             assert app.query_one("#tab-settings")
             assert str(app.query_one("#setting-recordings", Input).value) == str(app.config.recordings_path)
             assert app.query_one("#setting-theme", Select).value == app.config.theme
+            assert app.query_one("#setting-copy", Switch).value == app.config.copy_complete_text
+            assert len(app.query(".settings-group")) == 3
+            assert str(app.query_one("#shortcut-command", Static).render()) == app._shortcut.command
+            history_options = app.query_one("#history-options", OptionList)
+            assert history_options.option_count == 1
+            assert history_options.highlighted == 0
+            assert "Aug 02  12:00:53" in str(history_options.get_option_at_index(0).prompt)
+            assert "August 02" in str(app.query_one("#history-detail-title", Label).render())
+            assert app.query_one("#history-viewer", Markdown).source == "hello from history"
             header = app.query_one("#header", Static)
             assert header.region.height == 2
             assert header.styles.padding.top == 1
@@ -79,6 +100,9 @@ async def test_tui_activates_resident_nvidia_runtime(tmp_path: Path) -> None:
             assert app.query_one("#tab-record", TabPane).styles.background.a == 0
             assert app.query_one("#tab-history", TabPane).styles.background.a == 0
             assert app.query_one("#tab-settings", TabPane).styles.background.a == 0
+            assert app.query_one("#history-list-pane", Static).styles.background.a == 0
+            assert app.query_one("#history-detail", Static).styles.background.a == 0
+            assert app.query_one("#history-options", OptionList).styles.background.a == 0
 
             app._state = "recording"
             app._show_live_update(GrowingTranscriptionUpdate("provisional words", 1, 26 * 16_000))

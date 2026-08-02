@@ -23,7 +23,6 @@ def render_markdown(audio_path: Path, result: FileTranscriptionResult) -> str:
         f"latency_seconds: {result.latency_seconds:.3f}",
         f"complete: {'true' if result.complete else 'false'}",
         f"chunks: {len(result.chunks)}",
-        f"corrections: {len(result.corrections)}",
         "warnings:",
         warnings,
         "---",

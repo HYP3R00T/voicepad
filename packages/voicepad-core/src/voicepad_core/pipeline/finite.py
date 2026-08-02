@@ -18,7 +18,6 @@ from voicepad_core.planning import AdaptiveChunkPlanner
 from voicepad_core.preprocessing import DEFAULT_WAVEFORM_SPEC, AudioPreProcessor, PreprocessedAudio
 from voicepad_core.vad import PauseTracker, SileroVad, VadFrame, material_speech_regions
 
-from .aliases import AliasRule, apply_aliases
 from .assembly import ConservativeAssembler
 from .types import ChunkOutcome, FileTranscriptionResult
 
@@ -44,16 +43,9 @@ class SequentialVad(Protocol):
 class FiniteFileTranscriber:
     """Run immutable audio through VAD, bounded inference, and one assembler."""
 
-    def __init__(
-        self,
-        engine: ReadyEngine,
-        vad: SequentialVad,
-        *,
-        aliases: tuple[AliasRule, ...] = (),
-    ) -> None:
+    def __init__(self, engine: ReadyEngine, vad: SequentialVad) -> None:
         self._engine = engine
         self._vad = vad
-        self._aliases = aliases
 
     def transcribe_file(
         self,
@@ -137,10 +129,9 @@ class FiniteFileTranscriber:
             outcome.error is None and not outcome.cancelled for outcome in outcomes
         )
         complete = all_chunks_terminal and assembler.protocol_valid and not gaps and not token.is_cancelled
-        corrected = apply_aliases(assembler.words, self._aliases)
         return FileTranscriptionResult(
-            text=corrected.text,
-            words=corrected.words,
+            text=assembler.text,
+            words=assembler.words,
             tokens=assembler.tokens,
             duration_seconds=prepared.duration(),
             latency_seconds=time.perf_counter() - started,
@@ -148,7 +139,6 @@ class FiniteFileTranscriber:
             chunks=tuple(outcomes),
             speech_regions=speech,
             coverage_gaps=gaps,
-            corrections=corrected.corrections,
             warnings=tuple(warnings),
             complete=complete,
         )
@@ -157,7 +147,5 @@ class FiniteFileTranscriber:
 def build_finite_file_transcriber(
     engine: ResidentTranscriptionEngine,
     silero_model: Path,
-    *,
-    aliases: tuple[AliasRule, ...] = (),
 ) -> FiniteFileTranscriber:
-    return FiniteFileTranscriber(engine, SileroVad(silero_model), aliases=aliases)
+    return FiniteFileTranscriber(engine, SileroVad(silero_model))

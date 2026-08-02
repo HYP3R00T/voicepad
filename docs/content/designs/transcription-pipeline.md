@@ -690,7 +690,7 @@ Shutdown during recording follows this order:
 
 VoicePad does not free CUDA tensors underneath active model work.
 
-## Proper nouns and vocabulary intent
+## Vocabulary intent
 
 The official Parakeet Transformers implementation supports greedy search only
 and exposes no native prompt, hotword, or contextual-bias API. VoicePad will not
@@ -705,36 +705,15 @@ class TranscriptionIntent:
     vocabulary: tuple[str, ...] = ()
 ```
 
-Initial supported proper-noun behavior is deterministic alias correction after
-timestamp assembly. Configuration associates a canonical spelling only with
-explicit alternatives approved by the user. Replacement is word/phrase aware,
-preserves timing provenance, records the correction, and never performs a broad
-fuzzy rewrite.
-
-Example shape:
-
-```yaml
-proper_nouns:
-  - canonical: VoicePad
-    aliases: [voice pad]
-```
-
-Genuine decoder bias remains a research capability. A safe TDT implementation
-would tokenize configured phrases, maintain a prefix trie during decoding, and
-jointly alter token selection without desynchronizing predicted duration/frame
-advancement. The generic Transformers `LogitsProcessor` is not accepted without
-proof because TDT token and duration decisions are coupled. Fine-tuning is not
-used for dynamic user vocabulary.
-
-Contextual bias may become a separate Parakeet adapter capability only after
-local samples show improved names without ordinary-speech regressions. Until
-then the effective capability is `aliases`, not `native`.
+The Parakeet adapter rejects nonempty vocabulary requests until the deployment
+exposes a proven native capability. The pipeline does not rewrite assembled
+model output.
 
 ## Application result behavior
 
 The final result includes text, timed words/tokens when available, duration,
 latency, deployment/model/artifact/runtime/device identity, completeness, chunk
-outcomes, warnings, failures, and applied corrections.
+outcomes, warnings, and failures.
 
 For complete nonempty text, the application atomically writes Markdown, updates
 history from the same result text, and copies that exact text. For incomplete
@@ -757,7 +736,6 @@ language
 chunk minimum/preferred/lookback/maximum
 silence duration
 natural/forced overlap
-proper-noun aliases
 ```
 
 Unknown and obsolete fields fail with actionable field/path information. The
@@ -882,13 +860,10 @@ the target machine. These items remain explicit human/research gates:
    source audio; neither output is ground truth.
 2. Validate the 12-second semantic-overlap cap and final alignment thresholds
    with VAD-selected natural boundaries, not only fixed synthetic boundaries.
-3. Obtain representative local recordings for configured proper nouns and
-   compare baseline, explicit alias correction, and any experimental TDT
-   contextual bias.
-4. Exercise startup, active recording, stop/drain/copy, immediate second
+3. Exercise startup, active recording, stop/drain/copy, immediate second
    recording, unload/reload, and shutdown through the actual TUI after
    implementation.
-5. Test Windows on real Windows/NVIDIA hardware before adding support.
+4. Test Windows on real Windows/NVIDIA hardware before adding support.
 
 ## Migration sequencing
 

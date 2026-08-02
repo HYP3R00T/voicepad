@@ -40,11 +40,7 @@ class ApplicationRuntime:
 
     def transcribe_file(self, path: Path) -> FileTranscriptionResult:
         model = self._require_silero()
-        return build_finite_file_transcriber(
-            self.engine,
-            model,
-            aliases=self.config.alias_rules,
-        ).transcribe_file(path)
+        return build_finite_file_transcriber(self.engine, model).transcribe_file(path)
 
     def start_recording(
         self,
@@ -62,7 +58,6 @@ class ApplicationRuntime:
                 self.engine,
                 model,
                 microphone.growing_source,
-                aliases=self.config.alias_rules,
                 on_update=on_update,
             )
             job.start()
