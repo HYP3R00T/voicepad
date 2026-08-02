@@ -1809,7 +1809,7 @@ requires-dist = [
 
 [[package]]
 name = "voicepad-core"
-version = "0.2.1"
+version = "0.2.2"
 source = { editable = "packages/voicepad-core" }
 dependencies = [
     { name = "accelerate" },
