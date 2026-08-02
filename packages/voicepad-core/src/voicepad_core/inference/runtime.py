@@ -1,171 +1,186 @@
 from __future__ import annotations
 
-import logging
-from collections.abc import Iterable
+from collections.abc import Callable, Mapping
+from enum import StrEnum
 from pathlib import Path
-from threading import RLock
+from threading import Lock, RLock
+from typing import Protocol
 
-from .artifacts import ProgressCallback, locate_artifact, prepare_artifact
-from .backends import FasterWhisperDriver, SherpaOnnxDriver
-from .contracts import BackendContract, BackendDriver, PreparedModel, RuntimeInfo, RuntimeOptions, TranscriptionSession
-from .errors import BackendLookupError, BackendSessionError, BackendUnavailableError
-from ..config import get_config
-from ..models import Model, get_model
+from voicepad_core.artifacts import ArtifactStore, ProgressCallback
+from voicepad_core.deployments import ArtifactManifest, DeploymentDefinition, get_deployment, get_manifest
+from voicepad_core.preprocessing import PreprocessedAudio
 
-logger = logging.getLogger(__name__)
+from .cuda import CudaDevice, admit_cuda_device
+from .parakeet import TransformersParakeetTDTSession
+from .types import (
+    ActiveDeployment,
+    BackendResult,
+    CancellationToken,
+    InferenceError,
+    InvalidTranscriptionInputError,
+    RuntimeBusyError,
+    TranscriptionIntent,
+    TranscriptionSession,
+    UnsupportedIntentError,
+)
+
+SessionFactory = Callable[[DeploymentDefinition, ArtifactManifest, Path, CudaDevice], TranscriptionSession]
+DeviceAdmitter = Callable[[DeploymentDefinition, int], CudaDevice]
 
 
-class RuntimeManager:
-    """Download models and keep one backend session resident in memory."""
+class ArtifactProvider(Protocol):
+    def prepare(
+        self,
+        manifest: ArtifactManifest,
+        on_progress: ProgressCallback | None = None,
+    ) -> Path: ...
+
+
+class EngineState(StrEnum):
+    UNPREPARED = "unprepared"
+    PREPARING_ARTIFACT = "preparing-artifact"
+    LOADING = "loading"
+    WARMING = "warming"
+    READY = "ready"
+    ACTIVE_JOB = "active-job"
+    UNLOADING = "unloading"
+    FAILED = "failed"
+
+
+class ResidentTranscriptionEngine:
+    """Own one warmed deployment session and serialize all model operations."""
 
     def __init__(
         self,
-        cache_dir: Path,
-        drivers: Iterable[BackendDriver] | None = None,
+        artifact_root: Path,
+        *,
+        session_factories: Mapping[str, SessionFactory] | None = None,
+        device_admitter: DeviceAdmitter = admit_cuda_device,
+        artifact_store: ArtifactProvider | None = None,
     ) -> None:
-        self.cache_dir = cache_dir.expanduser().resolve()
-        enabled = drivers or (FasterWhisperDriver(), SherpaOnnxDriver())
-        self._drivers = {driver.id: driver for driver in enabled}
-        self._identity: tuple[Model, RuntimeOptions] | None = None
+        self._store = artifact_store or ArtifactStore(artifact_root)
+        self._factories = dict(
+            session_factories
+            or {
+                "transformers-parakeet-tdt": TransformersParakeetTDTSession,
+            }
+        )
+        self._admit_device = device_admitter
+        self._state = EngineState.UNPREPARED
         self._session: TranscriptionSession | None = None
-        self._lock = RLock()
+        self._state_lock = RLock()
+        self._operation_lock = Lock()
 
     @property
-    def active_info(self) -> RuntimeInfo | None:
-        """Return information about the loaded model."""
-        with self._lock:
-            return self._session.info if self._session is not None else None
+    def state(self) -> EngineState:
+        with self._state_lock:
+            return self._state
 
-    def contract(self, model: str | Model) -> BackendContract:
-        """Return the selected backend's input and output contract."""
-        return self._driver(self._model(model)).contract
+    @property
+    def active_deployment(self) -> ActiveDeployment | None:
+        with self._state_lock:
+            return self._session.deployment if self._session is not None else None
 
-    def is_ready(self, model: str | Model) -> bool:
-        """Return whether a complete model is already cached."""
-        return locate_artifact(self._model(model), self.cache_dir) is not None
-
-    def prepare(
+    def activate(
         self,
-        model: str | Model,
+        deployment_id: str,
+        *,
+        device_index: int = 0,
         on_progress: ProgressCallback | None = None,
-    ) -> Path:
-        """Download and validate a model without loading it."""
-        selected = self._model(model)
-        path = prepare_artifact(selected, self.cache_dir, on_progress)
-        logger.info("Prepared model: backend=%s model=%s path=%s", selected.backend, selected.id, path)
-        return path
-
-    def open(
-        self,
-        model: str | Model,
-        options: RuntimeOptions | None = None,
-    ) -> TranscriptionSession:
-        """Load a model, replacing the current session only when necessary."""
-        selected = self._model(model)
-        requested = options or RuntimeOptions()
-        identity = (selected, requested)
-
-        with self._lock:
-            if self._session is not None and self._identity == identity:
-                return self._session
-
-            driver = self._driver(selected)
-            if not driver.is_available():
-                raise BackendUnavailableError(f"Backend '{driver.id}' is unavailable.")
-
-            self.close()
-            prepared = PreparedModel(selected, self.prepare(selected))
-            try:
-                session = driver.open(prepared, requested)
-            except Exception as exc:
-                raise BackendSessionError(f"Backend '{driver.id}' could not open model '{selected.id}': {exc}") from exc
-
-            info = session.info
-            if info.backend_id != selected.backend or info.model_id != selected.id:
-                session.close()
-                raise BackendSessionError(f"Backend '{driver.id}' returned the wrong runtime identity.")
-
-            self._identity = identity
-            self._session = session
-            logger.info(
-                "Activated runtime: backend=%s model=%s device=%s precision=%s",
-                info.backend_id,
-                info.model_id,
-                info.device,
-                info.precision,
-            )
-            return session
-
-    def close(self) -> None:
-        """Release the loaded model."""
-        with self._lock:
-            session = self._session
-            self._session = None
-            self._identity = None
-            if session is None:
-                return
-            try:
-                session.close()
-            except Exception as exc:
-                raise BackendSessionError("Failed to close the active backend session.") from exc
-
-    def _driver(self, model: Model) -> BackendDriver:
+    ) -> ActiveDeployment:
+        if not self._operation_lock.acquire(blocking=False):
+            raise RuntimeBusyError("The transcription engine is busy.")
+        candidate: TranscriptionSession | None = None
         try:
-            return self._drivers[model.backend]
-        except KeyError as exc:
-            raise BackendLookupError(f"Backend '{model.backend}' is not registered.") from exc
+            definition = get_deployment(deployment_id)
+            manifest = get_manifest(definition.artifact_manifest_id)
+            with self._state_lock:
+                if (
+                    self._session is not None
+                    and self._session.deployment.definition.id == deployment_id
+                    and self._state is EngineState.READY
+                ):
+                    return self._session.deployment
+                self._close_session_locked()
+                self._state = EngineState.PREPARING_ARTIFACT
 
-    @staticmethod
-    def _model(model: str | Model) -> Model:
-        return get_model(model) if isinstance(model, str) else model
+            snapshot = self._store.prepare(manifest, on_progress)
+            device = self._admit_device(definition, device_index)
+            factory = self._factories.get(definition.adapter_id)
+            if factory is None:
+                raise InferenceError(f"No session adapter is registered for '{definition.adapter_id}'.")
+            with self._state_lock:
+                self._state = EngineState.LOADING
+            candidate = factory(definition, manifest, snapshot, device)
+            with self._state_lock:
+                self._state = EngineState.WARMING
+            warm = getattr(candidate, "warm", None)
+            if not callable(warm):
+                raise InferenceError(f"Session adapter '{definition.adapter_id}' does not implement warm-up.")
+            warm()
+            with self._state_lock:
+                self._session = candidate
+                candidate = None
+                self._state = EngineState.READY
+                return self._session.deployment
+        except Exception:
+            if candidate is not None:
+                candidate.close()
+            with self._state_lock:
+                self._session = None
+                self._state = EngineState.FAILED
+            raise
+        finally:
+            self._operation_lock.release()
 
+    def transcribe(
+        self,
+        audio: PreprocessedAudio,
+        intent: TranscriptionIntent | None = None,
+        cancellation: CancellationToken | None = None,
+    ) -> BackendResult:
+        if not self._operation_lock.acquire(blocking=False):
+            raise RuntimeBusyError("The transcription engine is busy.")
+        try:
+            with self._state_lock:
+                if self._state is not EngineState.READY or self._session is None:
+                    raise InferenceError(f"The transcription engine is not ready: state={self._state}.")
+                session = self._session
+                self._state = EngineState.ACTIVE_JOB
+            try:
+                result = session.transcribe(
+                    audio,
+                    intent or TranscriptionIntent(),
+                    cancellation or CancellationToken(),
+                )
+            except (InvalidTranscriptionInputError, UnsupportedIntentError):
+                with self._state_lock:
+                    self._state = EngineState.READY
+                raise
+            except Exception:
+                with self._state_lock:
+                    self._close_session_locked()
+                    self._state = EngineState.FAILED
+                raise
+            with self._state_lock:
+                self._state = EngineState.READY
+            return result
+        finally:
+            self._operation_lock.release()
 
-_default_manager: RuntimeManager | None = None
-_default_lock = RLock()
+    def unload(self) -> None:
+        if not self._operation_lock.acquire(blocking=False):
+            raise RuntimeBusyError("The transcription engine is busy.")
+        try:
+            with self._state_lock:
+                self._state = EngineState.UNLOADING
+                self._close_session_locked()
+                self._state = EngineState.UNPREPARED
+        finally:
+            self._operation_lock.release()
 
-
-def get_runtime_manager(cache_dir: Path | None = None) -> RuntimeManager:
-    """Return the process-wide runtime manager for the selected cache."""
-    global _default_manager
-    selected_cache = (cache_dir or get_config().model_cache_path).expanduser().resolve()
-    with _default_lock:
-        if _default_manager is None or _default_manager.cache_dir != selected_cache:
-            if _default_manager is not None:
-                _default_manager.close()
-            _default_manager = RuntimeManager(selected_cache)
-        return _default_manager
-
-
-def prepare_model(model_name: str, on_progress: ProgressCallback | None = None) -> Path:
-    """Download a supported model."""
-    return get_runtime_manager().prepare(model_name, on_progress)
-
-
-def model_is_ready(model_name: str) -> bool:
-    """Return whether a supported model is cached."""
-    return get_runtime_manager().is_ready(model_name)
-
-
-def activate_model(model_name: str, device: str = "auto", precision: str = "auto") -> RuntimeInfo:
-    """Load a supported model and report the selected runtime."""
-    return get_runtime_manager().open(model_name, RuntimeOptions(device=device, precision=precision)).info
-
-
-def deactivate_model() -> None:
-    """Close and discard the process-wide runtime."""
-    global _default_manager
-    with _default_lock:
-        manager = _default_manager
-        _default_manager = None
-        if manager is not None:
-            manager.close()
-
-
-__all__ = [
-    "RuntimeManager",
-    "activate_model",
-    "deactivate_model",
-    "get_runtime_manager",
-    "model_is_ready",
-    "prepare_model",
-]
+    def _close_session_locked(self) -> None:
+        session = self._session
+        self._session = None
+        if session is not None:
+            session.close()

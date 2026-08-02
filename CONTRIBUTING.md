@@ -86,7 +86,7 @@ Use an isolated worktree when another task or uncommitted work already occupies 
 - Add regression tests for confirmed defects.
 - Test important failure, cancellation, cleanup, and recovery behavior.
 - Update user or contributor documentation when behavior or workflow changes.
-- Do not commit credentials, `.env`, user recordings, private logs, model binaries, caches, or generated `site/` output.
+- Do not commit credentials, `.env`, user recordings, private logs, model binaries, caches, or generated `dist/` output.
 - Do not convert or add model artifacts unless an approved issue explicitly requires it and licensing permits it.
 
 If implementation reveals a materially different requirement, stop and update or split the issue before expanding the change.
@@ -100,7 +100,8 @@ uv run ruff check
 uv run ruff format --check
 uv run ty check
 uv run pytest packages --cov=voicepad --cov=voicepad_core --cov-fail-under=70
-uv run zensical build --clean
+pnpm --dir docs install --frozen-lockfile
+pnpm --dir docs build
 ```
 
 Run `prek run --all-files` before committing. Report hardware, model, network, or platform checks as passed, failed, or unavailable; do not represent unavailable checks as proof.

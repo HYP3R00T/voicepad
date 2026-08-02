@@ -5,7 +5,7 @@ Instructions for coding agents working in this repository.
 ## Project overview
 
 - Repo: `HYP3R00T/voicepad` — a private, local-first dictation application.
-- Stack: Python >= 3.13, `uv`, Textual, `ruff`, `ty`, `pytest`, and Zensical.
+- Stack: Python >= 3.13, `uv`, Textual, `ruff`, `ty`, `pytest`, Astro, Tailwind CSS, and `pnpm`.
 
 ## Environment setup
 
@@ -24,7 +24,7 @@ The Mise enter hook runs `scripts/enter_project.sh` to install Commitizen and co
 | Concern | Files |
 |---|---|
 | Python / tooling | `pyproject.toml`, `ruff.toml`, `ty.toml`, `mise.toml` |
-| Docs | `zensical.toml`, `docs/index.md` |
+| Docs | `docs/astro.config.mjs`, `docs/package.json`, `docs/src/`, `docs/content/` |
 | Scripts | `scripts/enter_project.sh` |
 | CI | `.github/workflows/ci.yml`, `.github/workflows/docs.yml` |
 
@@ -44,8 +44,9 @@ uv run ty check                # type check
 uv run pytest packages --cov=voicepad --cov=voicepad_core --cov-fail-under=70  # tests
 
 # Docs
-uv run zensical build --clean
-uv run zensical serve
+pnpm --dir docs install
+pnpm --dir docs build
+pnpm --dir docs dev
 ```
 
 Coverage threshold: **70%** (enforced in CI and `mise.toml` `test` task).
@@ -54,7 +55,7 @@ Coverage threshold: **70%** (enforced in CI and `mise.toml` `test` task).
 
 - **Code:** typed, explicit Python; `ruff` is the formatting/lint source of truth; avoid new tools unless justified; keep template files generic.
 - **Tests:** add or update tests for behavior changes; prefer focused unit tests over broad integration scaffolding.
-- **Docs:** update `docs/` if behavior or config changes; don't hand-edit `site/` (build artifact).
+- **Docs:** update Markdown in `docs/content/` if behavior or config changes; keep landing/layout code in `docs/src/`; don't hand-edit `docs/dist/` (build artifact).
 - **Commits:** use conventional commits (`cz commit` if available); planned work uses `issue-<number>-<slug>` branches and pull requests linked to an approved issue.
 - **Reviews:** `main` requires a pull request, current `CI (uv)`, and resolved review conversations; merging remains an explicit human action.
 - **Secrets:** never commit credentials; `.env` is gitignored and local-only. User recordings, private logs, and model binaries must not enter Git or GitHub.

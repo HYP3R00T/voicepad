@@ -29,7 +29,8 @@ uv run ruff check
 uv run ruff format --check
 uv run ty check
 uv run pytest packages --cov=voicepad --cov=voicepad_core --cov-fail-under=70
-uv run zensical build --clean
+pnpm --dir docs install --frozen-lockfile
+pnpm --dir docs build
 ```
 
 ## Risks, limitations, and review hotspots

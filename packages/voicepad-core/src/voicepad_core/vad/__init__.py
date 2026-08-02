@@ -1,11 +1,15 @@
-from .silero import InvalidVADSampleRateError, SileroVAD, SpeechSegment
-from .silero_download import VADModelDownloadError, ensure_model_exists, get_model_path
+from .activity import NaturalPause, PauseTracker, SpeechRegion, material_speech_regions
+from .silero import CONTEXT_SAMPLES, FRAME_SAMPLES, SAMPLE_RATE, SileroVad, VadError, VadFrame
 
 __all__ = [
-    "SpeechSegment",
-    "SileroVAD",
-    "InvalidVADSampleRateError",
-    "VADModelDownloadError",
-    "ensure_model_exists",
-    "get_model_path",
+    "CONTEXT_SAMPLES",
+    "FRAME_SAMPLES",
+    "SAMPLE_RATE",
+    "NaturalPause",
+    "PauseTracker",
+    "SileroVad",
+    "SpeechRegion",
+    "VadError",
+    "VadFrame",
+    "material_speech_regions",
 ]

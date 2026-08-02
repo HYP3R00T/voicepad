@@ -1,130 +1,142 @@
 from pathlib import Path
-from typing import cast
 
+import numpy as np
 import pytest
-from voicepad_core.audio import WaveformSpec
-from voicepad_core.inference.contracts import (
-    BackendContract,
-    PreparedModel,
-    RuntimeInfo,
-    RuntimeOptions,
-    TranscriptionRequest,
+from voicepad_core.artifacts import ProgressCallback
+from voicepad_core.deployments import (
+    PARAKEET_V3_CUDA,
+    PARAKEET_V3_MANIFEST,
+    ArtifactManifest,
+    HuggingFaceSource,
 )
-from voicepad_core.inference.errors import BackendLookupError, BackendSessionError, BackendUnavailableError
-from voicepad_core.inference.runtime import RuntimeManager
-from voicepad_core.inference.types import TranscriptionResult
-from voicepad_core.models import Model
+from voicepad_core.inference import (
+    ActiveDeployment,
+    BackendResult,
+    CancellationToken,
+    CudaDevice,
+    EngineState,
+    InferenceError,
+    ResidentTranscriptionEngine,
+    TranscriptionIntent,
+    UnsupportedIntentError,
+)
+from voicepad_core.preprocessing import PreprocessedAudio
 
 
-class _Session:
-    def __init__(self, model_id: str, backend: str = "test") -> None:
-        self._info = RuntimeInfo(backend, model_id, "cuda", "float16")
+class FakeStore:
+    def __init__(self, snapshot: Path) -> None:
+        self.snapshot = snapshot
+        self.calls = 0
+
+    def prepare(
+        self,
+        manifest: ArtifactManifest,
+        on_progress: ProgressCallback | None = None,
+    ) -> Path:
+        self.calls += 1
+        return self.snapshot
+
+
+class FakeSession:
+    def __init__(self, *, failure: Exception | None = None) -> None:
+        source = PARAKEET_V3_MANIFEST.source
+        assert isinstance(source, HuggingFaceSource)
+        self.deployment = ActiveDeployment(
+            PARAKEET_V3_CUDA,
+            source.revision,
+            "GPU-test",
+            "NVIDIA Test GPU",
+            4_000_000_000,
+        )
+        self.capabilities = PARAKEET_V3_CUDA.capabilities
+        self.failure = failure
+        self.warmed = False
         self.closed = False
 
-    @property
-    def info(self) -> RuntimeInfo:
-        return self._info
+    def warm(self) -> None:
+        self.warmed = True
 
-    def transcribe(self, request: TranscriptionRequest) -> TranscriptionResult:
-        raise NotImplementedError
+    def transcribe(
+        self,
+        audio: PreprocessedAudio,
+        intent: TranscriptionIntent,
+        cancellation: CancellationToken,
+    ) -> BackendResult:
+        if self.failure is not None:
+            raise self.failure
+        return BackendResult("ready", (), (), cancellation.is_cancelled)
 
     def close(self) -> None:
         self.closed = True
 
 
-class _Driver:
-    id = "test"
-    contract = BackendContract(WaveformSpec(16_000))
-
-    def __init__(self, *, available: bool = True, reported_backend: str = "test") -> None:
-        self.available = available
-        self.reported_backend = reported_backend
-        self.sessions: list[_Session] = []
-
-    def is_available(self) -> bool:
-        return self.available
-
-    def open(self, model: PreparedModel, options: RuntimeOptions) -> _Session:
-        session = _Session(model.spec.id, self.reported_backend)
-        self.sessions.append(session)
-        return session
+def device() -> CudaDevice:
+    return CudaDevice(0, "GPU-test", "NVIDIA Test GPU", 4_000_000_000, 3_000_000_000, (8, 6))
 
 
-class _FailingDriver(_Driver):
-    def open(self, model: PreparedModel, options: RuntimeOptions) -> _Session:
-        raise RuntimeError("native provider is missing")
+def audio() -> PreprocessedAudio:
+    return PreprocessedAudio(np.zeros(16_000, dtype=np.float32), 16_000, 1)
 
 
-def _model(model_id: str = "tiny", backend: str = "test") -> Model:
-    return Model(model_id, f"owner/{model_id}", backend, ("model.bin",), model_id, "test")
+def build_engine(tmp_path: Path, session: FakeSession) -> tuple[ResidentTranscriptionEngine, FakeStore]:
+    store = FakeStore(tmp_path / "snapshot")
+    engine = ResidentTranscriptionEngine(
+        tmp_path / "artifacts",
+        artifact_store=store,
+        device_admitter=lambda definition, index: device(),
+        session_factories={"transformers-parakeet-tdt": lambda *args: session},
+    )
+    return engine, store
 
 
-@pytest.fixture
-def prepared(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
-    """Avoid network access while testing runtime lifecycle behavior."""
-    path = tmp_path / "model"
-    path.mkdir()
-    (path / "model.bin").write_bytes(b"model")
-    monkeypatch.setattr("voicepad_core.inference.runtime.prepare_artifact", lambda *_args, **_kwargs: path)
-    return path
+def test_activate_warms_and_reuses_resident_session(tmp_path: Path) -> None:
+    session = FakeSession()
+    engine, store = build_engine(tmp_path, session)
+
+    active = engine.activate(PARAKEET_V3_CUDA.id)
+    repeated = engine.activate(PARAKEET_V3_CUDA.id)
+
+    assert active == repeated
+    assert engine.state is EngineState.READY
+    assert engine.active_deployment == active
+    assert session.warmed is True
+    assert store.calls == 1
 
 
-def test_contract_comes_from_selected_backend(tmp_path: Path) -> None:
-    """The model backend selects the published waveform contract."""
-    manager = RuntimeManager(tmp_path, [_Driver()])
-    assert manager.contract(_model()).audio.sample_rate == 16_000
+def test_transcribe_returns_to_ready_and_unload_closes_session(tmp_path: Path) -> None:
+    session = FakeSession()
+    engine, _ = build_engine(tmp_path, session)
+    engine.activate(PARAKEET_V3_CUDA.id)
+
+    result = engine.transcribe(audio())
+    engine.unload()
+
+    assert result.text == "ready"
+    assert session.closed is True
+    assert engine.state is EngineState.UNPREPARED
+    assert engine.active_deployment is None
 
 
-def test_unknown_backend_is_rejected(tmp_path: Path) -> None:
-    """A model cannot run without its explicitly selected backend."""
-    with pytest.raises(BackendLookupError):
-        RuntimeManager(tmp_path, []).contract(_model(backend="missing"))
+def test_unsupported_intent_does_not_invalidate_session(tmp_path: Path) -> None:
+    session = FakeSession(failure=UnsupportedIntentError("unsupported"))
+    engine, _ = build_engine(tmp_path, session)
+    engine.activate(PARAKEET_V3_CUDA.id)
+
+    with pytest.raises(UnsupportedIntentError):
+        engine.transcribe(audio())
+
+    assert engine.state is EngineState.READY
+    assert session.closed is False
 
 
-def test_open_reuses_identical_runtime(tmp_path: Path, prepared: Path) -> None:
-    """Repeated requests for the same model and options reuse GPU state."""
-    driver = _Driver()
-    manager = RuntimeManager(tmp_path, [driver])
-    first = manager.open(_model())
-    second = manager.open(_model())
-    assert first is second
+def test_unknown_inference_failure_invalidates_and_closes_session(tmp_path: Path) -> None:
+    session = FakeSession(failure=InferenceError("CUDA failure"))
+    engine, _ = build_engine(tmp_path, session)
+    engine.activate(PARAKEET_V3_CUDA.id)
 
+    with pytest.raises(InferenceError, match="CUDA failure"):
+        engine.transcribe(audio())
 
-def test_open_replaces_previous_runtime(tmp_path: Path, prepared: Path) -> None:
-    """Switching models closes the previous resident session."""
-    driver = _Driver()
-    manager = RuntimeManager(tmp_path, [driver])
-    first = cast(_Session, manager.open(_model("first")))
-    manager.open(_model("second"))
-    assert first.closed is True
-
-
-def test_unavailable_backend_fails_before_download(tmp_path: Path) -> None:
-    """Unavailable native dependencies produce an explicit error."""
-    manager = RuntimeManager(tmp_path, [_Driver(available=False)])
-    with pytest.raises(BackendUnavailableError):
-        manager.open(_model())
-
-
-def test_open_preserves_backend_failure_detail(tmp_path: Path, prepared: Path) -> None:
-    """A backend startup failure retains its actionable native error for callers."""
-    manager = RuntimeManager(tmp_path, [_FailingDriver()])
-
-    with pytest.raises(BackendSessionError, match="native provider is missing"):
-        manager.open(_model())
-
-
-def test_wrong_session_identity_is_rejected(tmp_path: Path, prepared: Path) -> None:
-    """A backend cannot silently report a different runtime."""
-    manager = RuntimeManager(tmp_path, [_Driver(reported_backend="wrong")])
-    with pytest.raises(BackendSessionError, match="wrong runtime identity"):
-        manager.open(_model())
-
-
-def test_close_is_idempotent(tmp_path: Path, prepared: Path) -> None:
-    """Closing repeatedly leaves no resident model."""
-    manager = RuntimeManager(tmp_path, [_Driver()])
-    session = cast(_Session, manager.open(_model()))
-    manager.close()
-    manager.close()
-    assert (session.closed, manager.active_info) == (True, None)
+    assert engine.state is EngineState.FAILED
+    assert engine.active_deployment is None
+    assert session.closed is True

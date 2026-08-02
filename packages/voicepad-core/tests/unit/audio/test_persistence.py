@@ -58,15 +58,15 @@ class TestWriteWavAtomic:
             (),
         )
 
-    def test_replace_failure_removes_temp_and_preserves_existing_destination(self, tmp_path: Path) -> None:
-        """When the atomic replacement fails, its temporary WAV is cleaned up."""
+    def test_promotion_failure_removes_temp_and_preserves_existing_destination(self, tmp_path: Path) -> None:
+        """When no-overwrite publication fails, its temporary WAV is cleaned up."""
         destination = tmp_path / "recording.wav"
         destination.write_bytes(b"existing recording")
         audio = RawAudio(samples=np.zeros(4, dtype=np.float32), sample_rate=16_000, channels=1)
 
         with (
-            patch("voicepad_core.audio.persistence.os.replace", side_effect=OSError("replace failed")),
-            pytest.raises(OSError, match="replace failed"),
+            patch("voicepad_core.audio.persistence.os.link", side_effect=OSError("promotion failed")),
+            pytest.raises(OSError, match="promotion failed"),
         ):
             write_wav_atomic(audio, destination)
 
@@ -91,6 +91,20 @@ def test_live_recording_reads_sample_range_and_finalizes(tmp_path: Path) -> None
     np.testing.assert_allclose(window.samples, [0.5, 0.75])
     assert (artifact.frame_count, artifact.duration(), sample_rate, len(persisted)) == (6, 1.5, 4, 6)
     assert tuple(tmp_path.glob(".recording-live-*.wav")) == ()
+
+
+def test_live_recording_refuses_overwrite_and_retains_recoverable_spool(tmp_path: Path) -> None:
+    destination = tmp_path / "recording.wav"
+    destination.write_bytes(b"existing recording")
+    recording = LiveWavRecording(destination, sample_rate=16_000, channels=1)
+    recording.start()
+    recording.append(np.zeros(512, dtype=np.float32))
+
+    with pytest.raises(FileExistsError):
+        recording.finish()
+
+    assert destination.read_bytes() == b"existing recording"
+    assert len(tuple(tmp_path.glob(".recording-live-*.wav"))) == 1
 
 
 def test_live_recording_read_during_finalization_uses_finished_artifact(tmp_path: Path) -> None:

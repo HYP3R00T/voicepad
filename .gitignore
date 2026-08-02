@@ -9,6 +9,8 @@ __pycache__/
 # Distribution / packaging
 .Python
 build/
+node_modules/
+.astro/
 develop-eggs/
 dist/
 downloads/
@@ -151,8 +153,8 @@ venv.bak/
 # Rope project settings
 .ropeproject
 
-# mkdocs documentation
-/site
+# Generated documentation
+/docs/dist
 
 # mypy
 .mypy_cache/

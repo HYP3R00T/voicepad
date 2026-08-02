@@ -28,23 +28,13 @@ def _resolve_input_device(device_index: int | None) -> int | None:
     return device_index
 
 
-def _query_native_rate(device_index: int | None) -> int:
-    try:
-        info = sd.query_devices(device_index, kind="input")
-        rate = int(info.get("default_samplerate", FALLBACK_INPUT_SAMPLE_RATE))
-        return rate if rate > 0 else FALLBACK_INPUT_SAMPLE_RATE
-    except Exception as err:
-        logger.warning("Falling back to %sHz for input device %s: %s", FALLBACK_INPUT_SAMPLE_RATE, device_index, err)
-        return FALLBACK_INPUT_SAMPLE_RATE
-
-
 class MicrophoneStream:
     """Live microphone capture using a non-blocking sounddevice InputStream."""
 
     def __init__(self, recording_path: Path, device_index: int | None = None) -> None:
         self._device_index = _resolve_input_device(device_index)
         self._recording_path = recording_path
-        self._sample_rate = _query_native_rate(self._device_index)
+        self._sample_rate = FALLBACK_INPUT_SAMPLE_RATE
         self._channels = DEFAULT_INPUT_CHANNELS
         self._lock = threading.Lock()
         self._lifecycle_lock = threading.Lock()
@@ -64,6 +54,14 @@ class MicrophoneStream:
         """Return whether the stream is currently recording."""
         with self._lock:
             return self._recording
+
+    @property
+    def growing_source(self) -> LiveWavRecording:
+        """Return the active disk-backed source for transcription workers."""
+        with self._lock:
+            if self._live_recording is None:
+                raise AudioStreamStateError("MicrophoneStream has no active recording writer.")
+            return self._live_recording
 
     def start(self) -> None:
         with self._lifecycle_lock:

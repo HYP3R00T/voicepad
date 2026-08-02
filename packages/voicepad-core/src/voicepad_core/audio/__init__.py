@@ -11,6 +11,7 @@ from .errors import (
 from .file import AudioSource, FileSource
 from .microphone import MicrophoneStream
 from .persistence import LiveWavRecording, WavArtifact, write_wav_atomic
+from .source import GrowingAudioSource
 from .types import AudioWindow, RawAudio, WaveformSpec
 
 __all__ = [
@@ -28,6 +29,7 @@ __all__ = [
     "SUPPORTED_FORMATS",
     "MicrophoneStream",
     "LiveWavRecording",
+    "GrowingAudioSource",
     "WavArtifact",
     "write_wav_atomic",
     "WaveformSpec",

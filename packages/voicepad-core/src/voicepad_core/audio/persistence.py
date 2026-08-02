@@ -70,12 +70,45 @@ class LiveWavRecording:
         self._ready = threading.Event()
         self._finished = threading.Event()
         self._state_lock = threading.Lock()
+        self._committed_condition = threading.Condition(self._state_lock)
         self._thread: threading.Thread | None = None
         self._finishing = False
         self._spool_path: Path | None = None
         self._frame_count = 0
         self._error: Exception | None = None
         self._artifact: WavArtifact | None = None
+
+    @property
+    def sample_rate(self) -> int:
+        return self._sample_rate
+
+    @property
+    def channels(self) -> int:
+        return self._channels
+
+    @property
+    def committed_samples(self) -> int:
+        with self._state_lock:
+            return self._frame_count
+
+    @property
+    def is_final(self) -> bool:
+        with self._state_lock:
+            return self._artifact is not None
+
+    def read_range(self, start_sample: int, end_sample: int) -> AudioWindow:
+        if end_sample <= start_sample:
+            raise ValueError("read range end must be greater than its start")
+        return self.read_from(start_sample, end_sample - start_sample)
+
+    def wait_for_update(self, after_sample: int, timeout: float | None = None) -> tuple[int, bool]:
+        with self._committed_condition:
+            self._committed_condition.wait_for(
+                lambda: self._frame_count > after_sample or self._artifact is not None or self._error is not None,
+                timeout=timeout,
+            )
+            self._raise_if_failed()
+            return self._frame_count, self._artifact is not None
 
     def start(self) -> None:
         if self._thread is not None:
@@ -162,9 +195,10 @@ class LiveWavRecording:
                 self._channels,
                 self._frame_count,
             )
-            with self._state_lock:
+            with self._committed_condition:
                 self._artifact = artifact
                 self._thread = None
+                self._committed_condition.notify_all()
             return artifact
         finally:
             self._finished.set()
@@ -207,11 +241,15 @@ class LiveWavRecording:
                             continue
                         if isinstance(item, np.ndarray):
                             spool.write(cast("NDArray[np.float32]", item))
-                            self._frame_count += len(item)
+                            with self._committed_condition:
+                                self._frame_count += len(item)
+                                self._committed_condition.notify_all()
                     finally:
                         self._queue.task_done()
         except Exception as exc:
-            self._error = exc
+            with self._committed_condition:
+                self._error = exc
+                self._committed_condition.notify_all()
             self._ready.set()
             self._fail_pending_reads(exc)
 
@@ -261,7 +299,7 @@ def write_wav_atomic(audio: RawAudio, path: str | Path) -> WavArtifact:
             format="WAV",
         )
         _flush_file(temporary_path)
-        os.replace(temporary_path, destination)
+        _promote_new_file(temporary_path, destination)
         _flush_file(destination)
     except Exception:
         temporary_path.unlink(missing_ok=True)
@@ -330,13 +368,12 @@ def _finalize_spool(
                     break
                 output.write(block)
         _flush_file(temporary_path)
-        os.replace(temporary_path, destination)
+        _promote_new_file(temporary_path, destination)
         _flush_file(destination)
     except Exception:
         temporary_path.unlink(missing_ok=True)
         raise
-    finally:
-        spool_path.unlink(missing_ok=True)
+    spool_path.unlink(missing_ok=True)
 
     artifact = WavArtifact(
         path=destination,
@@ -354,6 +391,16 @@ def _finalize_spool(
         artifact.channels,
     )
     return artifact
+
+
+def _promote_new_file(temporary_path: Path, destination: Path) -> None:
+    os.link(temporary_path, destination)
+    temporary_path.unlink()
+    descriptor = os.open(destination.parent, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def _flush_file(path: Path) -> None:

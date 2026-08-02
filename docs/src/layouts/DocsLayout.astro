@@ -1,0 +1,103 @@
+---
+import BaseLayout from './BaseLayout.astro'
+import { docGroups, docHref, flatDocs } from '../data/docs'
+
+interface Heading {
+  depth: number
+  slug: string
+  text: string
+}
+
+interface Props {
+  slug: string
+  title: string
+  description: string
+  headings: Heading[]
+}
+
+const { slug, title, description, headings } = Astro.props
+const base = import.meta.env.BASE_URL.replace(/\/$/, '')
+const currentIndex = flatDocs.findIndex((item) => item.slug === slug)
+const previous = currentIndex > 0 ? flatDocs[currentIndex - 1] : undefined
+const next = currentIndex >= 0 && currentIndex < flatDocs.length - 1 ? flatDocs[currentIndex + 1] : undefined
+const toc = headings.filter((heading) => heading.depth === 2 || heading.depth === 3)
+---
+
+<BaseLayout title={`${title} · VoicePad`} description={description}>
+  <div class="docs-mobile-picker shell lg:hidden">
+    <label for="docs-page" class="sr-only">Documentation page</label>
+    <select id="docs-page" data-docs-picker>
+      {flatDocs.map((item) => <option value={docHref(item.slug, base)} selected={item.slug === slug}>{item.label}</option>)}
+    </select>
+  </div>
+
+  <div class="shell docs-grid">
+    <aside class="docs-sidebar" aria-label="Documentation navigation">
+      <div class="sticky top-24 space-y-8">
+        {docGroups.map((group) => (
+          <section>
+            <h2>{group.label}</h2>
+            <nav>
+              {group.links.map((item) => (
+                <a class:list={[item.slug === slug && 'active']} href={docHref(item.slug, base)} aria-current={item.slug === slug ? 'page' : undefined}>
+                  {item.label}
+                </a>
+              ))}
+            </nav>
+          </section>
+        ))}
+      </div>
+    </aside>
+
+    <article class="docs-article docs-prose">
+      <slot />
+      <nav class="docs-pagination" aria-label="Previous and next pages">
+        {previous ? (
+          <a href={docHref(previous.slug, base)}>
+            <span>Previous</span>
+            <strong>← {previous.label}</strong>
+          </a>
+        ) : <span />}
+        {next && (
+          <a class="text-right" href={docHref(next.slug, base)}>
+            <span>Next</span>
+            <strong>{next.label} →</strong>
+          </a>
+        )}
+      </nav>
+    </article>
+
+    <aside class="docs-toc" aria-label="On this page">
+      {toc.length > 0 && (
+        <div class="sticky top-24">
+          <h2>On this page</h2>
+          <nav>
+            {toc.map((heading) => (
+              <a class:list={[heading.depth === 3 && 'nested']} href={`#${heading.slug}`}>{heading.text}</a>
+            ))}
+          </nav>
+        </div>
+      )}
+    </aside>
+  </div>
+</BaseLayout>
+
+<script>
+  document.querySelector<HTMLSelectElement>('[data-docs-picker]')?.addEventListener('change', (event) => {
+    window.location.href = (event.currentTarget as HTMLSelectElement).value
+  })
+
+  document.querySelectorAll<HTMLElement>('.docs-prose pre').forEach((block) => {
+    const button = document.createElement('button')
+    button.className = 'code-copy'
+    button.type = 'button'
+    button.textContent = 'Copy'
+    button.addEventListener('click', async () => {
+      const code = block.querySelector('code')?.textContent ?? ''
+      await navigator.clipboard.writeText(code)
+      button.textContent = 'Copied'
+      window.setTimeout(() => { button.textContent = 'Copy' }, 1500)
+    })
+    block.append(button)
+  })
+</script>
