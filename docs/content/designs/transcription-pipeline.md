@@ -114,7 +114,7 @@ source for a new transcription.
 - Cloud transcription.
 - Translation.
 - Claiming native hotword support that the model does not provide.
-- PyPI publication during the migration freeze.
+- Publishing packages directly from the backend implementation work.
 
 ## Verified research basis
 

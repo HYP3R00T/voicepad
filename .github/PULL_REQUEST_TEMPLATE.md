@@ -49,5 +49,5 @@ pnpm --dir docs build
 - [ ] Required local checks pass, and unavailable checks are disclosed.
 - [ ] Documentation is updated or the lack of documentation impact is explained.
 - [ ] The diff contains no credentials, private recordings, model binaries, caches, or generated site output.
-- [ ] This change does not publish packages, enable the PyPI workflow, add publishing credentials, or create a release.
+- [ ] This change does not directly publish packages, create package tags/releases, expose publishing credentials, or bypass the reviewed release-PR gate.
 - [ ] I reviewed the final diff and can explain every change, including AI-assisted work.
