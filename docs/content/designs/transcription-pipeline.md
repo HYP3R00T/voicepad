@@ -528,7 +528,7 @@ bounds:
 ```text
 minimum useful boundary:       20 seconds
 natural-boundary search:       after 25 seconds
-preferred duration:            about 30 seconds
+preferred duration:            30 seconds
 minimum qualifying silence:    500 milliseconds
 natural overlap:               previous pause-to-pause speech unit
 maximum semantic overlap:      12 seconds
@@ -538,12 +538,12 @@ hard runtime input:            60 seconds including overlap
 
 A natural breakpoint is the midpoint of a confirmed qualifying silence. The
 planner retains an ordered history of breakpoints. Once a logical chunk reaches
-25 seconds, the first subsequently confirmed natural breakpoint dispatches it;
-30 seconds is the expected duration rather than a timer that delays an already
-valid boundary. A finite-file or recovered backlog applies the same rule in
-sample order. If no qualifying pause arrives, the planner forces a boundary
-before the complete runtime source range, including left context, exceeds the
-hard maximum.
+25 seconds, the first subsequently confirmed natural breakpoint dispatches it.
+If no qualifying pause arrives by 30 seconds, the planner forces the boundary at
+the preferred duration instead of extending continuous speech to the runtime's
+hard input limit. A finite-file or recovered backlog applies the same rule in
+sample order. The hard maximum remains a safety bound on the complete runtime
+source range, including left context.
 
 Natural overlap uses two consecutive breakpoints:
 
