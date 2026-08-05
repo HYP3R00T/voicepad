@@ -71,15 +71,17 @@ class AdaptiveChunkPlanner:
         chunks: list[AudioChunk] = []
         while committed_samples > self._logical_start:
             hard_end = self._source_start + self.policy.maximum_input_seconds * SAMPLE_RATE
+            preferred_end = self._logical_start + self.policy.preferred_seconds * SAMPLE_RATE
+            forced_end = min(preferred_end, hard_end)
             search_start = self._logical_start + self.policy.natural_search_seconds * SAMPLE_RATE
             boundary = None
             if committed_samples >= search_start:
-                boundary = self._natural_boundary(search_start, min(committed_samples, hard_end))
+                boundary = self._natural_boundary(search_start, min(committed_samples, forced_end))
             if boundary is not None:
                 chunks.append(self._emit(boundary, natural=True))
                 continue
-            if committed_samples >= hard_end:
-                chunks.append(self._emit(hard_end, natural=False))
+            if committed_samples >= forced_end:
+                chunks.append(self._emit(forced_end, natural=False))
                 continue
             break
 

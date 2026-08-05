@@ -62,13 +62,17 @@ def test_backlog_still_prefers_available_natural_boundary_before_forcing() -> No
     assert chunks[0].overlap is OverlapKind.NONE
 
 
-def test_continuous_speech_forces_bounded_chunk_and_two_second_overlap() -> None:
+def test_continuous_speech_forces_at_preferred_duration_with_two_second_overlap() -> None:
     planner = AdaptiveChunkPlanner()
 
-    first = planner.poll(60 * SR)
-    tail = planner.poll(65 * SR, final=True)
+    assert planner.poll(29 * SR) == ()
+    chunks = planner.poll(65 * SR)
+    tail = planner.poll(70 * SR, final=True)
 
-    assert first[0].source_end_sample - first[0].source_start_sample == 60 * SR
+    assert [chunk.logical_end_sample for chunk in chunks] == [30 * SR, 60 * SR]
+    assert chunks[0].source_start_sample == 0
+    assert chunks[1].source_start_sample == 28 * SR
+    assert chunks[1].overlap is OverlapKind.FORCED
     assert tail[0].source_start_sample == 58 * SR
     assert tail[0].logical_start_sample == 60 * SR
     assert tail[0].overlap is OverlapKind.FORCED
@@ -84,11 +88,11 @@ def test_planner_dispatches_first_confirmed_pause_after_25_seconds() -> None:
     assert chunks[0].logical_end_sample == 26 * SR
 
 
-def test_planner_waits_for_first_pause_after_target() -> None:
+def test_planner_does_not_wait_past_preferred_duration_for_later_pause() -> None:
     planner = AdaptiveChunkPlanner()
     planner.add_pause(pause(34))
 
-    assert planner.poll(30 * SR) == ()
-    chunks = planner.poll(35 * SR)
+    chunks = planner.poll(30 * SR)
 
-    assert chunks[0].logical_end_sample == 34 * SR
+    assert chunks[0].logical_end_sample == 30 * SR
+    assert chunks[0].overlap is OverlapKind.NONE
