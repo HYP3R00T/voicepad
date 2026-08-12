@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 import soundfile as sf
+from voicepad_core.audio.errors import AudioStreamStateError
 from voicepad_core.audio.persistence import LiveWavRecording, WavArtifact, write_wav_atomic
 from voicepad_core.audio.types import AudioWindow, RawAudio
 
@@ -119,6 +120,26 @@ def test_abort_retains_spool_if_writer_does_not_stop(tmp_path: Path) -> None:
 
     assert spool.exists()
     assert recording._thread is writer
+
+
+def test_live_read_failure_does_not_stop_audio_persistence(tmp_path: Path) -> None:
+    destination = tmp_path / "recording.wav"
+    recording = LiveWavRecording(destination, sample_rate=4, channels=1)
+    recording.start()
+    recording.append(np.array([0.0, 0.25], dtype=np.float32))
+
+    with (
+        patch("voicepad_core.audio.persistence._read_window", side_effect=RuntimeError("read failed")),
+        pytest.raises(AudioStreamStateError, match="Could not read live audio"),
+    ):
+        recording.read_from(0)
+
+    recording.append(np.array([0.5, 0.75], dtype=np.float32))
+    artifact = recording.finish()
+    persisted, _ = sf.read(destination, dtype="float32")
+
+    assert artifact.frame_count == 4
+    np.testing.assert_allclose(persisted, [0.0, 0.25, 0.5, 0.75])
 
 
 def test_live_recording_read_during_finalization_uses_finished_artifact(tmp_path: Path) -> None:
