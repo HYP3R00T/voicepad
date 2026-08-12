@@ -233,14 +233,26 @@ class LiveWavRecording:
                         if item is _FINISH:
                             break
                         if isinstance(item, _ReadRequest):
-                            spool.flush()
-                            requested_end = (
-                                self._frame_count
-                                if item.max_samples is None
-                                else min(self._frame_count, item.start_sample + item.max_samples)
-                            )
-                            item.result = _read_window(self._spool_path, item.start_sample, requested_end)
-                            item.completed.set()
+                            try:
+                                spool.flush()
+                                requested_end = (
+                                    self._frame_count
+                                    if item.max_samples is None
+                                    else min(self._frame_count, item.start_sample + item.max_samples)
+                                )
+                                item.result = _read_window(self._spool_path, item.start_sample, requested_end)
+                            except Exception as error:
+                                item.error = error
+                                logger.exception(
+                                    "Live transcription read failed without stopping audio persistence: "
+                                    "destination=%s start_sample=%s max_samples=%s committed_frames=%s",
+                                    self._path,
+                                    item.start_sample,
+                                    item.max_samples,
+                                    self._frame_count,
+                                )
+                            finally:
+                                item.completed.set()
                             continue
                         if isinstance(item, np.ndarray):
                             spool.write(cast("NDArray[np.float32]", item))

@@ -484,7 +484,8 @@ class GrowingAudioSource(Protocol):
 The microphone callback copies buffers only into the bounded persistence queue.
 The writer appends a float WAV spool, publishes committed sample positions, and
 atomically finalizes the user-visible PCM WAV. Inference never executes on the
-microphone callback and cannot block persistence.
+microphone callback and cannot block persistence. A failed inference read is
+returned only to its requesting worker; it cannot terminate the audio writer.
 
 Writer backpressure or disk failure stops capture loudly. A finalization failure
 retains recoverable spool data. Existing WAV files are opened read-only and are
@@ -670,6 +671,11 @@ may mark a transcript incomplete; the WAV remains the durable source for
 retranscription.
 
 ## Cancellation and failure recovery
+
+Planner and inference workers cancel each other after failure, stop publishing
+to abandoned queues, and are both joined before a terminal result is returned.
+Source-read, preprocessing, inference, and assembly failures are recorded as
+stage-specific failed chunk outcomes without transcript text in logs.
 
 A cancellation token is passed to every job. Transformers stopping criteria can
 stop TDT generation, but only after encoder execution completes. Bounded chunks

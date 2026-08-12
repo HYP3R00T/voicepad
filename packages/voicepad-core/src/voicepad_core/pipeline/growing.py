@@ -82,9 +82,13 @@ class GrowingTranscriptionJob:
         self._cancellation.cancel()
 
     def finish(self, timeout: float = 120.0) -> FileTranscriptionResult:
-        if self._planner_thread is None:
+        if self._planner_thread is None or self._inference_thread is None:
             raise GrowingPipelineError("Growing transcription job is not started.")
-        if not self._done.wait(timeout):
+        deadline = time.monotonic() + timeout
+        for thread in (self._planner_thread, self._inference_thread):
+            thread.join(max(0.0, deadline - time.monotonic()))
+        if self._planner_thread.is_alive() or self._inference_thread.is_alive():
+            self._cancellation.cancel()
             raise GrowingPipelineError("Timed out while finalizing growing transcription.")
         if self._result is None:
             self._result = self._build_result()
@@ -121,6 +125,7 @@ class GrowingTranscriptionJob:
                             break
                     break
         except Exception as error:
+            logger.exception("Growing transcription planning failed")
             self._error = error
             self._warnings.append("growing-source planning failed")
             self._cancellation.cancel()
@@ -137,14 +142,21 @@ class GrowingTranscriptionJob:
                     assert isinstance(item, AudioChunk)
                     if self._cancellation.is_cancelled:
                         continue
-                    window = self._source.read_range(item.source_start_sample, item.source_end_sample)
-                    if window.start_sample != item.source_start_sample or window.end_sample != item.source_end_sample:
-                        raise GrowingPipelineError("Growing source lost a planned committed range.")
-                    audio = PreprocessedAudio(np.ascontiguousarray(window.samples), SAMPLE_RATE, 1)
                     index = len(self._outcomes)
                     started = time.perf_counter()
+                    stage = "source read"
                     try:
+                        window = self._source.read_range(item.source_start_sample, item.source_end_sample)
+                        if (
+                            window.start_sample != item.source_start_sample
+                            or window.end_sample != item.source_end_sample
+                        ):
+                            raise GrowingPipelineError("Growing source lost a planned committed range.")
+                        stage = "preprocessing"
+                        audio = PreprocessedAudio(np.ascontiguousarray(window.samples), SAMPLE_RATE, 1)
+                        stage = "inference"
                         result = self._engine.transcribe(audio, self._intent, self._cancellation)
+                        stage = "assembly"
                         self._assembler.add(index, item, result)
                         self._outcomes.append(
                             ChunkOutcome(
@@ -169,14 +181,20 @@ class GrowingTranscriptionJob:
                                 0,
                                 0,
                                 False,
-                                f"{type(error).__name__}: {error}",
+                                f"{stage}: {type(error).__name__}: {error}",
                             )
                         )
+                        logger.exception("Growing transcription chunk failed: chunk=%s stage=%s", index, stage)
                         self._error = error
-                        self._warnings.append(f"chunk {index} failed")
+                        self._warnings.append(f"chunk {index} {stage} failed")
                         self._cancellation.cancel()
                 finally:
                     self._queue.task_done()
+        except Exception as error:
+            logger.exception("Growing transcription inference worker failed")
+            self._error = error
+            self._warnings.append("growing inference worker failed")
+            self._cancellation.cancel()
         finally:
             self._done.set()
 
@@ -203,7 +221,7 @@ class GrowingTranscriptionJob:
         return False
 
     def _put_finished(self) -> None:
-        while True:
+        while self._inference_thread is not None and self._inference_thread.is_alive():
             try:
                 self._queue.put(_FINISHED, timeout=0.1)
                 return

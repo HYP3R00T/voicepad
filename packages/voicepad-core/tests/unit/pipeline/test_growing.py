@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 from threading import Event
+from unittest.mock import patch
 
 import numpy as np
-from voicepad_core.audio import LiveWavRecording
+from voicepad_core.audio import AudioWindow, LiveWavRecording
 from voicepad_core.deployments import PARAKEET_V3_CUDA, PARAKEET_V3_MANIFEST, HuggingFaceSource
 from voicepad_core.inference import ActiveDeployment, BackendResult, TimedWord, TokenTimestamp
 from voicepad_core.pipeline import GrowingTranscriptionJob, GrowingTranscriptionUpdate
@@ -36,6 +37,25 @@ class BoundaryVad:
             probability = 0.1 if 25 * SR <= absolute < 26 * SR else 0.9
             frames.append(VadFrame(absolute, start_sample + min(offset + 512, len(samples)), probability))
         return tuple(frames)
+
+
+class FailingInferenceReadSource:
+    sample_rate = SR
+    channels = 1
+    committed_samples = 2 * SR
+    is_final = True
+
+    def __init__(self) -> None:
+        self.reads = 0
+
+    def wait_for_update(self, after_sample: int, timeout: float | None = None) -> tuple[int, bool]:
+        return self.committed_samples, True
+
+    def read_range(self, start_sample: int, end_sample: int) -> AudioWindow:
+        self.reads += 1
+        if self.reads > 2:
+            raise RuntimeError("inference read failed")
+        return AudioWindow(np.zeros(end_sample - start_sample, dtype=np.float32), start_sample)
 
 
 class FakeEngine:
@@ -113,6 +133,33 @@ def test_growing_job_cancellation_is_not_reported_complete(tmp_path: Path) -> No
     result = job.finish()
 
     assert result.complete is False
+
+
+def test_inference_read_failure_finishes_incomplete_without_leaking_workers() -> None:
+    source = FailingInferenceReadSource()
+    job = GrowingTranscriptionJob(FakeEngine(), SpeechVad(), source)
+    job.start()
+
+    result = job.finish(timeout=2)
+
+    assert result.complete is False
+    assert result.chunks[0].error == "source read: RuntimeError: inference read failed"
+    assert result.warnings[0] == "chunk 0 source read failed"
+    assert job._planner_thread is not None and not job._planner_thread.is_alive()
+    assert job._inference_thread is not None and not job._inference_thread.is_alive()
+
+
+def test_unexpected_inference_worker_failure_does_not_strand_planner() -> None:
+    source = FailingInferenceReadSource()
+    job = GrowingTranscriptionJob(FakeEngine(), SpeechVad(), source)
+    with patch.object(job._queue, "get", side_effect=RuntimeError("queue failed")):
+        job.start()
+        result = job.finish(timeout=2)
+
+    assert result.complete is False
+    assert "growing inference worker failed" in result.warnings
+    assert job._planner_thread is not None and not job._planner_thread.is_alive()
+    assert job._inference_thread is not None and not job._inference_thread.is_alive()
 
 
 def test_growing_source_publishes_committed_cursor_and_final_state(tmp_path: Path) -> None:
