@@ -66,8 +66,12 @@ class ApplicationRuntime:
                 on_update=on_update,
             )
             job.start()
-        except Exception:
-            microphone.stop()
+        except Exception as error:
+            try:
+                microphone.stop()
+            except Exception as cleanup_error:
+                logger.exception("Microphone cleanup failed after recording startup failure")
+                error.add_note(f"Microphone cleanup also failed: {cleanup_error}")
             raise
         return microphone, job
 

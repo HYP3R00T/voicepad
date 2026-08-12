@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import contextlib
 import logging
+import sys
 import threading
 import time
 from pathlib import Path
@@ -78,16 +78,29 @@ def start_recording(
         raise
     except Exception as error:
         if microphone is not None and microphone.is_recording:
-            with contextlib.suppress(Exception):
+            try:
                 microphone.stop()
+            except Exception as cleanup_error:
+                logger.exception("Microphone cleanup failed after record command failure")
+                error.add_note(f"Microphone cleanup also failed: {cleanup_error}")
         if job is not None:
             job.cancel()
-            with contextlib.suppress(Exception):
+            try:
                 job.finish(timeout=30)
+            except Exception as cleanup_error:
+                logger.exception("Transcription cleanup failed after record command failure")
+                error.add_note(f"Transcription cleanup also failed: {cleanup_error}")
         typer.secho(f"VoicePad failed: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from error
     finally:
-        runtime.close()
+        primary_error = sys.exception()
+        try:
+            runtime.close()
+        except Exception as cleanup_error:
+            logger.exception("Runtime cleanup failed after record command")
+            if primary_error is None:
+                raise
+            (primary_error.__cause__ or primary_error).add_note(f"Runtime cleanup also failed: {cleanup_error}")
 
 
 def _wait_for_stop(duration: float | None, microphone: MicrophoneStream) -> None:

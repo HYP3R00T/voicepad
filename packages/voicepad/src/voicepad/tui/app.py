@@ -201,6 +201,7 @@ class VoicePadApp(App[None]):
         try:
             active = self.runtime.activate()
         except Exception as error:
+            logger.exception("Runtime activation failed")
             self.call_from_thread(self._set_error, f"activation failed: {error}")
             return
         self.call_from_thread(self._set_ready, active.device_name)
@@ -440,7 +441,12 @@ class VoicePadApp(App[None]):
         except Exception as error:
             self.query_one("#settings-status", Label).update(f"Settings error: {error}")
             return
-        self.runtime.close()
+        try:
+            self.runtime.close()
+        except Exception as error:
+            logger.exception("Runtime cleanup failed while applying settings")
+            self.query_one("#settings-status", Label).update(f"Settings saved, but runtime cleanup failed: {error}")
+            return
         self.config = updated
         self.runtime = ApplicationRuntime(updated)
         self.theme = updated.theme

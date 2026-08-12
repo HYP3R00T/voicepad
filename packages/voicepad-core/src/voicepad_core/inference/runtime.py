@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Mapping
 from enum import StrEnum
 from pathlib import Path
@@ -26,6 +27,7 @@ from .types import (
 
 SessionFactory = Callable[[DeploymentDefinition, ArtifactManifest, Path, CudaDevice], TranscriptionSession]
 DeviceAdmitter = Callable[[DeploymentDefinition, int], CudaDevice]
+logger = logging.getLogger(__name__)
 
 
 class ArtifactProvider(Protocol):
@@ -123,9 +125,13 @@ class ResidentTranscriptionEngine:
                 candidate = None
                 self._state = EngineState.READY
                 return self._session.deployment
-        except Exception:
+        except Exception as error:
             if candidate is not None:
-                candidate.close()
+                try:
+                    candidate.close()
+                except Exception as cleanup_error:
+                    logger.exception("Session cleanup failed after activation failure")
+                    error.add_note(f"Session cleanup also failed: {cleanup_error}")
             with self._state_lock:
                 self._session = None
                 self._state = EngineState.FAILED
@@ -157,10 +163,15 @@ class ResidentTranscriptionEngine:
                 with self._state_lock:
                     self._state = EngineState.READY
                 raise
-            except Exception:
+            except Exception as error:
                 with self._state_lock:
-                    self._close_session_locked()
-                    self._state = EngineState.FAILED
+                    try:
+                        self._close_session_locked()
+                    except Exception as cleanup_error:
+                        logger.exception("Session cleanup failed after transcription failure")
+                        error.add_note(f"Session cleanup also failed: {cleanup_error}")
+                    finally:
+                        self._state = EngineState.FAILED
                 raise
             with self._state_lock:
                 self._state = EngineState.READY
@@ -174,7 +185,12 @@ class ResidentTranscriptionEngine:
         try:
             with self._state_lock:
                 self._state = EngineState.UNLOADING
-                self._close_session_locked()
+                try:
+                    self._close_session_locked()
+                except Exception:
+                    self._state = EngineState.FAILED
+                    logger.exception("Session cleanup failed while unloading")
+                    raise
                 self._state = EngineState.UNPREPARED
         finally:
             self._operation_lock.release()
