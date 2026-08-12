@@ -134,3 +134,45 @@ async def test_tui_activates_resident_nvidia_runtime(tmp_path: Path) -> None:
 
     assert runtime.closed is True
     assert desktop_status.stopped is True
+
+
+@pytest.mark.asyncio
+async def test_settings_reload_reports_runtime_close_failure(tmp_path: Path) -> None:
+    runtime = FakeRuntime()
+    runtime.close = MagicMock(side_effect=RuntimeError("close failed"))  # type: ignore[method-assign]
+    config = AppConfig(recordings_path=tmp_path / "recordings", markdown_path=tmp_path / "markdown")
+    app = VoicePadApp(config, runtime=cast(ApplicationRuntime, runtime))
+
+    with (
+        patch("voicepad.tui.app.ControlServer.start"),
+        patch("voicepad.tui.app.ControlServer.stop"),
+        patch("voicepad.tui.app.DesktopStatus", FakeDesktopStatus),
+        patch("voicepad.tui.app.save_config"),
+    ):
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.action_save_settings()
+            assert "runtime cleanup failed: close failed" in str(app.query_one("#settings-status", Label).render())
+            assert app.runtime is runtime
+
+
+@pytest.mark.asyncio
+async def test_settings_reload_reports_reactivation_failure(tmp_path: Path) -> None:
+    runtime = FakeRuntime()
+    config = AppConfig(recordings_path=tmp_path / "recordings", markdown_path=tmp_path / "markdown")
+    app = VoicePadApp(config, runtime=cast(ApplicationRuntime, runtime))
+
+    with (
+        patch("voicepad.tui.app.ControlServer.start"),
+        patch("voicepad.tui.app.ControlServer.stop"),
+        patch("voicepad.tui.app.DesktopStatus", FakeDesktopStatus),
+        patch("voicepad.tui.app.save_config"),
+        patch("voicepad.tui.app.ApplicationRuntime") as runtime_type,
+    ):
+        runtime_type.return_value.activate.side_effect = RuntimeError("reactivation failed")
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.action_save_settings()
+            await pilot.pause()
+            assert "activation failed: reactivation failed" in str(app.query_one("#status", Label).render())
+            assert app._state == "error"

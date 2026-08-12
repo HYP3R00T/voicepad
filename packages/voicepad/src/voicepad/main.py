@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import sys
 from pathlib import Path
 from typing import Annotated
 
@@ -11,6 +13,7 @@ from voicepad.output import persist_markdown
 from voicepad.runtime import ApplicationRuntime
 from voicepad.tui.utils.clipboard import copy_to_clipboard
 
+logger = logging.getLogger(__name__)
 app = typer.Typer(
     help="VoicePad — private local NVIDIA-accelerated dictation.",
     invoke_without_command=True,
@@ -31,7 +34,14 @@ def prepare() -> None:
         typer.secho(f"Preparation failed: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from error
     finally:
-        runtime.close()
+        primary_error = sys.exception()
+        try:
+            runtime.close()
+        except Exception as cleanup_error:
+            logger.exception("Runtime cleanup failed after prepare command")
+            if primary_error is None:
+                raise
+            (primary_error.__cause__ or primary_error).add_note(f"Runtime cleanup also failed: {cleanup_error}")
 
 
 @app.command("transcribe")
@@ -59,7 +69,14 @@ def transcribe_file(
         typer.secho(f"Transcription failed: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from error
     finally:
-        runtime.close()
+        primary_error = sys.exception()
+        try:
+            runtime.close()
+        except Exception as cleanup_error:
+            logger.exception("Runtime cleanup failed after transcribe command")
+            if primary_error is None:
+                raise
+            (primary_error.__cause__ or primary_error).add_note(f"Runtime cleanup also failed: {cleanup_error}")
 
 
 @app.command("toggle")

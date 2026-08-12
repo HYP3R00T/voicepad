@@ -19,6 +19,26 @@ def test_cli_wait_stops_on_capture_failure() -> None:
     assert time.monotonic() - started < 1
 
 
+def test_record_command_preserves_primary_failure_when_cleanup_fails() -> None:
+    microphone = MagicMock()
+    microphone.is_recording = True
+    microphone.stop.side_effect = RuntimeError("stop failed")
+    job = MagicMock()
+    job.finish.side_effect = RuntimeError("finish failed")
+    runtime = MagicMock()
+    runtime.start_recording.return_value = (microphone, job)
+    runtime.close.side_effect = RuntimeError("close failed")
+    with (
+        patch("voicepad.cli.record.ApplicationRuntime", return_value=runtime),
+        patch("voicepad.cli.record._wait_for_stop", side_effect=RuntimeError("recording failed")),
+    ):
+        result = CliRunner().invoke(app, ["record", "start", "--duration", "1"])
+
+    assert result.exit_code == 1
+    assert "VoicePad failed: recording failed" in result.stderr
+    job.cancel.assert_called_once_with()
+
+
 def test_no_transcribe_rejects_partial_wav(tmp_path) -> None:  # type: ignore[no-untyped-def]
     microphone = MagicMock()
     microphone.stop.return_value = WavArtifact(tmp_path / "partial.wav", 16_000, 1, 16_000, 1.0)

@@ -38,7 +38,13 @@ class FakeStore:
 
 
 class FakeSession:
-    def __init__(self, *, failure: Exception | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        failure: Exception | None = None,
+        warm_failure: Exception | None = None,
+        close_failure: Exception | None = None,
+    ) -> None:
         source = PARAKEET_V3_MANIFEST.source
         assert isinstance(source, HuggingFaceSource)
         self.deployment = ActiveDeployment(
@@ -50,11 +56,15 @@ class FakeSession:
         )
         self.capabilities = PARAKEET_V3_CUDA.capabilities
         self.failure = failure
+        self.warm_failure = warm_failure
+        self.close_failure = close_failure
         self.warmed = False
         self.closed = False
 
     def warm(self) -> None:
         self.warmed = True
+        if self.warm_failure is not None:
+            raise self.warm_failure
 
     def transcribe(
         self,
@@ -68,6 +78,8 @@ class FakeSession:
 
     def close(self) -> None:
         self.closed = True
+        if self.close_failure is not None:
+            raise self.close_failure
 
 
 def device() -> CudaDevice:
@@ -129,6 +141,26 @@ def test_unsupported_intent_does_not_invalidate_session(tmp_path: Path) -> None:
     assert session.closed is False
 
 
+def test_activation_preserves_primary_failure_when_candidate_cleanup_fails(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    session = FakeSession(
+        warm_failure=InferenceError("warm failed"),
+        close_failure=RuntimeError("close failed"),
+    )
+    engine, _ = build_engine(tmp_path, session)
+
+    with pytest.raises(InferenceError, match="warm failed") as failure:
+        engine.activate(PARAKEET_V3_CUDA.id)
+
+    assert failure.value.__notes__ == ["Session cleanup also failed: close failed"]
+    assert "Session cleanup failed after activation failure" in caplog.text
+    assert engine.state is EngineState.FAILED
+    assert engine.active_deployment is None
+    engine.unload()
+    assert engine.state is EngineState.UNPREPARED
+
+
 def test_unknown_inference_failure_invalidates_and_closes_session(tmp_path: Path) -> None:
     session = FakeSession(failure=InferenceError("CUDA failure"))
     engine, _ = build_engine(tmp_path, session)
@@ -140,3 +172,40 @@ def test_unknown_inference_failure_invalidates_and_closes_session(tmp_path: Path
     assert engine.state is EngineState.FAILED
     assert engine.active_deployment is None
     assert session.closed is True
+
+
+def test_transcription_preserves_primary_failure_when_session_cleanup_fails(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    session = FakeSession(
+        failure=InferenceError("CUDA failure"),
+        close_failure=RuntimeError("close failed"),
+    )
+    engine, _ = build_engine(tmp_path, session)
+    engine.activate(PARAKEET_V3_CUDA.id)
+
+    with pytest.raises(InferenceError, match="CUDA failure") as failure:
+        engine.transcribe(audio())
+
+    assert failure.value.__notes__ == ["Session cleanup also failed: close failed"]
+    assert "Session cleanup failed after transcription failure" in caplog.text
+    assert engine.state is EngineState.FAILED
+    assert engine.active_deployment is None
+    engine.unload()
+
+
+def test_unload_failure_sets_failed_state_and_releases_operation_lock(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    session = FakeSession(close_failure=RuntimeError("close failed"))
+    engine, _ = build_engine(tmp_path, session)
+    engine.activate(PARAKEET_V3_CUDA.id)
+
+    with pytest.raises(RuntimeError, match="close failed"):
+        engine.unload()
+
+    assert "Session cleanup failed while unloading" in caplog.text
+    assert engine.state is EngineState.FAILED
+    assert engine.active_deployment is None
+    engine.unload()
+    assert engine.state is EngineState.UNPREPARED
