@@ -1,7 +1,7 @@
 import time
 from pathlib import Path
 from typing import cast
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from textual.widgets import Input, Label, Markdown, OptionList, Select, Static, Switch, TabPane
@@ -123,6 +123,14 @@ async def test_tui_activates_resident_nvidia_runtime(tmp_path: Path) -> None:
             assert desktop_status.started is True
             assert desktop_status.states == ["initializing", "ready", "recording"]
             assert app._state == "starting"
+
+            app._microphone = microphone = MagicMock()
+            microphone.capture_error = RuntimeError("capture failed")
+            app._state = "recording"
+            with patch.object(app, "_stop_recording") as stop:
+                app._update_timer()
+            stop.assert_called_once_with()
+            assert app._state == "transcribing"
 
     assert runtime.closed is True
     assert desktop_status.stopped is True

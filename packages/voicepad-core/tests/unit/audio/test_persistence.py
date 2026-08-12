@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from threading import Event, Thread
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
@@ -105,6 +105,20 @@ def test_live_recording_refuses_overwrite_and_retains_recoverable_spool(tmp_path
 
     assert destination.read_bytes() == b"existing recording"
     assert len(tuple(tmp_path.glob(".recording-live-*.wav"))) == 1
+
+
+def test_abort_retains_spool_if_writer_does_not_stop(tmp_path: Path) -> None:
+    spool = tmp_path / ".recording-live.wav"
+    spool.write_bytes(b"recoverable audio")
+    recording = LiveWavRecording(tmp_path / "recording.wav", 16_000, 1)
+    recording._thread = writer = MagicMock()
+    recording._spool_path = spool
+    writer.is_alive.return_value = True
+
+    recording.abort()
+
+    assert spool.exists()
+    assert recording._thread is writer
 
 
 def test_live_recording_read_during_finalization_uses_finished_artifact(tmp_path: Path) -> None:

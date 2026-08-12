@@ -208,6 +208,9 @@ class LiveWavRecording:
             with contextlib.suppress(queue.Full):
                 self._queue.put(_FINISH, timeout=5.0)
             self._thread.join(timeout=5.0)
+            if self._thread.is_alive():
+                logger.error("Audio writer did not stop; retaining recoverable spool: %s", self._spool_path)
+                return
         if self._spool_path is not None:
             self._spool_path.unlink(missing_ok=True)
         self._thread = None

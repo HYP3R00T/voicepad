@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
@@ -18,6 +20,8 @@ from voicepad_core.pipeline import (
 )
 
 from .config import AppConfig
+
+logger = logging.getLogger(__name__)
 
 
 class ApplicationRuntime:
@@ -51,6 +55,7 @@ class ApplicationRuntime:
         self.config.recordings_path.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         path = self.config.recordings_path / f"{self.config.recording_prefix}_{stamp}_{uuid4().hex[:8]}.wav"
+        logger.info("Recording start requested: path=%s", path)
         microphone = MicrophoneStream(path, device_index=self.config.input_device_index)
         microphone.start()
         try:
@@ -71,8 +76,22 @@ class ApplicationRuntime:
         microphone: MicrophoneStream,
         job: GrowingTranscriptionJob,
     ) -> tuple[WavArtifact, FileTranscriptionResult]:
+        logger.info("Recording stop requested")
         artifact = microphone.stop()
-        return artifact, job.finish()
+        result = job.finish()
+        if microphone.capture_error is not None:
+            result = replace(
+                result,
+                complete=False,
+                warnings=(*result.warnings, f"audio capture failed: {microphone.capture_error}"),
+            )
+        logger.info(
+            "Recording finalized: path=%s duration_s=%.3f complete=%s",
+            artifact.path,
+            artifact.duration_s,
+            result.complete,
+        )
+        return artifact, result
 
     def close(self) -> None:
         self.engine.unload()

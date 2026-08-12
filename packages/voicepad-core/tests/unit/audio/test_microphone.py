@@ -42,6 +42,7 @@ def test_start_opens_writer_before_microphone(
         dtype="float32",
         device=None,
         callback=stream._callback,
+        finished_callback=stream._stream_finished,
     )
     native_stream.start.assert_called_once_with()
     assert stream.is_recording
@@ -166,6 +167,42 @@ def test_callback_failure_aborts_capture(
 
     with pytest.raises(sd.CallbackAbort):
         stream._callback(np.zeros((1, 1), dtype=np.float32), 1, None, MagicMock())
+
+    assert str(stream.capture_error) == "writer failed"
+
+
+@pytest.mark.parametrize("method", ("stop", "close"))
+@patch("voicepad_core.audio.microphone.LiveWavRecording")
+@patch("voicepad_core.audio.microphone.sd.InputStream")
+def test_native_cleanup_failure_still_finalizes_audio(
+    input_stream_type: Mock,
+    recording_type: Mock,
+    tmp_path: Path,
+    method: str,
+) -> None:
+    artifact = WavArtifact(tmp_path / "recording.wav", 16_000, 1, 16_000, 1.0)
+    recording_type.return_value.finish.return_value = artifact
+    getattr(input_stream_type.return_value, method).side_effect = RuntimeError(f"{method} failed")
+    stream = MicrophoneStream(artifact.path)
+    stream.start()
+
+    assert stream.stop() == artifact
+    assert str(stream.capture_error) == f"{method} failed"
+    recording_type.return_value.finish.assert_called_once_with()
+
+
+@patch("voicepad_core.audio.microphone.LiveWavRecording")
+@patch("voicepad_core.audio.microphone.sd.InputStream")
+def test_unexpected_stream_end_is_observable(
+    _input_stream_type: Mock,
+    _recording_type: Mock,
+    tmp_path: Path,
+) -> None:
+    stream = MicrophoneStream(tmp_path / "recording.wav")
+    stream.start()
+    stream._stream_finished()
+
+    assert "stopped unexpectedly" in str(stream.capture_error)
 
 
 @patch("voicepad_core.audio.microphone.sd.InputStream")

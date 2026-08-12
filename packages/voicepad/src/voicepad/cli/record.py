@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import logging
 import threading
 import time
 from pathlib import Path
@@ -15,6 +16,7 @@ from voicepad.runtime import ApplicationRuntime
 from voicepad.tui.utils.clipboard import copy_to_clipboard
 
 record_app = typer.Typer(help="Record canonical audio and transcribe it with the resident NVIDIA deployment.")
+logger = logging.getLogger(__name__)
 
 
 @record_app.command("start")
@@ -47,12 +49,16 @@ def start_recording(
 
         typer.secho("Recording…", fg=typer.colors.RED, bold=True)
         try:
-            _wait_for_stop(duration)
+            assert microphone is not None
+            _wait_for_stop(duration, microphone)
         except KeyboardInterrupt:
             typer.echo("\nStop requested; finalizing audio…")
         if no_transcribe:
             assert microphone is not None
             artifact = microphone.stop()
+            if microphone.capture_error is not None:
+                typer.secho(f"Partial WAV preserved: {artifact.path}", fg=typer.colors.YELLOW, err=True)
+                raise typer.Exit(2)
             typer.echo(f"Saved WAV: {artifact.path}")
             return
 
@@ -84,9 +90,11 @@ def start_recording(
         runtime.close()
 
 
-def _wait_for_stop(duration: float | None) -> None:
-    if duration is not None:
-        time.sleep(duration)
+def _wait_for_stop(duration: float | None, microphone: MicrophoneStream) -> None:
+    deadline = None if duration is None else time.monotonic() + duration
+    if deadline is not None:
+        while microphone.capture_error is None and time.monotonic() < deadline:
+            time.sleep(0.05)
         return
     typer.echo("Type q and press Enter to stop.")
     stopped = threading.Event()
@@ -98,7 +106,9 @@ def _wait_for_stop(duration: float | None) -> None:
 
     threading.Thread(target=wait, daemon=True).start()
     while not stopped.wait(0.05):
-        pass
+        if microphone.capture_error is not None:
+            logger.error("Capture failed while waiting for CLI stop")
+            return
 
 
 def _recording_path(directory: Path, prefix: str) -> Path:

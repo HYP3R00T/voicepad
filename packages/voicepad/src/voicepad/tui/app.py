@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-import contextlib
+import logging
+import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -46,6 +47,8 @@ try:
 except Exception:
     APP_VERSION = "dev"
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True, slots=True)
 class HistoryEntry:
@@ -78,6 +81,7 @@ class VoicePadApp(App[None]):
         self._job: GrowingTranscriptionJob | None = None
         self._last_result: FileTranscriptionResult | None = None
         self._record_started = 0.0
+        self._finalization_lock = threading.Lock()
         self._history: list[HistoryEntry] = []
         self._desktop_status: DesktopStatus | None = None
         self._external_session = False
@@ -176,17 +180,21 @@ class VoicePadApp(App[None]):
 
     def on_unmount(self) -> None:
         self._control.stop()
-        if self._microphone is not None and self._microphone.is_recording:
-            with contextlib.suppress(Exception):
-                self._microphone.stop()
+        microphone, job = self._microphone, self._job
+        if microphone is not None and job is not None:
+            try:
+                with self._finalization_lock:
+                    if microphone.is_recording:
+                        artifact, result = self.runtime.stop_recording(microphone, job)
+                        persist_markdown(artifact.path, result, self.config.markdown_path)
+            except Exception:
+                logger.exception("TUI shutdown could not finalize the active recording")
         if self._desktop_status is not None:
             self._desktop_status.stop()
-        if self._job is not None:
-            self._job.cancel()
-            with contextlib.suppress(Exception):
-                self._job.finish(timeout=30)
-        with contextlib.suppress(Exception):
+        try:
             self.runtime.close()
+        except Exception:
+            logger.exception("TUI shutdown could not close the runtime")
 
     @work(thread=True, exclusive=True, group="activation")
     def _activate(self) -> None:
@@ -307,6 +315,12 @@ class VoicePadApp(App[None]):
         if self._state != "recording":
             return
         elapsed = time.monotonic() - self._record_started
+        if self._microphone is not None and self._microphone.capture_error is not None:
+            logger.error("TUI detected capture failure after %.3fs", elapsed)
+            self._state = "transcribing"
+            self._set_status("transcribing", "capture failed; preserving partial audio…")
+            self._stop_recording()
+            return
         if self._external_session and self._desktop_status is not None:
             self._desktop_status.set_recording_elapsed(elapsed)
         minutes, seconds = divmod(int(elapsed), 60)
@@ -320,12 +334,14 @@ class VoicePadApp(App[None]):
             self.call_from_thread(self._set_error, "recording state is incomplete")
             return
         try:
-            artifact, result = self.runtime.stop_recording(microphone, job)
-            markdown = persist_markdown(artifact.path, result, self.config.markdown_path)
-            copied = False
-            if result.complete and result.text and self.config.copy_complete_text:
-                copied = copy_to_clipboard(result.text)
+            with self._finalization_lock:
+                artifact, result = self.runtime.stop_recording(microphone, job)
+                markdown = persist_markdown(artifact.path, result, self.config.markdown_path)
+                copied = False
+                if result.complete and result.text and self.config.copy_complete_text:
+                    copied = copy_to_clipboard(result.text)
         except Exception as error:
+            logger.exception("Recording finalization failed")
             self.call_from_thread(self._set_error, f"transcription failed: {error}")
             return
         self.call_from_thread(self._recording_finished, markdown, result, copied)
