@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
 import numpy as np
 import pytest
 import sounddevice as sd
-from pytest import LogCaptureFixture
 from voicepad_core.audio import AudioStreamStateError, AudioWindow, MicrophoneStream, WavArtifact
 
 
@@ -96,9 +94,7 @@ def test_stop_finalizes_recording(
     input_stream_type: Mock,
     recording_type: Mock,
     tmp_path: Path,
-    caplog: LogCaptureFixture,
 ) -> None:
-    caplog.set_level(logging.INFO)
     artifact = WavArtifact(tmp_path / "recording.wav", 16_000, 1, 32_000, 2.0)
     recording_type.return_value.finish.return_value = artifact
     stream = MicrophoneStream(artifact.path)
@@ -110,13 +106,6 @@ def test_stop_finalizes_recording(
     input_stream_type.return_value.close.assert_called_once_with()
     recording_type.return_value.finish.assert_called_once_with()
     assert not stream.is_recording
-    lifecycle = next(
-        record.message for record in caplog.records if record.message.startswith("Microphone capture stopped")
-    )
-    assert "persisted_frames=32000" in lifecycle
-    assert "persisted_duration_s=2.000" in lifecycle
-    assert "missing_duration_s=" in lifecycle
-    assert "failures=0" in lifecycle
 
 
 @patch("voicepad_core.audio.microphone.sd.query_devices", return_value={"default_samplerate": 16_000})
@@ -179,112 +168,41 @@ def test_callback_failure_aborts_capture(
     with pytest.raises(sd.CallbackAbort):
         stream._callback(np.zeros((1, 1), dtype=np.float32), 1, None, MagicMock())
 
-    assert [failure.stage for failure in stream.capture_failures] == ["capture-write"]
-    assert str(stream.capture_failures[0].error) == "writer failed"
+    assert str(stream.capture_error) == "writer failed"
+
+
+@pytest.mark.parametrize("method", ("stop", "close"))
+@patch("voicepad_core.audio.microphone.LiveWavRecording")
+@patch("voicepad_core.audio.microphone.sd.InputStream")
+def test_native_cleanup_failure_still_finalizes_audio(
+    input_stream_type: Mock,
+    recording_type: Mock,
+    tmp_path: Path,
+    method: str,
+) -> None:
+    artifact = WavArtifact(tmp_path / "recording.wav", 16_000, 1, 16_000, 1.0)
+    recording_type.return_value.finish.return_value = artifact
+    getattr(input_stream_type.return_value, method).side_effect = RuntimeError(f"{method} failed")
+    stream = MicrophoneStream(artifact.path)
+    stream.start()
+
+    assert stream.stop() == artifact
+    assert str(stream.capture_error) == f"{method} failed"
+    recording_type.return_value.finish.assert_called_once_with()
 
 
 @patch("voicepad_core.audio.microphone.LiveWavRecording")
 @patch("voicepad_core.audio.microphone.sd.InputStream")
-def test_unexpected_native_stream_end_is_observable(
+def test_unexpected_stream_end_is_observable(
     _input_stream_type: Mock,
     _recording_type: Mock,
     tmp_path: Path,
 ) -> None:
     stream = MicrophoneStream(tmp_path / "recording.wav")
     stream.start()
-
     stream._stream_finished()
 
-    assert [failure.stage for failure in stream.capture_failures] == ["stream-finished"]
-
-
-@pytest.mark.parametrize(("failed_method", "expected_stage"), (("stop", "native-stop"), ("close", "native-close")))
-@patch("voicepad_core.audio.microphone.LiveWavRecording")
-@patch("voicepad_core.audio.microphone.sd.InputStream")
-def test_native_cleanup_failure_does_not_prevent_wav_finalization(
-    input_stream_type: Mock,
-    recording_type: Mock,
-    tmp_path: Path,
-    failed_method: str,
-    expected_stage: str,
-) -> None:
-    artifact = WavArtifact(tmp_path / "recording.wav", 16_000, 1, 16_000, 1.0)
-    recording_type.return_value.finish.return_value = artifact
-    getattr(input_stream_type.return_value, failed_method).side_effect = RuntimeError(f"{failed_method} failed")
-    stream = MicrophoneStream(artifact.path)
-    stream.start()
-
-    assert stream.stop() == artifact
-    assert [failure.stage for failure in stream.capture_failures] == [expected_stage]
-    recording_type.return_value.finish.assert_called_once_with()
-
-
-@patch("voicepad_core.audio.microphone.LiveWavRecording")
-@patch("voicepad_core.audio.microphone.sd.InputStream")
-def test_native_and_finalization_failures_are_both_retained(
-    input_stream_type: Mock,
-    recording_type: Mock,
-    tmp_path: Path,
-    caplog: LogCaptureFixture,
-) -> None:
-    input_stream_type.return_value.stop.side_effect = RuntimeError("native stop failed")
-    recording_type.return_value.finish.side_effect = OSError("disk finalization failed")
-    stream = MicrophoneStream(tmp_path / "recording.wav")
-    stream.start()
-
-    with pytest.raises(AudioStreamStateError, match="recoverable spool") as raised:
-        stream.stop()
-
-    assert isinstance(raised.value.__cause__, OSError)
-    assert [failure.stage for failure in stream.capture_failures] == ["native-stop", "audio-finalization"]
-    assert [str(failure.error) for failure in stream.capture_failures] == [
-        "native stop failed",
-        "disk finalization failed",
-    ]
-    failure_records = [record for record in caplog.records if record.message.startswith("Microphone capture failure")]
-    assert [record.exc_info[1] for record in failure_records if record.exc_info is not None] == [
-        stream.capture_failures[0].error,
-        stream.capture_failures[1].error,
-    ]
-
-
-@patch("voicepad_core.audio.microphone.LiveWavRecording")
-@patch("voicepad_core.audio.microphone.sd.InputStream")
-def test_partial_capture_returns_artifact_with_failure_provenance(
-    _input_stream_type: Mock,
-    recording_type: Mock,
-    tmp_path: Path,
-) -> None:
-    artifact = WavArtifact(tmp_path / "recording.wav", 16_000, 1, 16_000, 1.0)
-    recording_type.return_value.finish.return_value = artifact
-    recording_type.return_value.append.side_effect = RuntimeError("writer failed")
-    stream = MicrophoneStream(artifact.path)
-    stream.start()
-    with pytest.raises(sd.CallbackAbort):
-        stream._callback(np.zeros((1, 1), dtype=np.float32), 1, None, MagicMock())
-
-    assert stream.stop() == artifact
-    assert stream.last_artifact == artifact
-    assert [failure.stage for failure in stream.capture_failures] == ["capture-write"]
-
-
-@patch("voicepad_core.audio.microphone.sd.InputStream")
-def test_native_stop_failure_still_publishes_written_audio(input_stream_type: Mock, tmp_path: Path) -> None:
-    destination = tmp_path / "recording.wav"
-    input_stream_type.return_value.stop.side_effect = RuntimeError("native stop failed")
-    stream = MicrophoneStream(destination)
-    stream.start()
-    stream._callback(
-        np.array([[0.0], [0.25], [0.5]], dtype=np.float32),
-        3,
-        None,
-        MagicMock(__bool__=Mock(return_value=False)),
-    )
-
-    artifact = stream.stop()
-
-    assert (artifact.path, artifact.frame_count, destination.exists()) == (destination, 3, True)
-    assert [failure.stage for failure in stream.capture_failures] == ["native-stop"]
+    assert "stopped unexpectedly" in str(stream.capture_error)
 
 
 @patch("voicepad_core.audio.microphone.sd.InputStream")

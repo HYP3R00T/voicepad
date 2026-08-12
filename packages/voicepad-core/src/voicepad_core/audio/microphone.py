@@ -3,11 +3,9 @@ from __future__ import annotations
 import logging
 import sys
 import threading
-from collections.abc import Callable
-from dataclasses import dataclass
+import time
 from pathlib import Path
-from time import monotonic
-from typing import Any, Literal
+from typing import Any
 
 import numpy as np
 import sounddevice as sd
@@ -18,26 +16,6 @@ from .persistence import LiveWavRecording, WavArtifact
 from .types import AudioWindow
 
 logger = logging.getLogger(__name__)
-
-CaptureFailureStage = Literal[
-    "capture-write",
-    "stream-finished",
-    "native-stop",
-    "native-close",
-    "audio-finalization",
-]
-
-
-@dataclass(frozen=True, slots=True)
-class CaptureFailure:
-    """One privacy-safe stage marker retaining its original capture exception."""
-
-    stage: CaptureFailureStage
-    error: Exception
-
-    @property
-    def summary(self) -> str:
-        return f"{self.stage}: {type(self.error).__name__}: {self.error}"
 
 
 def _resolve_input_device(device_index: int | None) -> int | None:
@@ -63,8 +41,7 @@ class MicrophoneStream:
         self._lifecycle_lock = threading.Lock()
         self._stream: sd.InputStream | None = None
         self._live_recording: LiveWavRecording | None = None
-        self._failures: list[CaptureFailure] = []
-        self._last_artifact: WavArtifact | None = None
+        self._capture_error: Exception | None = None
         self._started_at = 0.0
         self._recording = False
         self._logger = logging.getLogger(__name__)
@@ -76,27 +53,15 @@ class MicrophoneStream:
 
     @property
     def is_recording(self) -> bool:
-        """Return whether capture still needs an explicit stop/finalization."""
+        """Return whether the stream is currently recording."""
         with self._lock:
             return self._recording
 
     @property
-    def capture_failures(self) -> tuple[CaptureFailure, ...]:
-        """Return every fatal capture/stop failure in occurrence order."""
-        with self._lock:
-            return tuple(self._failures)
-
-    @property
     def capture_error(self) -> Exception | None:
-        """Return the first fatal capture error for lightweight health polling."""
-        failures = self.capture_failures
-        return failures[0].error if failures else None
-
-    @property
-    def last_artifact(self) -> WavArtifact | None:
-        """Return the artifact produced by the latest successful finalization."""
+        """Return the first fatal capture or native-stream error, if any."""
         with self._lock:
-            return self._last_artifact
+            return self._capture_error
 
     @property
     def growing_source(self) -> LiveWavRecording:
@@ -115,9 +80,8 @@ class MicrophoneStream:
             live_recording.start()
             with self._lock:
                 self._live_recording = live_recording
-                self._failures.clear()
-                self._last_artifact = None
-                self._started_at = monotonic()
+                self._capture_error = None
+                self._started_at = time.monotonic()
                 self._recording = True
 
             native_stream: sd.InputStream | None = None
@@ -138,11 +102,7 @@ class MicrophoneStream:
                     self._recording = False
                     self._stream = None
                     self._live_recording = None
-                removed = live_recording.abort()
-                if not removed:
-                    self._logger.error(
-                        "Recording startup failed and its spool remains recoverable: path=%s", self._recording_path
-                    )
+                live_recording.abort()
                 if native_stream is not None:
                     try:
                         native_stream.close()
@@ -156,68 +116,51 @@ class MicrophoneStream:
                 raise
 
         self._logger.info(
-            "Microphone capture started: path=%s device=%s sample_rate=%s channels=%s",
+            "Microphone capture started: path=%s device=%s sample_rate=%s",
             self._recording_path,
             self._device_index if self._device_index is not None else "system-default",
             self._sample_rate,
-            self._channels,
         )
 
     def stop(self) -> WavArtifact:
-        """Stop native capture and always attempt durable WAV finalization."""
+        """Stop capture and finalize its continuously written WAV file."""
         with self._lifecycle_lock:
             with self._lock:
-                if self._last_artifact is not None:
-                    return self._last_artifact
-                if self._live_recording is None:
+                if not self._recording:
                     raise AudioStreamStateError("MicrophoneStream is not recording. Call start() first.")
                 self._recording = False
                 native_stream = self._stream
                 self._stream = None
-                live_recording = self._live_recording
-
             if native_stream is not None:
-                self._run_native_cleanup("native-stop", native_stream.stop)
-                self._run_native_cleanup("native-close", native_stream.close)
-
+                for operation in (native_stream.stop, native_stream.close):
+                    try:
+                        operation()
+                    except Exception as error:
+                        self._remember_error(error)
+            if self._live_recording is None:
+                raise AudioStreamStateError("MicrophoneStream has no active recording writer.")
             try:
-                artifact = live_recording.finish()
-            except Exception as error:
-                self._record_failure("audio-finalization", error)
-                raise AudioStreamStateError(
-                    f"Audio finalization failed; recoverable spool audio was retained for {self._recording_path}."
-                ) from error
-
-            with self._lock:
-                self._last_artifact = artifact
-            self._log_stopped(artifact)
-            return artifact
-
-    def _run_native_cleanup(
-        self,
-        stage: Literal["native-stop", "native-close"],
-        operation: Callable[[], object],
-    ) -> None:
-        try:
-            operation()
-        except Exception as error:
-            self._record_failure(stage, error)
-
-    def _log_stopped(self, artifact: WavArtifact) -> None:
-        elapsed = monotonic() - self._started_at
+                artifact = self._live_recording.finish()
+            except Exception:
+                self._logger.exception(
+                    "Audio finalization failed; recoverable spool retained: %s", self._recording_path
+                )
+                raise
+        elapsed = time.monotonic() - self._started_at
         self._logger.info(
             "Microphone capture stopped: path=%s elapsed_s=%.3f persisted_frames=%s "
-            "persisted_duration_s=%.3f missing_duration_s=%.3f failures=%s",
+            "persisted_duration_s=%.3f missing_duration_s=%.3f failed=%s",
             artifact.path,
             elapsed,
             artifact.frame_count,
             artifact.duration_s,
             max(0.0, elapsed - artifact.duration_s),
-            len(self.capture_failures),
+            self.capture_error is not None,
         )
+        return artifact
 
     def read_window(self, start_sample: int, max_samples: int | None = None) -> AudioWindow:
-        """Read committed capture beginning at an absolute sample position."""
+        """Read committed audio beginning at an absolute source sample."""
         if self._live_recording is None:
             raise AudioStreamStateError("MicrophoneStream has no active recording writer.")
         return self._live_recording.read_from(start_sample, max_samples)
@@ -226,44 +169,36 @@ class MicrophoneStream:
         self,
         indata: np.ndarray,
         frames: int,
-        callback_time: Any,
+        time: Any,
         status: sd.CallbackFlags,
     ) -> None:
-        del frames, callback_time
+        del frames, time
         if status:
-            self._logger.warning("Microphone callback status: path=%s status=%s", self._recording_path, status)
+            self._logger.warning("Microphone callback status: %s", status)
         with self._lock:
-            if not self._recording:
-                return
-            copied = indata.copy()
-            live_recording = self._live_recording
-            if live_recording is None:
-                error = AudioStreamStateError("Microphone writer disappeared during active capture.")
-                self._record_failure("capture-write", error)
-                raise sd.CallbackAbort from error
-            try:
-                live_recording.append(copied)
-            except Exception as error:
-                self._record_failure("capture-write", error)
-                raise sd.CallbackAbort from error
+            if self._recording:
+                copied = indata.copy()
+                if self._live_recording is None:
+                    raise sd.CallbackAbort
+                try:
+                    self._live_recording.append(copied)
+                except Exception as error:
+                    self._remember_error(error)
+                    raise sd.CallbackAbort from error
 
     def _stream_finished(self) -> None:
         with self._lock:
-            if not self._recording or self._failures:
-                return
-            self._record_failure(
-                "stream-finished",
-                AudioStreamStateError("Microphone input stream stopped unexpectedly."),
-            )
+            if self._recording and self._capture_error is None:
+                self._capture_error = AudioStreamStateError("Microphone input stream stopped unexpectedly.")
+                self._logger.error("Microphone input stream stopped unexpectedly: path=%s", self._recording_path)
 
-    def _record_failure(self, stage: CaptureFailureStage, error: Exception) -> None:
-        failure = CaptureFailure(stage, error)
+    def _remember_error(self, error: Exception) -> None:
         with self._lock:
-            self._failures.append(failure)
+            if self._capture_error is None:
+                self._capture_error = error
         self._logger.error(
-            "Microphone capture failure: path=%s stage=%s error_type=%s error=%s",
+            "Microphone capture failure: path=%s error_type=%s error=%s",
             self._recording_path,
-            stage,
             type(error).__name__,
             error,
             exc_info=(type(error), error, error.__traceback__),

@@ -77,34 +77,19 @@ class ApplicationRuntime:
         job: GrowingTranscriptionJob,
     ) -> tuple[WavArtifact, FileTranscriptionResult]:
         logger.info("Recording stop requested")
-        try:
-            artifact = microphone.stop()
-            logger.info(
-                "Recording audio finalized: path=%s frames=%s duration_s=%.3f",
-                artifact.path,
-                artifact.frame_count,
-                artifact.duration_s,
-            )
-            result = job.finish()
-        except Exception:
-            logger.exception("Recording stop or transcription finalization failed")
-            raise
-        failures = microphone.capture_failures
-        if failures:
+        artifact = microphone.stop()
+        result = job.finish()
+        if microphone.capture_error is not None:
             result = replace(
                 result,
                 complete=False,
-                warnings=(*result.warnings, *(f"audio capture failed during {item.summary}" for item in failures)),
+                warnings=(*result.warnings, f"audio capture failed: {microphone.capture_error}"),
             )
         logger.info(
-            "Recording transcription finalized: path=%s complete=%s chunks=%s duration_s=%.3f latency_s=%.3f "
-            "capture_failures=%s",
+            "Recording finalized: path=%s duration_s=%.3f complete=%s",
             artifact.path,
+            artifact.duration_s,
             result.complete,
-            len(result.chunks),
-            result.duration_seconds,
-            result.latency_seconds,
-            len(failures),
         )
         return artifact, result
 

@@ -10,7 +10,7 @@ class TestMain:
         """The console entry point dispatches toggle without loading the full CLI."""
         with (
             patch("sys.argv", ["voicepad", "toggle"]),
-            patch("voicepad.diagnostics.configure_logging") as configure_logging,
+            patch("voicepad.entrypoint._configure_logging") as configure_logging,
             patch("voicepad.tui.control.run_toggle_command", return_value=0) as run_toggle,
         ):
             result = main()

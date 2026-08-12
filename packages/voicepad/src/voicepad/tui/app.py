@@ -82,7 +82,6 @@ class VoicePadApp(App[None]):
         self._last_result: FileTranscriptionResult | None = None
         self._record_started = 0.0
         self._finalization_lock = threading.Lock()
-        self._finalized_recording: tuple[Path, FileTranscriptionResult, bool] | None = None
         self._history: list[HistoryEntry] = []
         self._desktop_status: DesktopStatus | None = None
         self._external_session = False
@@ -173,7 +172,6 @@ class VoicePadApp(App[None]):
             yield VoiceButton("󰉋  save changes", role="primary", id="settings-save-btn")
 
     def on_mount(self) -> None:
-        logger.info("TUI mounted")
         self._control.start()
         self._ensure_desktop_status().set_state("initializing")
         self.set_interval(0.1, self._update_timer)
@@ -181,42 +179,28 @@ class VoicePadApp(App[None]):
         self._activate()
 
     def on_unmount(self) -> None:
-        logger.info("TUI shutdown started: state=%s", self._state)
-        failures = 0
         self._control.stop()
         microphone, job = self._microphone, self._job
         if microphone is not None and job is not None:
             try:
-                markdown, result, _ = self._finalize_recording(microphone, job)
-                logger.info(
-                    "TUI shutdown preserved active recording: markdown=%s complete=%s",
-                    markdown,
-                    result.complete,
-                )
+                with self._finalization_lock:
+                    if microphone.is_recording:
+                        artifact, result = self.runtime.stop_recording(microphone, job)
+                        persist_markdown(artifact.path, result, self.config.markdown_path)
             except Exception:
-                failures += 1
                 logger.exception("TUI shutdown could not finalize the active recording")
-                job.cancel()
-                try:
-                    job.finish(timeout=30)
-                except Exception:
-                    failures += 1
-                    logger.exception("TUI shutdown could not release the recording job")
         if self._desktop_status is not None:
             self._desktop_status.stop()
         try:
             self.runtime.close()
         except Exception:
-            failures += 1
-            logger.exception("TUI shutdown could not close the application runtime")
-        logger.info("TUI shutdown finished: failures=%s", failures)
+            logger.exception("TUI shutdown could not close the runtime")
 
     @work(thread=True, exclusive=True, group="activation")
     def _activate(self) -> None:
         try:
             active = self.runtime.activate()
         except Exception as error:
-            logger.exception("Runtime activation failed")
             self.call_from_thread(self._set_error, f"activation failed: {error}")
             return
         self.call_from_thread(self._set_ready, active.device_name)
@@ -303,7 +287,6 @@ class VoicePadApp(App[None]):
         try:
             microphone, job = self.runtime.start_recording(on_update=self._receive_live_update)
         except Exception as error:
-            logger.exception("Recording start failed")
             self.call_from_thread(self._set_error, f"recording failed: {error}")
             return
         self.call_from_thread(self._recording_started, microphone, job)
@@ -322,10 +305,8 @@ class VoicePadApp(App[None]):
         )
 
     def _recording_started(self, microphone: MicrophoneStream, job: GrowingTranscriptionJob) -> None:
-        logger.info("TUI recording entered active state")
         self._microphone = microphone
         self._job = job
-        self._finalized_recording = None
         self._record_started = time.monotonic()
         self._state = "recording"
         self._set_status("recording", "recording… 󰔛 0.0s")
@@ -334,15 +315,10 @@ class VoicePadApp(App[None]):
         if self._state != "recording":
             return
         elapsed = time.monotonic() - self._record_started
-        if self._microphone is not None and self._microphone.capture_failures:
-            logger.error(
-                "TUI detected failed capture while recording: elapsed_s=%.3f failures=%s",
-                elapsed,
-                len(self._microphone.capture_failures),
-            )
+        if self._microphone is not None and self._microphone.capture_error is not None:
+            logger.error("TUI detected capture failure after %.3fs", elapsed)
             self._state = "transcribing"
             self._set_status("transcribing", "capture failed; preserving partial audio…")
-            self._overlay_set("error")
             self._stop_recording()
             return
         if self._external_session and self._desktop_status is not None:
@@ -358,29 +334,17 @@ class VoicePadApp(App[None]):
             self.call_from_thread(self._set_error, "recording state is incomplete")
             return
         try:
-            markdown, result, copied = self._finalize_recording(microphone, job)
+            with self._finalization_lock:
+                artifact, result = self.runtime.stop_recording(microphone, job)
+                markdown = persist_markdown(artifact.path, result, self.config.markdown_path)
+                copied = False
+                if result.complete and result.text and self.config.copy_complete_text:
+                    copied = copy_to_clipboard(result.text)
         except Exception as error:
-            logger.exception("Recording stop, transcription, or Markdown persistence failed")
+            logger.exception("Recording finalization failed")
             self.call_from_thread(self._set_error, f"transcription failed: {error}")
             return
-        logger.info("Recording result persisted: markdown=%s complete=%s", markdown, result.complete)
         self.call_from_thread(self._recording_finished, markdown, result, copied)
-
-    def _finalize_recording(
-        self,
-        microphone: MicrophoneStream,
-        job: GrowingTranscriptionJob,
-    ) -> tuple[Path, FileTranscriptionResult, bool]:
-        with self._finalization_lock:
-            if self._finalized_recording is not None:
-                return self._finalized_recording
-            artifact, result = self.runtime.stop_recording(microphone, job)
-            markdown = persist_markdown(artifact.path, result, self.config.markdown_path)
-            copied = False
-            if result.complete and result.text and self.config.copy_complete_text:
-                copied = copy_to_clipboard(result.text)
-            self._finalized_recording = (markdown, result, copied)
-            return self._finalized_recording
 
     def _recording_finished(
         self,
