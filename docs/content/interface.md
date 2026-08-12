@@ -47,5 +47,12 @@ native recording, transcribing, or completion status card while another
 application has focus. See [Global desktop shortcut](../configuration/global-hotkey/).
 
 While recording, the header displays elapsed time in seconds and then minutes.
-Incomplete text is displayed and persisted with metadata, but is not copied
-automatically. The WAV remains the durable source for later retranscription.
+The TUI and recording CLI also monitor capture health. If the microphone stream
+or durable writer fails, they stop waiting immediately, finalize the maximum
+valid partial WAV, and mark the result incomplete. `--no-transcribe` reports a
+partial WAV as an error rather than claiming an ordinary successful save.
+
+Quitting the TUI with an active recording uses the same finalization and
+Markdown persistence path as an explicit stop. If WAV publication itself fails,
+the operation spool remains recoverable and its location is recorded in the
+private session log. Incomplete text is never copied automatically.

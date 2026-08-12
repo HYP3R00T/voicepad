@@ -203,14 +203,24 @@ class LiveWavRecording:
         finally:
             self._finished.set()
 
-    def abort(self) -> None:
-        if self._thread is not None and self._thread.is_alive():
+    def abort(self) -> bool:
+        """Discard startup audio only after proving its writer has stopped."""
+        thread = self._thread
+        if thread is not None and thread.is_alive():
             with contextlib.suppress(queue.Full):
                 self._queue.put(_FINISH, timeout=5.0)
-            self._thread.join(timeout=5.0)
+            thread.join(timeout=5.0)
+            if thread.is_alive():
+                logger.error(
+                    "Audio writer did not stop during abort; retaining recoverable spool: destination=%s spool=%s",
+                    self._path,
+                    self._spool_path,
+                )
+                return False
         if self._spool_path is not None:
             self._spool_path.unlink(missing_ok=True)
         self._thread = None
+        return True
 
     def _write_loop(self) -> None:
         assert self._spool_path is not None
@@ -230,14 +240,26 @@ class LiveWavRecording:
                         if item is _FINISH:
                             break
                         if isinstance(item, _ReadRequest):
-                            spool.flush()
-                            requested_end = (
-                                self._frame_count
-                                if item.max_samples is None
-                                else min(self._frame_count, item.start_sample + item.max_samples)
-                            )
-                            item.result = _read_window(self._spool_path, item.start_sample, requested_end)
-                            item.completed.set()
+                            try:
+                                spool.flush()
+                                requested_end = (
+                                    self._frame_count
+                                    if item.max_samples is None
+                                    else min(self._frame_count, item.start_sample + item.max_samples)
+                                )
+                                item.result = _read_window(self._spool_path, item.start_sample, requested_end)
+                            except Exception as error:
+                                item.error = error
+                                logger.exception(
+                                    "Live transcription read failed without stopping audio persistence: "
+                                    "destination=%s start_sample=%s max_samples=%s committed_frames=%s",
+                                    self._path,
+                                    item.start_sample,
+                                    item.max_samples,
+                                    self._frame_count,
+                                )
+                            finally:
+                                item.completed.set()
                             continue
                         if isinstance(item, np.ndarray):
                             spool.write(cast("NDArray[np.float32]", item))
@@ -247,6 +269,12 @@ class LiveWavRecording:
                     finally:
                         self._queue.task_done()
         except Exception as exc:
+            logger.exception(
+                "Live audio writer failed: destination=%s spool=%s committed_frames=%s",
+                self._path,
+                self._spool_path,
+                self._frame_count,
+            )
             with self._committed_condition:
                 self._error = exc
                 self._committed_condition.notify_all()

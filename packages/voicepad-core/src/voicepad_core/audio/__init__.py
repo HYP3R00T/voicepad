@@ -9,7 +9,7 @@ from .errors import (
     UnsupportedAudioFormatError,
 )
 from .file import AudioSource, FileSource
-from .microphone import MicrophoneStream
+from .microphone import CaptureFailure, MicrophoneStream
 from .persistence import LiveWavRecording, WavArtifact, write_wav_atomic
 from .source import GrowingAudioSource
 from .types import AudioWindow, RawAudio, WaveformSpec
@@ -28,6 +28,7 @@ __all__ = [
     "FileSource",
     "SUPPORTED_FORMATS",
     "MicrophoneStream",
+    "CaptureFailure",
     "LiveWavRecording",
     "GrowingAudioSource",
     "WavArtifact",

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import contextlib
+import logging
 import threading
 import time
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Protocol
 
 import typer
-from voicepad_core.audio import MicrophoneStream
+from voicepad_core.audio import CaptureFailure, MicrophoneStream
 
 from voicepad.config import load_config
 from voicepad.output import persist_markdown
@@ -15,6 +15,12 @@ from voicepad.runtime import ApplicationRuntime
 from voicepad.tui.utils.clipboard import copy_to_clipboard
 
 record_app = typer.Typer(help="Record canonical audio and transcribe it with the resident NVIDIA deployment.")
+logger = logging.getLogger(__name__)
+
+
+class CaptureHealth(Protocol):
+    @property
+    def capture_failures(self) -> tuple[CaptureFailure, ...]: ...
 
 
 @record_app.command("start")
@@ -47,12 +53,20 @@ def start_recording(
 
         typer.secho("Recording…", fg=typer.colors.RED, bold=True)
         try:
-            _wait_for_stop(duration)
+            assert microphone is not None
+            _wait_for_stop(duration, microphone)
         except KeyboardInterrupt:
             typer.echo("\nStop requested; finalizing audio…")
         if no_transcribe:
             assert microphone is not None
             artifact = microphone.stop()
+            if microphone.capture_failures:
+                typer.secho(
+                    f"Partial WAV preserved after capture failure: {artifact.path}",
+                    fg=typer.colors.YELLOW,
+                    err=True,
+                )
+                raise typer.Exit(2)
             typer.echo(f"Saved WAV: {artifact.path}")
             return
 
@@ -71,25 +85,36 @@ def start_recording(
     except typer.Exit:
         raise
     except Exception as error:
+        logger.exception("CLI recording failed")
         if microphone is not None and microphone.is_recording:
-            with contextlib.suppress(Exception):
+            try:
                 microphone.stop()
+            except Exception:
+                logger.exception("CLI cleanup could not finalize microphone audio")
         if job is not None:
             job.cancel()
-            with contextlib.suppress(Exception):
+            try:
                 job.finish(timeout=30)
+            except Exception:
+                logger.exception("CLI cleanup could not release the recording job")
         typer.secho(f"VoicePad failed: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from error
     finally:
         runtime.close()
 
 
-def _wait_for_stop(duration: float | None) -> None:
+def _wait_for_stop(duration: float | None, microphone: CaptureHealth) -> None:
+    stopped = threading.Event()
     if duration is not None:
-        time.sleep(duration)
+        deadline = time.monotonic() + duration
+        while not microphone.capture_failures:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            stopped.wait(min(0.05, remaining))
+        logger.error("CLI detected failed capture before its requested duration elapsed")
         return
     typer.echo("Type q and press Enter to stop.")
-    stopped = threading.Event()
 
     def wait() -> None:
         while input().strip().casefold() != "q":
@@ -98,7 +123,9 @@ def _wait_for_stop(duration: float | None) -> None:
 
     threading.Thread(target=wait, daemon=True).start()
     while not stopped.wait(0.05):
-        pass
+        if microphone.capture_failures:
+            logger.error("CLI detected failed capture while waiting for an interactive stop")
+            return
 
 
 def _recording_path(directory: Path, prefix: str) -> Path:

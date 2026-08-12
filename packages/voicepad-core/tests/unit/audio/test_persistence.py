@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 from threading import Event, Thread
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
 import soundfile as sf
+from voicepad_core.audio import AudioStreamStateError
 from voicepad_core.audio.persistence import LiveWavRecording, WavArtifact, write_wav_atomic
 from voicepad_core.audio.types import AudioWindow, RawAudio
 
@@ -105,6 +106,40 @@ def test_live_recording_refuses_overwrite_and_retains_recoverable_spool(tmp_path
 
     assert destination.read_bytes() == b"existing recording"
     assert len(tuple(tmp_path.glob(".recording-live-*.wav"))) == 1
+
+
+def test_failed_live_read_does_not_stop_audio_persistence(tmp_path: Path) -> None:
+    destination = tmp_path / "recording.wav"
+    recording = LiveWavRecording(destination, sample_rate=4, channels=1)
+    recording.start()
+    recording.append(np.array([0.0, 0.25], dtype=np.float32))
+
+    with (
+        patch("voicepad_core.audio.persistence._read_window", side_effect=RuntimeError("transient read failure")),
+        pytest.raises(AudioStreamStateError, match="Could not read live audio"),
+    ):
+        recording.read_from(0, max_samples=2)
+
+    recording.append(np.array([0.5, 0.75], dtype=np.float32))
+    artifact = recording.finish()
+    persisted, _ = sf.read(destination, dtype="float32")
+
+    assert artifact.frame_count == 4
+    np.testing.assert_allclose(persisted, [0.0, 0.25, 0.5, 0.75])
+
+
+def test_abort_retains_spool_if_writer_does_not_stop(tmp_path: Path) -> None:
+    spool = tmp_path / ".recording-live.wav"
+    spool.write_bytes(b"recoverable audio")
+    recording = LiveWavRecording(tmp_path / "recording.wav", sample_rate=16_000, channels=1)
+    writer = MagicMock()
+    writer.is_alive.return_value = True
+    recording._thread = writer
+    recording._spool_path = spool
+
+    assert recording.abort() is False
+    assert spool.read_bytes() == b"recoverable audio"
+    assert recording._thread is writer
 
 
 def test_live_recording_read_during_finalization_uses_finished_artifact(tmp_path: Path) -> None:

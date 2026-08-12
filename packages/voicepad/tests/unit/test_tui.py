@@ -1,16 +1,19 @@
+import logging
 import time
 from pathlib import Path
 from typing import cast
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
+from pytest import LogCaptureFixture
 from textual.widgets import Input, Label, Markdown, OptionList, Select, Static, Switch, TabPane
 from voicepad.config import AppConfig
 from voicepad.runtime import ApplicationRuntime
 from voicepad.tui.app import HistoryEntry, VoicePadApp, _history_label, _recorded_at
+from voicepad_core.audio import CaptureFailure, WavArtifact
 from voicepad_core.deployments import PARAKEET_V3_CUDA, PARAKEET_V3_MANIFEST, HuggingFaceSource
 from voicepad_core.inference import ActiveDeployment
-from voicepad_core.pipeline import GrowingTranscriptionUpdate
+from voicepad_core.pipeline import FileTranscriptionResult, GrowingTranscriptionUpdate
 
 
 def test_history_entries_have_compact_human_readable_labels(tmp_path: Path) -> None:
@@ -124,5 +127,64 @@ async def test_tui_activates_resident_nvidia_runtime(tmp_path: Path) -> None:
             assert desktop_status.states == ["initializing", "ready", "recording"]
             assert app._state == "starting"
 
+            failed_microphone = MagicMock()
+            failed_microphone.capture_failures = (CaptureFailure("capture-write", RuntimeError("writer failed")),)
+            app._microphone = failed_microphone
+            app._state = "recording"
+            app._record_started = time.monotonic() - 3.0
+            with patch.object(app, "_stop_recording") as stop:
+                app._update_timer()
+            stop.assert_called_once_with()
+            assert app._state == "transcribing"
+            assert "capture failed" in str(app.query_one("#status").render())
+
     assert runtime.closed is True
     assert desktop_status.stopped is True
+
+
+def test_tui_shutdown_uses_authoritative_recording_finalization(tmp_path: Path) -> None:
+    runtime = MagicMock()
+    config = AppConfig(recordings_path=tmp_path / "recordings", markdown_path=tmp_path / "markdown")
+    app = VoicePadApp(config, runtime=cast(ApplicationRuntime, runtime))
+    microphone = MagicMock()
+    job = MagicMock()
+    artifact = WavArtifact(tmp_path / "recording.wav", 16_000, 1, 16_000, 1.0)
+    source = PARAKEET_V3_MANIFEST.source
+    assert isinstance(source, HuggingFaceSource)
+    active = ActiveDeployment(PARAKEET_V3_CUDA, source.revision, "GPU-test", "NVIDIA Test GPU", 4_000_000_000)
+    result = FileTranscriptionResult("partial", (), (), 1.0, 0.1, active, (), (), (), (), False)
+    runtime.stop_recording.return_value = (artifact, result)
+    app._microphone = microphone
+    app._job = job
+    markdown = config.markdown_path / "recording.md"
+
+    with (
+        patch.object(app._control, "stop"),
+        patch("voicepad.tui.app.persist_markdown", return_value=markdown) as persist,
+    ):
+        app.on_unmount()
+
+    runtime.stop_recording.assert_called_once_with(microphone, job)
+    persist.assert_called_once_with(artifact.path, result, config.markdown_path)
+    job.cancel.assert_not_called()
+    runtime.close.assert_called_once_with()
+
+
+def test_tui_shutdown_reports_finalization_and_release_failures(caplog: LogCaptureFixture) -> None:
+    caplog.set_level(logging.INFO)
+    runtime = MagicMock()
+    app = VoicePadApp(AppConfig(), runtime=cast(ApplicationRuntime, runtime))
+    microphone = MagicMock()
+    job = MagicMock()
+    runtime.stop_recording.side_effect = RuntimeError("finalization failed")
+    job.finish.side_effect = RuntimeError("worker did not stop")
+    app._microphone = microphone
+    app._job = job
+
+    with patch.object(app._control, "stop"):
+        app.on_unmount()
+
+    job.cancel.assert_called_once_with()
+    assert "TUI shutdown could not finalize the active recording" in caplog.messages
+    assert "TUI shutdown could not release the recording job" in caplog.messages
+    assert "TUI shutdown finished: failures=2" in caplog.messages

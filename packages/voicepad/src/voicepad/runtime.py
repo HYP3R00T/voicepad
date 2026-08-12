@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
@@ -18,6 +20,8 @@ from voicepad_core.pipeline import (
 )
 
 from .config import AppConfig
+
+logger = logging.getLogger(__name__)
 
 
 class ApplicationRuntime:
@@ -51,6 +55,7 @@ class ApplicationRuntime:
         self.config.recordings_path.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         path = self.config.recordings_path / f"{self.config.recording_prefix}_{stamp}_{uuid4().hex[:8]}.wav"
+        logger.info("Recording start requested: path=%s", path)
         microphone = MicrophoneStream(path, device_index=self.config.input_device_index)
         microphone.start()
         try:
@@ -71,8 +76,37 @@ class ApplicationRuntime:
         microphone: MicrophoneStream,
         job: GrowingTranscriptionJob,
     ) -> tuple[WavArtifact, FileTranscriptionResult]:
-        artifact = microphone.stop()
-        return artifact, job.finish()
+        logger.info("Recording stop requested")
+        try:
+            artifact = microphone.stop()
+            logger.info(
+                "Recording audio finalized: path=%s frames=%s duration_s=%.3f",
+                artifact.path,
+                artifact.frame_count,
+                artifact.duration_s,
+            )
+            result = job.finish()
+        except Exception:
+            logger.exception("Recording stop or transcription finalization failed")
+            raise
+        failures = microphone.capture_failures
+        if failures:
+            result = replace(
+                result,
+                complete=False,
+                warnings=(*result.warnings, *(f"audio capture failed during {item.summary}" for item in failures)),
+            )
+        logger.info(
+            "Recording transcription finalized: path=%s complete=%s chunks=%s duration_s=%.3f latency_s=%.3f "
+            "capture_failures=%s",
+            artifact.path,
+            result.complete,
+            len(result.chunks),
+            result.duration_seconds,
+            result.latency_seconds,
+            len(failures),
+        )
+        return artifact, result
 
     def close(self) -> None:
         self.engine.unload()
