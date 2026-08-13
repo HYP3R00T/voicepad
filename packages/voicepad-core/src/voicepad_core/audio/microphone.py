@@ -4,6 +4,7 @@ import logging
 import sys
 import threading
 import time
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -12,8 +13,9 @@ import sounddevice as sd
 
 from .constants import DEFAULT_INPUT_CHANNELS, FALLBACK_INPUT_SAMPLE_RATE
 from .errors import AudioStreamStateError
-from .persistence import LiveWavRecording, WavArtifact
+from .live_recording import LiveWavRecording
 from .types import AudioWindow
+from .wav_persistence import WavArtifact
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +34,14 @@ def _resolve_input_device(device_index: int | None) -> int | None:
 class MicrophoneStream:
     """Live microphone capture using a non-blocking sounddevice InputStream."""
 
-    def __init__(self, recording_path: Path, device_index: int | None = None) -> None:
+    def __init__(
+        self,
+        recording_path: Path,
+        device_index: int | None = None,
+        *,
+        logger: logging.Logger | logging.LoggerAdapter[logging.Logger] | None = None,
+        log_context: Mapping[str, str] | None = None,
+    ) -> None:
         self._device_index = _resolve_input_device(device_index)
         self._recording_path = recording_path
         self._sample_rate = FALLBACK_INPUT_SAMPLE_RATE
@@ -44,7 +53,8 @@ class MicrophoneStream:
         self._capture_error: Exception | None = None
         self._started_at = 0.0
         self._recording = False
-        self._logger = logging.getLogger(__name__)
+        self._logger = logger or logging.getLogger(__name__)
+        self._log_context = dict(log_context or {})
 
     @property
     def sample_rate(self) -> int:
@@ -76,7 +86,13 @@ class MicrophoneStream:
             with self._lock:
                 if self._recording:
                     raise AudioStreamStateError("MicrophoneStream is already recording. Call stop() first.")
-            live_recording = LiveWavRecording(self._recording_path, self._sample_rate, self._channels)
+            live_recording = LiveWavRecording(
+                self._recording_path,
+                self._sample_rate,
+                self._channels,
+                logger=self._logger,
+                log_context=self._log_context,
+            )
             live_recording.start()
             with self._lock:
                 self._live_recording = live_recording

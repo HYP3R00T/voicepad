@@ -187,8 +187,10 @@ class VoicePadApp(App[None]):
                     if microphone.is_recording:
                         artifact, result = self.runtime.stop_recording(microphone, job)
                         persist_markdown(artifact.path, result, self.config.markdown_path)
-            except Exception:
+                        self.runtime.end_recording(outcome="completed" if result.complete else "incomplete")
+            except Exception as error:
                 logger.exception("TUI shutdown could not finalize the active recording")
+                self.runtime.end_recording(outcome="failed", error=error)
         if self._desktop_status is not None:
             self._desktop_status.stop()
         try:
@@ -343,8 +345,10 @@ class VoicePadApp(App[None]):
                     copied = copy_to_clipboard(result.text)
         except Exception as error:
             logger.exception("Recording finalization failed")
+            self.runtime.end_recording(outcome="failed", error=error)
             self.call_from_thread(self._set_error, f"transcription failed: {error}")
             return
+        self.runtime.end_recording(outcome="completed" if result.complete else "incomplete")
         self.call_from_thread(self._recording_finished, markdown, result, copied)
 
     def _recording_finished(

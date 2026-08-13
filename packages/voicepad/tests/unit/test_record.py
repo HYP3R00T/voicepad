@@ -43,8 +43,11 @@ def test_no_transcribe_rejects_partial_wav(tmp_path) -> None:  # type: ignore[no
     microphone = MagicMock()
     microphone.stop.return_value = WavArtifact(tmp_path / "partial.wav", 16_000, 1, 16_000, 1.0)
     microphone.capture_error = RuntimeError("capture failed")
+    runtime = MagicMock()
+    runtime.start_capture.return_value = microphone
+    runtime.stop_capture.return_value = microphone.stop.return_value
     with (
-        patch("voicepad.cli.record.MicrophoneStream", return_value=microphone),
+        patch("voicepad.cli.record.ApplicationRuntime", return_value=runtime),
         patch("voicepad.cli.record._wait_for_stop"),
     ):
         result = CliRunner().invoke(app, ["record", "start", "--no-transcribe", "--duration", "1"])

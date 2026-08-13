@@ -4,7 +4,6 @@ import logging
 import sys
 import threading
 import time
-from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -37,10 +36,7 @@ def start_recording(
     job = None
     try:
         if no_transcribe:
-            config.recordings_path.mkdir(parents=True, exist_ok=True)
-            path = _recording_path(config.recordings_path, config.recording_prefix)
-            microphone = MicrophoneStream(path, device_index=config.input_device_index)
-            microphone.start()
+            microphone = runtime.start_capture()
         else:
             typer.echo("Preparing and warming the NVIDIA deployment…")
             active = runtime.activate()
@@ -55,10 +51,12 @@ def start_recording(
             typer.echo("\nStop requested; finalizing audio…")
         if no_transcribe:
             assert microphone is not None
-            artifact = microphone.stop()
+            artifact = runtime.stop_capture(microphone)
             if microphone.capture_error is not None:
+                runtime.end_recording(outcome="incomplete")
                 typer.secho(f"Partial WAV preserved: {artifact.path}", fg=typer.colors.YELLOW, err=True)
                 raise typer.Exit(2)
+            runtime.end_recording(outcome="completed")
             typer.echo(f"Saved WAV: {artifact.path}")
             return
 
@@ -72,8 +70,10 @@ def start_recording(
             if copy_to_clipboard(result.text):
                 typer.echo("Copied complete transcription to clipboard.")
         elif not result.complete:
+            runtime.end_recording(outcome="incomplete")
             typer.secho("Transcription is incomplete; it was not copied.", fg=typer.colors.YELLOW, err=True)
             raise typer.Exit(2)
+        runtime.end_recording(outcome="completed")
     except typer.Exit:
         raise
     except Exception as error:
@@ -90,6 +90,7 @@ def start_recording(
             except Exception as cleanup_error:
                 logger.exception("Transcription cleanup failed after record command failure")
                 error.add_note(f"Transcription cleanup also failed: {cleanup_error}")
+        runtime.end_recording(outcome="failed", error=error)
         typer.secho(f"VoicePad failed: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from error
     finally:
@@ -122,11 +123,3 @@ def _wait_for_stop(duration: float | None, microphone: MicrophoneStream) -> None
         if microphone.capture_error is not None:
             logger.error("Capture failed while waiting for CLI stop")
             return
-
-
-def _recording_path(directory: Path, prefix: str) -> Path:
-    stamp = time.strftime("%Y%m%d_%H%M%S")
-    candidate = directory / f"{prefix}_{stamp}.wav"
-    if candidate.exists():
-        raise FileExistsError(f"Recording destination already exists: {candidate}")
-    return candidate

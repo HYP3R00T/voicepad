@@ -35,6 +35,7 @@ dependencies = [
   "pyperclip>=1.9.0",
   "textual>=8.2.4",
   "typer>=0.23.1",
+  "utilityhub-logging>=0.1.0",
   "voicepad-core>=0.2.1",
 ]
 

@@ -4,10 +4,11 @@ import logging
 import queue
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 import numpy as np
+from utilityhub_logging import bind_context
 
 from voicepad_core.audio import IncrementalAudioSource
 from voicepad_core.inference import CancellationToken, TranscriptionIntent
@@ -15,13 +16,12 @@ from voicepad_core.planning import AdaptiveChunkPlanner, AudioChunk
 from voicepad_core.preprocessing import PreprocessedAudio
 from voicepad_core.vad import SAMPLE_RATE, PauseTracker, SileroVad, VadFrame, material_speech_regions
 
-from .batch import ReadyEngine, SequentialVad
+from .contracts import ReadyEngine, SequentialVad
 from .transcript_assembly import ConservativeAssembler
 from .types import ChunkOutcome, TranscriptionProgress, TranscriptionResult
 
 _FINISHED = object()
 VAD_READ_SAMPLES = SAMPLE_RATE
-logger = logging.getLogger(__name__)
 
 
 class IncrementalPipelineError(RuntimeError):
@@ -40,6 +40,8 @@ class IncrementalTranscriptionJob:
         intent: TranscriptionIntent | None = None,
         on_update: Callable[[TranscriptionProgress], None] | None = None,
         descriptor_queue_size: int = 2,
+        logger: logging.Logger | logging.LoggerAdapter[logging.Logger] | None = None,
+        log_context: Mapping[str, str] | None = None,
     ) -> None:
         if source.sample_rate != SAMPLE_RATE or source.channels != 1:
             raise IncrementalPipelineError("Incremental transcription requires mono 16 kHz persisted audio.")
@@ -67,19 +69,35 @@ class IncrementalTranscriptionJob:
         self._inference_thread: threading.Thread | None = None
         self._done = threading.Event()
         self._result: TranscriptionResult | None = None
+        self._logger = logger or logging.getLogger(__name__)
+        self._log_context = dict(log_context or {})
 
     def start(self) -> None:
         if self._planner_thread is not None:
             raise IncrementalPipelineError("Incremental transcription job is already started.")
         self._started_at = time.perf_counter()
         self._vad.reset()
-        self._planner_thread = threading.Thread(target=self._plan, name="transcription-planner", daemon=True)
-        self._inference_thread = threading.Thread(target=self._infer, name="transcription-inference", daemon=True)
+        self._planner_thread = threading.Thread(
+            target=self._plan_with_context,
+            name="transcription-planner",
+            daemon=True,
+        )
+        self._inference_thread = threading.Thread(
+            target=self._infer_with_context,
+            name="transcription-inference",
+            daemon=True,
+        )
         self._inference_thread.start()
         self._planner_thread.start()
+        self._logger.info(
+            "Incremental transcription started: deployment=%s queue_capacity=%s",
+            self._active.definition.id,
+            self._queue.maxsize,
+        )
 
     def cancel(self) -> None:
         self._cancellation.cancel()
+        self._logger.info("Incremental transcription cancellation requested")
 
     def finish(self, timeout: float = 120.0) -> TranscriptionResult:
         if self._planner_thread is None or self._inference_thread is None:
@@ -92,7 +110,23 @@ class IncrementalTranscriptionJob:
             raise IncrementalPipelineError("Timed out while finalizing incremental transcription.")
         if self._result is None:
             self._result = self._build_result()
+            self._logger.info(
+                "Incremental transcription finished: complete=%s chunks=%s duration_s=%.3f latency_s=%.3f warnings=%s",
+                self._result.complete,
+                len(self._result.chunks),
+                self._result.duration_seconds,
+                self._result.latency_seconds,
+                len(self._result.warnings),
+            )
         return self._result
+
+    def _plan_with_context(self) -> None:
+        with bind_context(**self._log_context):
+            self._plan()
+
+    def _infer_with_context(self) -> None:
+        with bind_context(**self._log_context):
+            self._infer()
 
     def _plan(self) -> None:
         planner = AdaptiveChunkPlanner()
@@ -125,7 +159,7 @@ class IncrementalTranscriptionJob:
                             break
                     break
         except Exception as error:
-            logger.exception("Incremental transcription planning failed")
+            self._logger.exception("Incremental transcription planning failed")
             self._error = error
             self._warnings.append("incremental-source planning failed")
             self._cancellation.cancel()
@@ -168,6 +202,19 @@ class IncrementalTranscriptionJob:
                                 result.cancelled,
                             )
                         )
+                        self._logger.info(
+                            "Incremental transcription chunk completed: chunk=%s source_start=%s source_end=%s "
+                            "logical_start=%s logical_end=%s latency_s=%.3f tokens=%s words=%s cancelled=%s",
+                            index,
+                            item.source_start_sample,
+                            item.source_end_sample,
+                            item.logical_start_sample,
+                            item.logical_end_sample,
+                            self._outcomes[-1].latency_seconds,
+                            len(result.tokens),
+                            len(result.words),
+                            result.cancelled,
+                        )
                         self._publish_update(item)
                         if result.cancelled:
                             self._warnings.append(f"chunk {index} generation was cancelled")
@@ -184,14 +231,16 @@ class IncrementalTranscriptionJob:
                                 f"{stage}: {type(error).__name__}: {error}",
                             )
                         )
-                        logger.exception("Incremental transcription chunk failed: chunk=%s stage=%s", index, stage)
+                        self._logger.exception(
+                            "Incremental transcription chunk failed: chunk=%s stage=%s", index, stage
+                        )
                         self._error = error
                         self._warnings.append(f"chunk {index} {stage} failed")
                         self._cancellation.cancel()
                 finally:
                     self._queue.task_done()
         except Exception as error:
-            logger.exception("Incremental transcription inference worker failed")
+            self._logger.exception("Incremental transcription inference worker failed")
             self._error = error
             self._warnings.append("incremental inference worker failed")
             self._cancellation.cancel()
@@ -209,7 +258,7 @@ class IncrementalTranscriptionJob:
         try:
             self._on_update(update)
         except Exception as error:
-            logger.warning("Incremental transcription update callback failed: %s", error)
+            self._logger.warning("Incremental transcription update callback failed: %s", error)
 
     def _put_descriptor(self, descriptor: AudioChunk) -> bool:
         while not self._cancellation.is_cancelled:
@@ -268,6 +317,8 @@ def build_incremental_job(
     *,
     intent: TranscriptionIntent | None = None,
     on_update: Callable[[TranscriptionProgress], None] | None = None,
+    logger: logging.Logger | logging.LoggerAdapter[logging.Logger] | None = None,
+    log_context: Mapping[str, str] | None = None,
 ) -> IncrementalTranscriptionJob:
     return IncrementalTranscriptionJob(
         engine,
@@ -275,4 +326,6 @@ def build_incremental_job(
         source,
         intent=intent,
         on_update=on_update,
+        logger=logger,
+        log_context=log_context,
     )

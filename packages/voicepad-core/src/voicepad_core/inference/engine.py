@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable, Mapping
 from enum import StrEnum
 from pathlib import Path
@@ -92,6 +93,8 @@ class ResidentTranscriptionEngine:
     ) -> ActiveDeployment:
         if not self._operation_lock.acquire(blocking=False):
             raise RuntimeBusyError("The transcription engine is busy.")
+        started = time.perf_counter()
+        logger.info("Deployment activation started: deployment=%s device_index=%s", deployment_id, device_index)
         candidate: TranscriptionSession | None = None
         try:
             definition = get_deployment(deployment_id)
@@ -102,6 +105,7 @@ class ResidentTranscriptionEngine:
                     and self._session.deployment.definition.id == deployment_id
                     and self._state is EngineState.READY
                 ):
+                    logger.info("Deployment already active: deployment=%s", deployment_id)
                     return self._session.deployment
                 self._close_session_locked()
                 self._state = EngineState.PREPARING_ARTIFACT
@@ -124,6 +128,13 @@ class ResidentTranscriptionEngine:
                 self._session = candidate
                 candidate = None
                 self._state = EngineState.READY
+                logger.info(
+                    "Deployment activation finished: deployment=%s device=%s precision=%s latency_s=%.3f",
+                    self._session.deployment.definition.id,
+                    self._session.deployment.device_name,
+                    self._session.deployment.definition.precision.value,
+                    time.perf_counter() - started,
+                )
                 return self._session.deployment
         except Exception as error:
             if candidate is not None:
@@ -135,6 +146,13 @@ class ResidentTranscriptionEngine:
             with self._state_lock:
                 self._session = None
                 self._state = EngineState.FAILED
+            logger.error(
+                "Deployment activation failed: deployment=%s error_type=%s error=%s",
+                deployment_id,
+                type(error).__name__,
+                error,
+                exc_info=(type(error), error, error.__traceback__),
+            )
             raise
         finally:
             self._operation_lock.release()
@@ -147,6 +165,7 @@ class ResidentTranscriptionEngine:
     ) -> BackendResult:
         if not self._operation_lock.acquire(blocking=False):
             raise RuntimeBusyError("The transcription engine is busy.")
+        started = time.perf_counter()
         try:
             with self._state_lock:
                 if self._state is not EngineState.READY or self._session is None:
@@ -175,6 +194,17 @@ class ResidentTranscriptionEngine:
                 raise
             with self._state_lock:
                 self._state = EngineState.READY
+            logger.info(
+                "Inference finished: deployment=%s samples=%s sample_rate=%s tokens=%s words=%s "
+                "cancelled=%s latency_s=%.3f",
+                session.deployment.definition.id,
+                len(audio.samples),
+                audio.sample_rate,
+                len(result.tokens),
+                len(result.words),
+                result.cancelled,
+                time.perf_counter() - started,
+            )
             return result
         finally:
             self._operation_lock.release()
@@ -184,6 +214,7 @@ class ResidentTranscriptionEngine:
             raise RuntimeBusyError("The transcription engine is busy.")
         try:
             with self._state_lock:
+                deployment_id = self._session.deployment.definition.id if self._session is not None else None
                 self._state = EngineState.UNLOADING
                 try:
                     self._close_session_locked()
@@ -192,6 +223,7 @@ class ResidentTranscriptionEngine:
                     logger.exception("Session cleanup failed while unloading")
                     raise
                 self._state = EngineState.UNPREPARED
+                logger.info("Deployment unloaded: deployment=%s", deployment_id or "none")
         finally:
             self._operation_lock.release()
 

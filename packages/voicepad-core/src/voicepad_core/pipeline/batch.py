@@ -1,43 +1,26 @@
 from __future__ import annotations
 
+import logging
 import time
 from pathlib import Path
-from typing import Protocol
 
 import numpy as np
 
 from voicepad_core.audio import FileSource, RawAudio
 from voicepad_core.inference import (
-    ActiveDeployment,
-    BackendResult,
     CancellationToken,
     ResidentTranscriptionEngine,
     TranscriptionIntent,
 )
 from voicepad_core.planning import AdaptiveChunkPlanner
 from voicepad_core.preprocessing import DEFAULT_WAVEFORM_SPEC, AudioPreProcessor, PreprocessedAudio
-from voicepad_core.vad import PauseTracker, SileroVad, VadFrame, material_speech_regions
+from voicepad_core.vad import PauseTracker, SileroVad, material_speech_regions
 
+from .contracts import ReadyEngine, SequentialVad
 from .transcript_assembly import ConservativeAssembler
 from .types import ChunkOutcome, TranscriptionResult
 
-
-class ReadyEngine(Protocol):
-    @property
-    def active_deployment(self) -> ActiveDeployment | None: ...
-
-    def transcribe(
-        self,
-        audio: PreprocessedAudio,
-        intent: TranscriptionIntent | None = None,
-        cancellation: CancellationToken | None = None,
-    ) -> BackendResult: ...
-
-
-class SequentialVad(Protocol):
-    def reset(self) -> None: ...
-
-    def accept(self, samples: np.ndarray, start_sample: int, *, final: bool = False) -> tuple[VadFrame, ...]: ...
+logger = logging.getLogger(__name__)
 
 
 class BatchTranscriber:
@@ -54,6 +37,7 @@ class BatchTranscriber:
         intent: TranscriptionIntent | None = None,
         cancellation: CancellationToken | None = None,
     ) -> TranscriptionResult:
+        logger.info("Batch transcription file requested: path=%s", path)
         return self.transcribe_audio(
             FileSource(path).read_audio(),
             intent=intent,
@@ -71,6 +55,13 @@ class BatchTranscriber:
         if active is None:
             raise RuntimeError("A verified and warmed transcription deployment must be active.")
         started = time.perf_counter()
+        logger.info(
+            "Batch transcription started: sample_rate=%s channels=%s frames=%s deployment=%s",
+            raw_audio.sample_rate,
+            raw_audio.channels,
+            raw_audio.frame_count,
+            active.definition.id,
+        )
         requested_intent = intent or TranscriptionIntent()
         token = cancellation or CancellationToken()
         prepared = AudioPreProcessor.prepare(raw_audio, DEFAULT_WAVEFORM_SPEC)
@@ -111,6 +102,17 @@ class BatchTranscriber:
                         result.cancelled,
                     )
                 )
+                logger.info(
+                    "Batch transcription chunk completed: chunk=%s source_start=%s source_end=%s "
+                    "latency_s=%.3f tokens=%s words=%s cancelled=%s",
+                    index,
+                    descriptor.source_start_sample,
+                    descriptor.source_end_sample,
+                    latency,
+                    len(result.tokens),
+                    len(result.words),
+                    result.cancelled,
+                )
                 if result.cancelled:
                     warnings.append(f"chunk {index} generation was cancelled")
                     break
@@ -119,6 +121,13 @@ class BatchTranscriber:
                 message = f"{type(error).__name__}: {error}"
                 outcomes.append(ChunkOutcome(index, descriptor, latency, 0, 0, False, message))
                 warnings.append(f"chunk {index} failed")
+                logger.error(
+                    "Batch transcription chunk failed: chunk=%s error_type=%s error=%s",
+                    index,
+                    type(error).__name__,
+                    error,
+                    exc_info=(type(error), error, error.__traceback__),
+                )
                 break
 
         gaps = assembler.coverage_gaps(speech)
@@ -129,7 +138,7 @@ class BatchTranscriber:
             outcome.error is None and not outcome.cancelled for outcome in outcomes
         )
         complete = all_chunks_terminal and assembler.protocol_valid and not gaps and not token.is_cancelled
-        return TranscriptionResult(
+        result = TranscriptionResult(
             text=assembler.text,
             words=assembler.words,
             tokens=assembler.tokens,
@@ -142,6 +151,17 @@ class BatchTranscriber:
             warnings=tuple(warnings),
             complete=complete,
         )
+        logger.info(
+            "Batch transcription finished: complete=%s chunks=%s duration_s=%.3f latency_s=%.3f "
+            "transformations=%s warnings=%s",
+            result.complete,
+            len(result.chunks),
+            result.duration_seconds,
+            result.latency_seconds,
+            prepared.transformations,
+            len(result.warnings),
+        )
+        return result
 
 
 def build_batch_transcriber(

@@ -1117,3 +1117,9 @@ urllib3==2.7.0 \
     --hash=sha256:231e0ec3b63ceb14667c67be60f2f2c40a518cb38b03af60abc813da26505f4c \
     --hash=sha256:9fb4c81ebbb1ce9531cce37674bbc6f1360472bc18ca9a553ede278ef7276897
     # via requests
+utilityhub-logging==0.1.0 \
+    --hash=sha256:3c3f29c7daaf556c64cb045260d47fe8f9bc51e3d17c647202404180e74e84f1 \
+    --hash=sha256:a1dfc236bb5c50dabf3a25c2860f9e3c79c461236aa38eb3d4eb59f15761516f
+    # via
+    #   voicepad
+    #   voicepad-core

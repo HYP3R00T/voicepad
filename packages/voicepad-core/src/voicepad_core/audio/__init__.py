@@ -10,9 +10,10 @@ from .errors import (
 )
 from .file import AudioSource, FileSource
 from .incremental_source import IncrementalAudioSource
+from .live_recording import LiveWavRecording
 from .microphone import MicrophoneStream
-from .persistence import LiveWavRecording, WavArtifact, write_wav_atomic
 from .types import AudioWindow, RawAudio, WaveformSpec
+from .wav_persistence import WavArtifact, write_wav_atomic
 
 __all__ = [
     "AudioWindow",

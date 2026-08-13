@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import json
+import logging
 from pathlib import Path
 from threading import Event
 from unittest.mock import patch
 
 import numpy as np
+from utilityhub_logging import LogFormat, begin_scope_logging, cleanup_logging, end_scope_logging
 from voicepad_core.audio import AudioWindow, LiveWavRecording
 from voicepad_core.deployments import PARAKEET_V3_CUDA, PARAKEET_V3_MANIFEST, HuggingFaceSource
 from voicepad_core.inference import ActiveDeployment, BackendResult, TimedWord, TokenTimestamp
@@ -78,6 +81,17 @@ class FakeEngine:
         return BackendResult(
             "incremental",
             (TokenTimestamp("▁incremental", word.start_seconds, word.end_seconds),),
+            (word,),
+        )
+
+
+class PrivateTextEngine(FakeEngine):
+    def transcribe(self, audio: PreprocessedAudio, intent=None, cancellation=None) -> BackendResult:  # type: ignore[no-untyped-def]
+        self.calls += 1
+        word = TimedWord("PRIVATE_TRANSCRIPT_SENTINEL", 0.25, min(0.75, audio.duration()))
+        return BackendResult(
+            word.text,
+            (TokenTimestamp("PRIVATE_TOKEN_SENTINEL", word.start_seconds, word.end_seconds),),
             (word,),
         )
 
@@ -180,3 +194,55 @@ def test_incremental_source_publishes_committed_cursor_and_final_state(tmp_path:
     recording.finish()
     _, final = recording.wait_for_update(committed, timeout=2)
     assert final is True
+
+
+def test_core_worker_logs_are_correlated_without_exposing_transcript_content(tmp_path: Path) -> None:
+    scope_logger, log_path = begin_scope_logging(
+        "recording",
+        "core-worker-test",
+        app_name="voicepad",
+        logs_path=tmp_path,
+        log_format=LogFormat.JSON,
+    )
+    context = {
+        "recording_id": "core-worker-test",
+        "scope_id": "core-worker-test",
+        "scope_type": "recording",
+        "component": "voicepad_core.pipeline.incremental",
+    }
+    scoped_logger = logging.LoggerAdapter(scope_logger.getChild("pipeline"), {"utilityhub_context": context})
+    recording = LiveWavRecording(
+        tmp_path / "recording.wav",
+        SR,
+        1,
+        logger=scoped_logger,
+        log_context=context,
+    )
+    job = IncrementalTranscriptionJob(
+        PrivateTextEngine(),
+        SpeechVad(),
+        recording,
+        logger=scoped_logger,
+        log_context=context,
+    )
+
+    try:
+        recording.start()
+        job.start()
+        recording.append(np.zeros(2 * SR, dtype=np.float32))
+        recording.finish()
+        result = job.finish()
+    finally:
+        end_scope_logging(scope_logger)
+        cleanup_logging(close_all_loggers=True)
+
+    records = [json.loads(line) for line in log_path.read_text().splitlines()]
+    chunk_records = [
+        record for record in records if str(record["message"]).startswith("Incremental transcription chunk completed")
+    ]
+    assert result.text == "PRIVATE_TRANSCRIPT_SENTINEL"
+    assert len(chunk_records) == 1
+    assert chunk_records[0]["context"]["recording_id"] == "core-worker-test"
+    assert chunk_records[0]["context"]["component"] == "voicepad_core.pipeline.incremental"
+    assert "PRIVATE_TRANSCRIPT_SENTINEL" not in log_path.read_text()
+    assert "PRIVATE_TOKEN_SENTINEL" not in log_path.read_text()
