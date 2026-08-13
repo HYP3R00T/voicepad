@@ -4,7 +4,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 from voicepad.config import AppConfig
 from voicepad.runtime import ApplicationRuntime
-from voicepad_core.deployments import PARAKEET_V3_CUDA, PARAKEET_V3_MANIFEST, HuggingFaceSource
+from voicepad_core.deployments import (
+    PARAKEET_V3_CUDA,
+    PARAKEET_V3_MANIFEST,
+    SILERO_VAD_ONNX_EXTRACTION,
+    HuggingFaceSource,
+    get_manifest,
+)
 from voicepad_core.inference import ActiveDeployment
 from voicepad_core.pipeline import TranscriptionResult
 
@@ -99,3 +105,44 @@ def test_runtime_close_marks_unfinished_recording_abandoned(tmp_path: Path) -> N
     runtime.engine.unload.assert_called_once_with()
     scope.close.assert_called_once_with(outcome="abandoned", error=None)
     assert runtime._recording_scope is None
+
+
+def test_runtime_reports_only_fully_verified_artifacts_as_ready(tmp_path: Path) -> None:
+    runtime = ApplicationRuntime(AppConfig(artifact_cache_path=tmp_path))
+    runtime.artifacts = MagicMock()
+    runtime.artifacts.locate.return_value = tmp_path / "parakeet"
+
+    with patch("voicepad.runtime.WheelExtractor.verify", return_value=tmp_path / "silero.onnx") as verify:
+        assert runtime.artifacts_ready() is True
+
+    runtime.artifacts.locate.assert_called_once_with(PARAKEET_V3_MANIFEST)
+    verify.assert_called_once_with(SILERO_VAD_ONNX_EXTRACTION)
+
+    runtime.artifacts.locate.return_value = None
+    assert runtime.artifacts_ready() is False
+
+
+def test_runtime_reports_combined_artifact_progress(tmp_path: Path) -> None:
+    runtime = ApplicationRuntime(AppConfig(artifact_cache_path=tmp_path))
+    runtime.engine = MagicMock()
+    source = PARAKEET_V3_MANIFEST.source
+    assert isinstance(source, HuggingFaceSource)
+    active = ActiveDeployment(PARAKEET_V3_CUDA, source.revision, "gpu", "gpu", 4_000_000_000)
+    parakeet_size = PARAKEET_V3_MANIFEST.total_size
+    silero_manifest = get_manifest(SILERO_VAD_ONNX_EXTRACTION.wheel_manifest_id)
+    progress: list[tuple[int, int]] = []
+
+    def activate(_deployment_id: str, *, on_progress) -> ActiveDeployment:  # type: ignore[no-untyped-def]
+        on_progress(parakeet_size, parakeet_size)
+        return active
+
+    def prepare(_extraction, on_progress):  # type: ignore[no-untyped-def]
+        on_progress(silero_manifest.total_size, silero_manifest.total_size)
+        return tmp_path / "silero.onnx"
+
+    runtime.engine.activate.side_effect = activate
+    with patch("voicepad.runtime.WheelExtractor.prepare", side_effect=prepare):
+        assert runtime.activate(on_progress=lambda completed, total: progress.append((completed, total))) is active
+
+    expected_total = parakeet_size + silero_manifest.total_size
+    assert progress == [(parakeet_size, expected_total), (expected_total, expected_total)]

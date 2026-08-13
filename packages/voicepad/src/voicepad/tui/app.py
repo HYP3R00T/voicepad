@@ -25,17 +25,19 @@ from textual.widgets import (
     TabPane,
 )
 from voicepad_core.audio import MicrophoneStream
+from voicepad_core.inference import ActiveDeployment
 from voicepad_core.pipeline import (
     IncrementalTranscriptionJob,
     TranscriptionProgress,
     TranscriptionResult,
 )
 
-from voicepad.config import AppConfig, load_config, save_config
+from voicepad.config import AppConfig, config_path, load_config, save_config
 from voicepad.output import persist_markdown
 from voicepad.runtime import ApplicationRuntime
 from voicepad.tui.components import VoiceButton
 from voicepad.tui.control import ControlServer
+from voicepad.tui.setup import SetupModal
 from voicepad.tui.shortcut import desktop_shortcut_status, open_shortcut_settings
 from voicepad.tui.status import DesktopStatus
 from voicepad.tui.status import State as DesktopStatusState
@@ -73,6 +75,7 @@ class VoicePadApp(App[None]):
 
     def __init__(self, config: AppConfig | None = None, runtime: ApplicationRuntime | None = None) -> None:
         super().__init__(ansi_color=True)
+        self._config_missing = config is None and not config_path().exists()
         self.config = config or load_config()
         self.theme = self.config.theme
         self.runtime = runtime or ApplicationRuntime(self.config)
@@ -176,7 +179,7 @@ class VoicePadApp(App[None]):
         self._ensure_desktop_status().set_state("initializing")
         self.set_interval(0.1, self._update_timer)
         self._load_history()
-        self._activate()
+        self._check_setup()
 
     def on_unmount(self) -> None:
         self._control.stop()
@@ -207,6 +210,58 @@ class VoicePadApp(App[None]):
             self.call_from_thread(self._set_error, f"activation failed: {error}")
             return
         self.call_from_thread(self._set_ready, active.device_name)
+
+    @work(thread=True, exclusive=True, group="setup-check")
+    def _check_setup(self) -> None:
+        if self._config_missing:
+            self.call_from_thread(self._setup_checked, None)
+            return
+        try:
+            artifacts_ready = self.runtime.artifacts_ready()
+        except Exception as error:
+            logger.exception("Could not inspect local model artifacts")
+            self.call_from_thread(self._set_error, f"setup check failed: {error}")
+            return
+        self.call_from_thread(self._setup_checked, artifacts_ready)
+
+    def _setup_checked(self, artifacts_ready: bool | None) -> None:
+        if artifacts_ready is not True:
+            self._state = "setup"
+            self._set_status("transcribing", "setup required")
+            self.push_screen(
+                SetupModal(
+                    config_missing=self._config_missing,
+                    artifacts_missing=None if artifacts_ready is None else not artifacts_ready,
+                    artifact_path=self.config.artifact_cache_path,
+                )
+            )
+            return
+        self._set_status("transcribing", "loading model…")
+        self._activate()
+
+    def begin_setup(self, modal: SetupModal) -> None:
+        self._prepare_setup(modal)
+
+    @work(thread=True, group="setup-prepare")
+    def _prepare_setup(self, modal: SetupModal) -> None:
+        try:
+            if self._config_missing:
+                save_config(self.config)
+                self._config_missing = False
+
+            def on_progress(completed: int, total: int) -> None:
+                self.call_from_thread(modal.update_progress, completed, total)
+
+            active = self.runtime.activate(on_progress=on_progress)
+        except Exception as error:
+            logger.exception("VoicePad setup failed")
+            self.call_from_thread(modal.show_error, error)
+            return
+        self.call_from_thread(self._complete_setup, modal, active)
+
+    def _complete_setup(self, modal: SetupModal, active: ActiveDeployment) -> None:
+        modal.dismiss()
+        self._set_ready(active.device_name)
 
     def _set_status(self, state: str, message: str) -> None:
         icons = {"ready": "", "recording": "󰑊", "transcribing": "󰔟", "error": "󰅙"}
@@ -456,11 +511,11 @@ class VoicePadApp(App[None]):
         self.theme = updated.theme
         self.query_one("#settings-status", Label).update("Saved. Reloading verified deployment…")
         self._state = "loading"
-        self._set_status("transcribing", "loading model…")
+        self._set_status("transcribing", "checking setup…")
         if self._desktop_status is not None:
             self._desktop_status.set_state("initializing")
         self._load_history()
-        self._activate()
+        self._check_setup()
 
 
 def _recorded_at(stem: str) -> datetime | None:

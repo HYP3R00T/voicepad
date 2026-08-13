@@ -529,45 +529,32 @@ InfoModal {
 
 /* ── info modal close button — inherits VoiceButton default role ── */
 
-/* ── setup wizard modal ── */
+/* ── first-run setup ── */
 SetupModal {
     align: center middle;
+    background: $background 70%;
 }
 
-#wizard-dialog {
+#setup-dialog {
     layout: vertical;
-    padding: 1 2;
-    width: 70;
+    padding: 2 4;
+    width: 85%;
+    min-width: 48;
+    max-width: 76;
     height: auto;
-    max-height: 28;
     border: tall $primary;
     background: $background;
 }
 
-#wizard-step-indicator {
+#setup-title {
     width: 100%;
-    height: 1;
-    text-align: right;
-    color: $text-disabled;
-    margin-bottom: 1;
-}
-
-#wizard-body {
-    layout: vertical;
-    height: auto;
-    width: 100%;
-}
-
-.wizard-title {
-    width: 100%;
-    height: auto;
     text-align: center;
     color: $foreground;
     text-style: bold;
     margin-bottom: 1;
 }
 
-.wizard-text {
+#setup-reason, #setup-explanation {
     width: 100%;
     height: auto;
     text-align: center;
@@ -575,82 +562,41 @@ SetupModal {
     margin-bottom: 1;
 }
 
-.wizard-features {
-    width: 100%;
-    height: auto;
-    color: $text;
-    padding: 0 2;
-    border: round $border-blurred;
-    margin-bottom: 1;
-    text-align: center;
-    content-align: center middle;
-}
-
-.wizard-credit {
-    width: 100%;
-    height: 1;
-    text-align: center;
-    color: $text-disabled;
-    margin-top: 1;
-}
-
-.wizard-hint {
+#setup-path {
     width: 100%;
     height: auto;
     color: $text-muted;
-    margin-top: 1;
+    text-align: center;
+    margin-bottom: 1;
 }
 
-.wizard-status {
+#setup-progress {
     width: 100%;
     height: 1;
-    text-align: center;
-    margin-top: 1;
+    margin: 1 0;
 }
 
-#wizard-keybindings {
+#setup-progress > Bar {
+    width: 1fr;
+}
+
+#setup-status {
     width: 100%;
     height: auto;
-    background: $background;
-    border: round $border-blurred;
-    margin-top: 1;
-    margin-bottom: 1;
-    padding: 0 1;
+    color: $text-muted;
+    text-align: center;
+    margin: 1 0;
 }
 
-#wizard-progress {
+#setup-actions {
     width: 100%;
-    margin-top: 1;
-}
-
-#wizard-progress > Bar {
-    width: 1fr;
-}
-
-#wizard-keybindings > .datatable--header {
-    display: none;
-}
-
-#wizard-model-select, #wizard-device-select {
-    width: 100%;
-    margin-top: 1;
-}
-
-#wizard-nav {
-    layout: horizontal;
     height: 1;
-    width: 100%;
-    margin-top: 2;
-    padding: 0;
+    align: center middle;
+    margin-top: 1;
 }
 
-/* ── wizard nav buttons — inherits VoiceButton roles ── */
-#wizard-spacer {
-    width: 1fr;
-}
-
-#wizard-next:disabled {
-    color: $text-disabled;
+#setup-continue {
+    width: auto;
 }
 
 /* ── delete confirmation modal ── */

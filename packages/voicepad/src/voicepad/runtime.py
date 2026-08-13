@@ -7,9 +7,14 @@ from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
-from voicepad_core.artifacts import ArtifactStore, WheelExtractor
+from voicepad_core.artifacts import ArtifactError, ArtifactStore, ProgressCallback, WheelExtractor
 from voicepad_core.audio import MicrophoneStream, WavArtifact
-from voicepad_core.deployments import PARAKEET_V3_CUDA, SILERO_VAD_ONNX_EXTRACTION
+from voicepad_core.deployments import (
+    PARAKEET_V3_CUDA,
+    PARAKEET_V3_MANIFEST,
+    SILERO_VAD_ONNX_EXTRACTION,
+    get_manifest,
+)
 from voicepad_core.inference import ActiveDeployment, ResidentTranscriptionEngine
 from voicepad_core.pipeline import (
     IncrementalTranscriptionJob,
@@ -39,9 +44,34 @@ class ApplicationRuntime:
     def active_deployment(self) -> ActiveDeployment | None:
         return self.engine.active_deployment
 
-    def activate(self) -> ActiveDeployment:
-        active = self.engine.activate(self.config.deployment_id)
-        self._silero_model = WheelExtractor(self.artifacts).prepare(SILERO_VAD_ONNX_EXTRACTION)
+    def artifacts_ready(self) -> bool:
+        """Return whether every required model artifact is present and valid."""
+        try:
+            if self.artifacts.locate(PARAKEET_V3_MANIFEST) is None:
+                return False
+            WheelExtractor(self.artifacts).verify(SILERO_VAD_ONNX_EXTRACTION)
+        except (ArtifactError, OSError):
+            return False
+        return True
+
+    def activate(self, on_progress: ProgressCallback | None = None) -> ActiveDeployment:
+        parakeet_size = PARAKEET_V3_MANIFEST.total_size
+        silero_manifest = get_manifest(SILERO_VAD_ONNX_EXTRACTION.wheel_manifest_id)
+        total_size = parakeet_size + silero_manifest.total_size
+
+        def parakeet_progress(completed: int, _total: int) -> None:
+            if on_progress is not None:
+                on_progress(completed, total_size)
+
+        def silero_progress(completed: int, _total: int) -> None:
+            if on_progress is not None:
+                on_progress(parakeet_size + completed, total_size)
+
+        active = self.engine.activate(self.config.deployment_id, on_progress=parakeet_progress)
+        self._silero_model = WheelExtractor(self.artifacts).prepare(
+            SILERO_VAD_ONNX_EXTRACTION,
+            silero_progress,
+        )
         return active
 
     def transcribe_file(self, path: Path) -> TranscriptionResult:
