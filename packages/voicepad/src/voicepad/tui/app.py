@@ -129,7 +129,7 @@ class VoicePadApp(App[None]):
                     yield Input(str(self.config.recordings_path), id="setting-recordings", classes="settings-input")
                 with Static(classes="settings-item"):
                     yield Label("Transcripts", classes="settings-key")
-                    yield Label("Schema-1 Markdown results", classes="settings-help")
+                    yield Label("Markdown transcription results", classes="settings-help")
                     yield Input(str(self.config.markdown_path), id="setting-markdown", classes="settings-input")
                 with Static(classes="settings-item"):
                     yield Label("Model cache", classes="settings-key")
@@ -508,7 +508,7 @@ def _read_history(config: AppConfig) -> list[HistoryEntry]:
 
 def _split_markdown(content: str) -> tuple[dict[str, str], str]:
     if not content.startswith("---\n") or "\n---\n" not in content[4:]:
-        raise ValueError("not a VoicePad schema-1 Markdown result")
+        raise ValueError("not a VoicePad Markdown result")
     header, text = content[4:].split("\n---\n", 1)
     metadata = {}
     for line in header.splitlines():

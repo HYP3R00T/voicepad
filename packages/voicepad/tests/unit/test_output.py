@@ -17,6 +17,7 @@ def result() -> TranscriptionResult:
 def test_markdown_uses_authoritative_result_metadata(tmp_path: Path) -> None:
     content = render_markdown(tmp_path / "recording.wav", result())
 
+    assert "schema:" not in content
     assert "complete: true" in content
     assert PARAKEET_V3_CUDA.id in content
     assert content.endswith("hello\n")

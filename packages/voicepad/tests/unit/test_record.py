@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 
 from typer.testing import CliRunner
 from voicepad.cli.record import _wait_for_stop
+from voicepad.config import AppConfig
 from voicepad.main import app
 from voicepad_core.audio import WavArtifact
 
@@ -29,6 +30,7 @@ def test_record_command_preserves_primary_failure_when_cleanup_fails() -> None:
     runtime.start_recording.return_value = (microphone, job)
     runtime.close.side_effect = RuntimeError("close failed")
     with (
+        patch("voicepad.cli.record.load_config", return_value=AppConfig()),
         patch("voicepad.cli.record.ApplicationRuntime", return_value=runtime),
         patch("voicepad.cli.record._wait_for_stop", side_effect=RuntimeError("recording failed")),
     ):
@@ -47,6 +49,7 @@ def test_no_transcribe_rejects_partial_wav(tmp_path) -> None:  # type: ignore[no
     runtime.start_capture.return_value = microphone
     runtime.stop_capture.return_value = microphone.stop.return_value
     with (
+        patch("voicepad.cli.record.load_config", return_value=AppConfig()),
         patch("voicepad.cli.record.ApplicationRuntime", return_value=runtime),
         patch("voicepad.cli.record._wait_for_stop"),
     ):

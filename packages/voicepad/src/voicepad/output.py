@@ -12,7 +12,6 @@ def render_markdown(audio_path: Path, result: TranscriptionResult) -> str:
     warnings = "\n".join(f"  - {warning}" for warning in result.warnings) or "  []"
     return "\n".join((
         "---",
-        "schema: 1",
         f"audio: {audio_path.name}",
         f"deployment: {active.definition.id}",
         f"model: {active.definition.model_id}",

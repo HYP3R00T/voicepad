@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from textual.widgets import Input, Label, Markdown, OptionList, Select, Static, Switch, TabPane
-from voicepad.config import AppConfig
+from voicepad.config import AppConfig, load_config
 from voicepad.runtime import ApplicationRuntime
 from voicepad.tui.app import HistoryEntry, VoicePadApp, _history_label, _recorded_at
 from voicepad_core.deployments import PARAKEET_V3_CUDA, PARAKEET_V3_MANIFEST, HuggingFaceSource
@@ -134,6 +134,54 @@ async def test_tui_activates_resident_nvidia_runtime(tmp_path: Path) -> None:
 
     assert runtime.closed is True
     assert desktop_status.stopped is True
+
+
+@pytest.mark.asyncio
+async def test_settings_write_utilityhub_toml_and_reload_it(tmp_path: Path) -> None:
+    runtime = FakeRuntime()
+    replacement_runtime = FakeRuntime()
+    config_path = tmp_path / "voicepad.toml"
+    config = AppConfig(recordings_path=tmp_path / "recordings", markdown_path=tmp_path / "markdown")
+    app = VoicePadApp(config, runtime=cast(ApplicationRuntime, runtime))
+
+    with (
+        patch("voicepad.tui.app.ControlServer.start"),
+        patch("voicepad.tui.app.ControlServer.stop"),
+        patch("voicepad.tui.app.DesktopStatus", FakeDesktopStatus),
+        patch("voicepad.config.config_path", return_value=config_path),
+        patch(
+            "voicepad.tui.app.ApplicationRuntime",
+            return_value=cast(ApplicationRuntime, replacement_runtime),
+        ),
+    ):
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            recordings = tmp_path / "new-recordings"
+            markdown = tmp_path / "new-markdown"
+            artifacts = tmp_path / "new-artifacts"
+            app.query_one("#setting-recordings", Input).value = str(recordings)
+            app.query_one("#setting-markdown", Input).value = str(markdown)
+            app.query_one("#setting-artifacts", Input).value = str(artifacts)
+            app.query_one("#setting-prefix", Input).value = "dictation"
+            app.query_one("#setting-copy", Switch).value = False
+            app.query_one("#setting-theme", Select).value = "nord"
+
+            with patch.object(app, "_activate"):
+                app.action_save_settings()
+
+            persisted = load_config(config_path)
+            assert persisted == app.config
+            assert persisted.recordings_path == recordings
+            assert persisted.markdown_path == markdown
+            assert persisted.artifact_cache_path == artifacts
+            assert persisted.recording_prefix == "dictation"
+            assert persisted.copy_complete_text is False
+            assert persisted.theme == "nord"
+            contents = config_path.read_text(encoding="utf-8")
+            assert "schema" not in contents
+            assert "v2" not in contents.lower()
+            assert runtime.closed is True
+            assert app.runtime is replacement_runtime
 
 
 @pytest.mark.asyncio
