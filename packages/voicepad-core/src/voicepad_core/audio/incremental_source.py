@@ -5,7 +5,7 @@ from typing import Protocol
 from .types import AudioWindow
 
 
-class GrowingAudioSource(Protocol):
+class IncrementalAudioSource(Protocol):
     @property
     def sample_rate(self) -> int: ...
 

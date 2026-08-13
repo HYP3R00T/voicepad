@@ -64,7 +64,7 @@ class MicrophoneStream:
             return self._capture_error
 
     @property
-    def growing_source(self) -> LiveWavRecording:
+    def incremental_source(self) -> LiveWavRecording:
         """Return the active disk-backed source for transcription workers."""
         with self._lock:
             if self._live_recording is None:

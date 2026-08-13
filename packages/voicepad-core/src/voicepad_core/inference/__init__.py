@@ -1,6 +1,6 @@
 from .cuda import ADMISSION_HEADROOM_BYTES, CudaDevice, admit_cuda_device
+from .engine import EngineState, ResidentTranscriptionEngine
 from .parakeet import TransformersParakeetTDTSession
-from .runtime import EngineState, ResidentTranscriptionEngine
 from .types import (
     ActiveDeployment,
     BackendResult,

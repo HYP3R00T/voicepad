@@ -10,7 +10,7 @@ from voicepad.runtime import ApplicationRuntime
 from voicepad.tui.app import HistoryEntry, VoicePadApp, _history_label, _recorded_at
 from voicepad_core.deployments import PARAKEET_V3_CUDA, PARAKEET_V3_MANIFEST, HuggingFaceSource
 from voicepad_core.inference import ActiveDeployment
-from voicepad_core.pipeline import GrowingTranscriptionUpdate
+from voicepad_core.pipeline import TranscriptionProgress
 
 
 def test_history_entries_have_compact_human_readable_labels(tmp_path: Path) -> None:
@@ -105,7 +105,7 @@ async def test_tui_activates_resident_nvidia_runtime(tmp_path: Path) -> None:
             assert app.query_one("#history-options", OptionList).styles.background.a == 0
 
             app._state = "recording"
-            app._show_live_update(GrowingTranscriptionUpdate("provisional words", 1, 26 * 16_000))
+            app._show_live_update(TranscriptionProgress("provisional words", 1, 26 * 16_000))
             assert "provisional words" in str(app.query_one("#tx-text").render())
             assert "through 26.0s" in str(app.query_one("#tx-meta").render())
 

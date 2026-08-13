@@ -18,8 +18,8 @@ from voicepad_core.planning import AdaptiveChunkPlanner
 from voicepad_core.preprocessing import DEFAULT_WAVEFORM_SPEC, AudioPreProcessor, PreprocessedAudio
 from voicepad_core.vad import PauseTracker, SileroVad, VadFrame, material_speech_regions
 
-from .assembly import ConservativeAssembler
-from .types import ChunkOutcome, FileTranscriptionResult
+from .transcript_assembly import ConservativeAssembler
+from .types import ChunkOutcome, TranscriptionResult
 
 
 class ReadyEngine(Protocol):
@@ -40,7 +40,7 @@ class SequentialVad(Protocol):
     def accept(self, samples: np.ndarray, start_sample: int, *, final: bool = False) -> tuple[VadFrame, ...]: ...
 
 
-class FiniteFileTranscriber:
+class BatchTranscriber:
     """Run immutable audio through VAD, bounded inference, and one assembler."""
 
     def __init__(self, engine: ReadyEngine, vad: SequentialVad) -> None:
@@ -53,7 +53,7 @@ class FiniteFileTranscriber:
         *,
         intent: TranscriptionIntent | None = None,
         cancellation: CancellationToken | None = None,
-    ) -> FileTranscriptionResult:
+    ) -> TranscriptionResult:
         return self.transcribe_audio(
             FileSource(path).read_audio(),
             intent=intent,
@@ -66,7 +66,7 @@ class FiniteFileTranscriber:
         *,
         intent: TranscriptionIntent | None = None,
         cancellation: CancellationToken | None = None,
-    ) -> FileTranscriptionResult:
+    ) -> TranscriptionResult:
         active = self._engine.active_deployment
         if active is None:
             raise RuntimeError("A verified and warmed transcription deployment must be active.")
@@ -129,7 +129,7 @@ class FiniteFileTranscriber:
             outcome.error is None and not outcome.cancelled for outcome in outcomes
         )
         complete = all_chunks_terminal and assembler.protocol_valid and not gaps and not token.is_cancelled
-        return FileTranscriptionResult(
+        return TranscriptionResult(
             text=assembler.text,
             words=assembler.words,
             tokens=assembler.tokens,
@@ -144,8 +144,8 @@ class FiniteFileTranscriber:
         )
 
 
-def build_finite_file_transcriber(
+def build_batch_transcriber(
     engine: ResidentTranscriptionEngine,
     silero_model: Path,
-) -> FiniteFileTranscriber:
-    return FiniteFileTranscriber(engine, SileroVad(silero_model))
+) -> BatchTranscriber:
+    return BatchTranscriber(engine, SileroVad(silero_model))

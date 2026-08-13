@@ -26,9 +26,9 @@ from textual.widgets import (
 )
 from voicepad_core.audio import MicrophoneStream
 from voicepad_core.pipeline import (
-    FileTranscriptionResult,
-    GrowingTranscriptionJob,
-    GrowingTranscriptionUpdate,
+    IncrementalTranscriptionJob,
+    TranscriptionProgress,
+    TranscriptionResult,
 )
 
 from voicepad.config import AppConfig, load_config, save_config
@@ -78,8 +78,8 @@ class VoicePadApp(App[None]):
         self.runtime = runtime or ApplicationRuntime(self.config)
         self._state = "loading"
         self._microphone: MicrophoneStream | None = None
-        self._job: GrowingTranscriptionJob | None = None
-        self._last_result: FileTranscriptionResult | None = None
+        self._job: IncrementalTranscriptionJob | None = None
+        self._last_result: TranscriptionResult | None = None
         self._record_started = 0.0
         self._finalization_lock = threading.Lock()
         self._history: list[HistoryEntry] = []
@@ -292,10 +292,10 @@ class VoicePadApp(App[None]):
             return
         self.call_from_thread(self._recording_started, microphone, job)
 
-    def _receive_live_update(self, update: GrowingTranscriptionUpdate) -> None:
+    def _receive_live_update(self, update: TranscriptionProgress) -> None:
         self.call_from_thread(self._show_live_update, update)
 
-    def _show_live_update(self, update: GrowingTranscriptionUpdate) -> None:
+    def _show_live_update(self, update: TranscriptionProgress) -> None:
         if self._state not in {"recording", "transcribing"}:
             return
         text = self.query_one("#tx-text", Label)
@@ -305,7 +305,7 @@ class VoicePadApp(App[None]):
             f"live · {update.processed_chunks} chunks · through {update.processed_through_sample / 16_000:.1f}s"
         )
 
-    def _recording_started(self, microphone: MicrophoneStream, job: GrowingTranscriptionJob) -> None:
+    def _recording_started(self, microphone: MicrophoneStream, job: IncrementalTranscriptionJob) -> None:
         self._microphone = microphone
         self._job = job
         self._record_started = time.monotonic()
@@ -350,7 +350,7 @@ class VoicePadApp(App[None]):
     def _recording_finished(
         self,
         markdown_path: Path,
-        result: FileTranscriptionResult,
+        result: TranscriptionResult,
         copied: bool,
     ) -> None:
         self._microphone = None

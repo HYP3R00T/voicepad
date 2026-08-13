@@ -12,11 +12,11 @@ from voicepad_core.audio import MicrophoneStream, WavArtifact
 from voicepad_core.deployments import PARAKEET_V3_CUDA, SILERO_VAD_ONNX_EXTRACTION
 from voicepad_core.inference import ActiveDeployment, ResidentTranscriptionEngine
 from voicepad_core.pipeline import (
-    FileTranscriptionResult,
-    GrowingTranscriptionJob,
-    GrowingTranscriptionUpdate,
-    build_finite_file_transcriber,
-    build_growing_job,
+    IncrementalTranscriptionJob,
+    TranscriptionProgress,
+    TranscriptionResult,
+    build_batch_transcriber,
+    build_incremental_job,
 )
 
 from .config import AppConfig
@@ -42,15 +42,15 @@ class ApplicationRuntime:
         self._silero_model = WheelExtractor(self.artifacts).prepare(SILERO_VAD_ONNX_EXTRACTION)
         return active
 
-    def transcribe_file(self, path: Path) -> FileTranscriptionResult:
+    def transcribe_file(self, path: Path) -> TranscriptionResult:
         model = self._require_silero()
-        return build_finite_file_transcriber(self.engine, model).transcribe_file(path)
+        return build_batch_transcriber(self.engine, model).transcribe_file(path)
 
     def start_recording(
         self,
         *,
-        on_update: Callable[[GrowingTranscriptionUpdate], None] | None = None,
-    ) -> tuple[MicrophoneStream, GrowingTranscriptionJob]:
+        on_update: Callable[[TranscriptionProgress], None] | None = None,
+    ) -> tuple[MicrophoneStream, IncrementalTranscriptionJob]:
         model = self._require_silero()
         self.config.recordings_path.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
@@ -59,10 +59,10 @@ class ApplicationRuntime:
         microphone = MicrophoneStream(path, device_index=self.config.input_device_index)
         microphone.start()
         try:
-            job = build_growing_job(
+            job = build_incremental_job(
                 self.engine,
                 model,
-                microphone.growing_source,
+                microphone.incremental_source,
                 on_update=on_update,
             )
             job.start()
@@ -78,8 +78,8 @@ class ApplicationRuntime:
     @staticmethod
     def stop_recording(
         microphone: MicrophoneStream,
-        job: GrowingTranscriptionJob,
-    ) -> tuple[WavArtifact, FileTranscriptionResult]:
+        job: IncrementalTranscriptionJob,
+    ) -> tuple[WavArtifact, TranscriptionResult]:
         logger.info("Recording stop requested")
         artifact = microphone.stop()
         result = job.finish()

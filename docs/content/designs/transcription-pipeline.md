@@ -176,7 +176,7 @@ chunks legitimately differ near artificial boundaries. Production planning must
 prefer VAD-confirmed pauses, and assembly must preserve uncertainty rather than
 delete text to imitate the full-file result.
 
-The first production-path finite-file validation used official Silero-selected
+The first production-path batch validation used official Silero-selected
 boundaries and six descriptors. Its longest complete model input was 35.744
 seconds. The resident pipeline processed the 141.792-second source in 6.2-6.5
 seconds including VAD, feature preparation, sequential inference, timestamp
@@ -184,11 +184,11 @@ conversion, and assembly. It produced 321 timed words with no failed chunks,
 overlap warnings, or VAD coverage gaps. Independent offline processes produced
 the same result hash.
 
-A growing-source validation wrote canonical blocks through the bounded WAV
+An incremental-source validation wrote canonical blocks through the bounded WAV
 persistence queue while planner and inference workers consumed disk ranges. Stop
 finalized the user WAV and drained six descriptors in 5.783 seconds with no
 failures, warnings, or coverage gaps. Its authoritative result hash matched the
-finite-file path exactly.
+batch path exactly.
 
 ### Alternative runtime findings
 
@@ -468,10 +468,10 @@ VoicePad does not depend on a network request after preparation.
 
 ## Audio source and persistence
 
-One source protocol covers immutable files and growing recordings:
+Incremental recording sources expose committed ranges through one protocol:
 
 ```python
-class GrowingAudioSource(Protocol):
+class IncrementalAudioSource(Protocol):
     sample_rate: int
     channels: int
     committed_samples: int
@@ -511,7 +511,7 @@ contiguous one-dimensional array
 The adapter's processor creates model features and moves them to CUDA FP16.
 VoicePad downmixes and resamples immutable file sources with deterministic
 source/runtime sample mapping. Live Linux capture requests mono 16 kHz from the
-shared sound server so growing persisted sample positions are already canonical.
+shared sound server so incrementally persisted sample positions are already canonical.
 It does not peak-normalize by default. Timestamps map back to absolute source
 samples without cumulative floating-point drift.
 
@@ -542,7 +542,7 @@ planner retains an ordered history of breakpoints. Once a logical chunk reaches
 25 seconds, the first subsequently confirmed natural breakpoint dispatches it.
 If no qualifying pause arrives by 30 seconds, the planner forces the boundary at
 the preferred duration instead of extending continuous speech to the runtime's
-hard input limit. A finite-file or recovered backlog applies the same rule in
+hard input limit. A batch input or recovered backlog applies the same rule in
 sample order. The hard maximum remains a safety bound on the complete runtime
 source range, including left context.
 
@@ -594,7 +594,7 @@ non-speech.
 ```text
 microphone callback
   -> bounded persistence queue
-  -> growing WAV + committed cursor
+  -> incremental WAV persistence + committed cursor
 
 planner worker
   -> CPU VAD
@@ -611,9 +611,9 @@ inference worker
 Queues store descriptors, not prepared audio arrays. At most one prepared model
 input exists. Slow inference creates a disk-backed backlog. The measured warm
 throughput is far above real time, but correctness does not rely on that speed.
-After each successful chunk, the growing job emits a provisional assembled-text
+After each successful chunk, the incremental job emits a provisional assembled-text
 update for presentation. The update may change when a later overlap observation
-arrives; only the terminal `FileTranscriptionResult` is authoritative.
+arrives; only the terminal `TranscriptionResult` is authoritative.
 
 Recording stop means stop capture, drain persistence, mark the source final,
 plan the remaining speech, process terminal descriptors, assemble, persist, and
@@ -879,8 +879,8 @@ the target machine. These items remain explicit human/research gates:
 3. Add catalogue/artifact preparation together with the first consumer.
 4. Add the resident official Parakeet session and prove Linux/NVIDIA lifecycle.
 5. Add direct CPU Silero VAD, deterministic planning, timestamp aggregation,
-   assembly, and finite-file transcription.
-6. Add growing-source execution and events.
+   assembly, and batch transcription.
+6. Add incremental-source execution and events.
 7. Cut over file/history/CLI, then TUI/hotkey recording.
 8. Remove legacy backends, dependencies, heuristics, and obsolete configuration.
 9. Complete documentation, privacy/licensing notices, real-surface checks, and

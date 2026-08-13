@@ -8,7 +8,7 @@ import numpy as np
 from voicepad_core.audio import AudioWindow, LiveWavRecording
 from voicepad_core.deployments import PARAKEET_V3_CUDA, PARAKEET_V3_MANIFEST, HuggingFaceSource
 from voicepad_core.inference import ActiveDeployment, BackendResult, TimedWord, TokenTimestamp
-from voicepad_core.pipeline import GrowingTranscriptionJob, GrowingTranscriptionUpdate
+from voicepad_core.pipeline import IncrementalTranscriptionJob, TranscriptionProgress
 from voicepad_core.preprocessing import PreprocessedAudio
 from voicepad_core.vad import VadFrame
 
@@ -74,16 +74,20 @@ class FakeEngine:
     def transcribe(self, audio: PreprocessedAudio, intent=None, cancellation=None) -> BackendResult:  # type: ignore[no-untyped-def]
         self.calls += 1
         duration = audio.duration()
-        word = TimedWord("growing", 0.25, min(0.75, duration))
-        return BackendResult("growing", (TokenTimestamp("▁growing", word.start_seconds, word.end_seconds),), (word,))
+        word = TimedWord("incremental", 0.25, min(0.75, duration))
+        return BackendResult(
+            "incremental",
+            (TokenTimestamp("▁incremental", word.start_seconds, word.end_seconds),),
+            (word,),
+        )
 
 
-def test_growing_job_waits_for_persistence_finalization(tmp_path: Path) -> None:
+def test_incremental_job_waits_for_persistence_finalization(tmp_path: Path) -> None:
     recording = LiveWavRecording(tmp_path / "recording.wav", SR, 1)
     recording.start()
     engine = FakeEngine()
-    updates: list[GrowingTranscriptionUpdate] = []
-    job = GrowingTranscriptionJob(engine, SpeechVad(), recording, on_update=updates.append)
+    updates: list[TranscriptionProgress] = []
+    job = IncrementalTranscriptionJob(engine, SpeechVad(), recording, on_update=updates.append)
     job.start()
 
     recording.append(np.zeros(SR, dtype=np.float32))
@@ -94,22 +98,22 @@ def test_growing_job_waits_for_persistence_finalization(tmp_path: Path) -> None:
     assert artifact.path.exists()
     assert result.complete is True
     assert result.duration_seconds == 2.0
-    assert result.text == "growing"
+    assert result.text == "incremental"
     assert engine.calls == 1
-    assert updates == [GrowingTranscriptionUpdate("growing", 1, 2 * SR)]
+    assert updates == [TranscriptionProgress("incremental", 1, 2 * SR)]
 
 
-def test_growing_job_emits_update_before_recording_stops(tmp_path: Path) -> None:
+def test_incremental_job_emits_update_before_recording_stops(tmp_path: Path) -> None:
     recording = LiveWavRecording(tmp_path / "recording.wav", SR, 1)
     recording.start()
     received = Event()
-    updates: list[GrowingTranscriptionUpdate] = []
+    updates: list[TranscriptionProgress] = []
 
-    def on_update(update: GrowingTranscriptionUpdate) -> None:
+    def on_update(update: TranscriptionProgress) -> None:
         updates.append(update)
         received.set()
 
-    job = GrowingTranscriptionJob(FakeEngine(), BoundaryVad(), recording, on_update=on_update)
+    job = IncrementalTranscriptionJob(FakeEngine(), BoundaryVad(), recording, on_update=on_update)
     job.start()
     recording.append(np.zeros(30 * SR, dtype=np.float32))
 
@@ -121,10 +125,10 @@ def test_growing_job_emits_update_before_recording_stops(tmp_path: Path) -> None
     job.finish()
 
 
-def test_growing_job_cancellation_is_not_reported_complete(tmp_path: Path) -> None:
+def test_incremental_job_cancellation_is_not_reported_complete(tmp_path: Path) -> None:
     recording = LiveWavRecording(tmp_path / "recording.wav", SR, 1)
     recording.start()
-    job = GrowingTranscriptionJob(FakeEngine(), SpeechVad(), recording)
+    job = IncrementalTranscriptionJob(FakeEngine(), SpeechVad(), recording)
     job.start()
     recording.append(np.zeros(SR, dtype=np.float32))
 
@@ -137,7 +141,7 @@ def test_growing_job_cancellation_is_not_reported_complete(tmp_path: Path) -> No
 
 def test_inference_read_failure_finishes_incomplete_without_leaking_workers() -> None:
     source = FailingInferenceReadSource()
-    job = GrowingTranscriptionJob(FakeEngine(), SpeechVad(), source)
+    job = IncrementalTranscriptionJob(FakeEngine(), SpeechVad(), source)
     job.start()
 
     result = job.finish(timeout=2)
@@ -151,18 +155,18 @@ def test_inference_read_failure_finishes_incomplete_without_leaking_workers() ->
 
 def test_unexpected_inference_worker_failure_does_not_strand_planner() -> None:
     source = FailingInferenceReadSource()
-    job = GrowingTranscriptionJob(FakeEngine(), SpeechVad(), source)
+    job = IncrementalTranscriptionJob(FakeEngine(), SpeechVad(), source)
     with patch.object(job._queue, "get", side_effect=RuntimeError("queue failed")):
         job.start()
         result = job.finish(timeout=2)
 
     assert result.complete is False
-    assert "growing inference worker failed" in result.warnings
+    assert "incremental inference worker failed" in result.warnings
     assert job._planner_thread is not None and not job._planner_thread.is_alive()
     assert job._inference_thread is not None and not job._inference_thread.is_alive()
 
 
-def test_growing_source_publishes_committed_cursor_and_final_state(tmp_path: Path) -> None:
+def test_incremental_source_publishes_committed_cursor_and_final_state(tmp_path: Path) -> None:
     recording = LiveWavRecording(tmp_path / "recording.wav", SR, 1)
     recording.start()
     recording.append(np.ones(512, dtype=np.float32))

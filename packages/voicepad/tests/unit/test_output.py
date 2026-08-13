@@ -4,14 +4,14 @@ import pytest
 from voicepad.output import persist_markdown, render_markdown
 from voicepad_core.deployments import PARAKEET_V3_CUDA, PARAKEET_V3_MANIFEST, HuggingFaceSource
 from voicepad_core.inference import ActiveDeployment
-from voicepad_core.pipeline import FileTranscriptionResult
+from voicepad_core.pipeline import TranscriptionResult
 
 
-def result() -> FileTranscriptionResult:
+def result() -> TranscriptionResult:
     source = PARAKEET_V3_MANIFEST.source
     assert isinstance(source, HuggingFaceSource)
     active = ActiveDeployment(PARAKEET_V3_CUDA, source.revision, "GPU-test", "NVIDIA GPU", 4_000_000_000)
-    return FileTranscriptionResult("hello", (), (), 1.0, 0.1, active, (), (), (), (), True)
+    return TranscriptionResult("hello", (), (), 1.0, 0.1, active, (), (), (), (), True)
 
 
 def test_markdown_uses_authoritative_result_metadata(tmp_path: Path) -> None:

@@ -1,26 +1,26 @@
-from .assembly import ConservativeAssembler
-from .finite import FiniteFileTranscriber, build_finite_file_transcriber
-from .growing import GrowingPipelineError, GrowingTranscriptionJob, build_growing_job
+from .batch import BatchTranscriber, build_batch_transcriber
+from .incremental import IncrementalPipelineError, IncrementalTranscriptionJob, build_incremental_job
+from .transcript_assembly import ConservativeAssembler
 from .types import (
     ChunkOutcome,
     CoverageGap,
-    FileTranscriptionResult,
-    GrowingTranscriptionUpdate,
     ObservedToken,
     ObservedWord,
+    TranscriptionProgress,
+    TranscriptionResult,
 )
 
 __all__ = [
     "ChunkOutcome",
     "ConservativeAssembler",
     "CoverageGap",
-    "FileTranscriptionResult",
-    "FiniteFileTranscriber",
-    "GrowingPipelineError",
-    "GrowingTranscriptionJob",
-    "GrowingTranscriptionUpdate",
+    "TranscriptionResult",
+    "BatchTranscriber",
+    "IncrementalPipelineError",
+    "IncrementalTranscriptionJob",
+    "TranscriptionProgress",
     "ObservedToken",
     "ObservedWord",
-    "build_finite_file_transcriber",
-    "build_growing_job",
+    "build_batch_transcriber",
+    "build_incremental_job",
 ]
