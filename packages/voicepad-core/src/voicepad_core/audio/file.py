@@ -4,7 +4,6 @@ import logging
 import os
 import subprocess
 import tempfile
-from abc import ABC, abstractmethod
 from pathlib import Path
 
 import numpy as np
@@ -22,49 +21,20 @@ from .types import RawAudio
 logger = logging.getLogger(__name__)
 
 
-class AudioSource(ABC):
-    """Source that provides samples and their native format."""
-
-    @abstractmethod
-    def read(self) -> np.ndarray: ...
-
-    @abstractmethod
-    def get_sample_rate(self) -> int: ...
-
-    @abstractmethod
-    def get_channels(self) -> int: ...
-
-    def read_audio(self) -> RawAudio:
-        return RawAudio(self.read(), self.get_sample_rate(), self.get_channels())
-
-
-class FileSource(AudioSource):
+class FileSource:
     """Read raw audio from a file on disk."""
 
     def __init__(self, file_path: str | Path) -> None:
         self._file_path = Path(file_path)
         self._validate()
-        self._audio: np.ndarray | None = None
-        self._sample_rate = 0
-        self._channels = 0
+        self._audio: RawAudio | None = None
 
-    def read(self) -> np.ndarray:
+    def read_audio(self) -> RawAudio:
         if self._audio is None:
             logger.debug("FileSource loading %s", self._file_path)
-            self._load()
+            self._audio = self._load()
             logger.debug("FileSource loaded %s", self._file_path)
-        assert self._audio is not None
         return self._audio
-
-    def get_sample_rate(self) -> int:
-        if self._audio is None:
-            self._load()
-        return self._sample_rate
-
-    def get_channels(self) -> int:
-        if self._audio is None:
-            self._load()
-        return self._channels
 
     def _validate(self) -> None:
         if not self._file_path.exists():
@@ -74,14 +44,14 @@ class FileSource(AudioSource):
         if suffix not in SUPPORTED_FORMATS:
             raise UnsupportedAudioFormatError(f"Unsupported format '{suffix}'. Supported: {sorted(SUPPORTED_FORMATS)}")
 
-    def _load(self) -> None:
+    def _load(self) -> RawAudio:
         suffix = self._file_path.suffix.lower()
         audio, sample_rate = (
             sf.read(str(self._file_path), dtype="float32") if suffix in NATIVE_FORMATS else self._load_via_ffmpeg()
         )
-        self._sample_rate = sample_rate
-        self._channels = 1 if audio.ndim == 1 else audio.shape[1]
-        self._audio = audio.astype(np.float32)
+        samples = audio.astype(np.float32)
+        channels = 1 if samples.ndim == 1 else samples.shape[1]
+        return RawAudio(samples, sample_rate, channels)
 
     def _load_via_ffmpeg(self) -> tuple[np.ndarray, int]:
         tmp_path: str | None = None

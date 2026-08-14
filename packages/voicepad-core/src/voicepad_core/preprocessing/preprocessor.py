@@ -6,7 +6,6 @@ from math import gcd
 
 import numpy as np
 
-from ..audio.file import AudioSource
 from ..audio.types import RawAudio, WaveformSpec
 
 logger = logging.getLogger(__name__)
@@ -52,12 +51,6 @@ class PreprocessedAudio:
 
 class AudioPreProcessor:
     """Prepare source audio for an explicit backend input contract."""
-
-    def __init__(self, source: AudioSource) -> None:
-        self._source = source
-
-    def process(self, target: WaveformSpec = DEFAULT_WAVEFORM_SPEC) -> PreprocessedAudio:
-        return self.prepare(self._source.read_audio(), target)
 
     @staticmethod
     def prepare(raw_audio: RawAudio, target: WaveformSpec) -> PreprocessedAudio:
