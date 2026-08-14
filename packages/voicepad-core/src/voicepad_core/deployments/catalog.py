@@ -3,14 +3,10 @@ from __future__ import annotations
 from .types import (
     ArtifactFile,
     ArtifactManifest,
-    DeclaredCapabilities,
     DeploymentDefinition,
     HttpSource,
     HuggingFaceSource,
-    Precision,
-    ProcessingProfile,
     ResourceProfile,
-    TimestampGranularity,
     WheelExtraction,
 )
 
@@ -85,59 +81,22 @@ PARAKEET_V3_CUDA = DeploymentDefinition(
     id="parakeet-v3.transformers-fp16-cuda",
     model_id="nvidia-parakeet-tdt-0.6b-v3",
     artifact_manifest_id=PARAKEET_V3_MANIFEST.id,
-    adapter_id="transformers-parakeet-tdt",
-    precision=Precision.FP16,
-    capabilities=DeclaredCapabilities(
-        native_sample_rate=16_000,
-        languages=(
-            "bg",
-            "hr",
-            "cs",
-            "da",
-            "nl",
-            "en",
-            "et",
-            "fi",
-            "fr",
-            "de",
-            "el",
-            "hu",
-            "it",
-            "lv",
-            "lt",
-            "mt",
-            "pl",
-            "pt",
-            "ro",
-            "sk",
-            "sl",
-            "es",
-            "sv",
-            "ru",
-            "uk",
-        ),
-        timestamps=TimestampGranularity.TOKEN_DURATION,
-    ),
+    precision="fp16",
+    sample_rate=16_000,
     resources=ResourceProfile(
         required_device="cuda",
         platforms=("linux-x86_64",),
         minimum_gpu_memory_bytes=3_900_000_000,
-        measured_gpu="NVIDIA GeForce RTX 3050 Laptop GPU",
         measured_peak_memory_bytes=2_040_109_056,
     ),
-    processing=ProcessingProfile(
-        preferred_chunk_seconds=30,
-        maximum_input_seconds=60,
-        warmup_seconds=30,
-    ),
-    recommended=True,
+    maximum_input_seconds=60,
+    warmup_seconds=30,
 )
 
 MANIFESTS = {
     PARAKEET_V3_MANIFEST.id: PARAKEET_V3_MANIFEST,
     SILERO_VAD_WHEEL_MANIFEST.id: SILERO_VAD_WHEEL_MANIFEST,
 }
-DEPLOYMENTS = {PARAKEET_V3_CUDA.id: PARAKEET_V3_CUDA}
 
 
 def get_manifest(manifest_id: str) -> ArtifactManifest:
@@ -148,7 +107,6 @@ def get_manifest(manifest_id: str) -> ArtifactManifest:
 
 
 def get_deployment(deployment_id: str) -> DeploymentDefinition:
-    try:
-        return DEPLOYMENTS[deployment_id]
-    except KeyError as error:
-        raise KeyError(f"Unknown deployment: {deployment_id}") from error
+    if deployment_id != PARAKEET_V3_CUDA.id:
+        raise KeyError(f"Unknown deployment: {deployment_id}")
+    return PARAKEET_V3_CUDA

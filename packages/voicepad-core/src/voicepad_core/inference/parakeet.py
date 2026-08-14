@@ -13,7 +13,6 @@ from transformers import AutoModelForTDT, AutoProcessor, StoppingCriteria, Stopp
 
 from voicepad_core.deployments import (
     ArtifactManifest,
-    DeclaredCapabilities,
     DeploymentDefinition,
     HuggingFaceSource,
 )
@@ -82,14 +81,9 @@ class TransformersParakeetTDTSession:
     def deployment(self) -> ActiveDeployment:
         return self._active
 
-    @property
-    def capabilities(self) -> DeclaredCapabilities:
-        return self._definition.capabilities
-
     def warm(self) -> None:
-        seconds = self._definition.processing.warmup_seconds
-        samples = np.zeros(seconds * self.capabilities.native_sample_rate, dtype=np.float32)
-        audio = PreprocessedAudio(samples, self.capabilities.native_sample_rate, channels=1)
+        samples = np.zeros(self._definition.warmup_seconds * self._definition.sample_rate, dtype=np.float32)
+        audio = PreprocessedAudio(samples, self._definition.sample_rate, channels=1)
         self.transcribe(audio, TranscriptionIntent(), CancellationToken())
 
     def transcribe(
@@ -176,19 +170,19 @@ class TransformersParakeetTDTSession:
             raise UnsupportedIntentError("This deployment does not accept a language hint.")
         if intent.vocabulary:
             raise UnsupportedIntentError("This deployment does not expose native vocabulary biasing.")
-        if audio.sample_rate != self.capabilities.native_sample_rate or audio.channels != 1:
+        if audio.sample_rate != self._definition.sample_rate or audio.channels != 1:
             raise InvalidTranscriptionInputError(
-                f"Parakeet requires mono {self.capabilities.native_sample_rate} Hz canonical audio."
+                f"Parakeet requires mono {self._definition.sample_rate} Hz canonical audio."
             )
         if audio.samples.ndim != 1 or audio.samples.dtype != np.float32 or not audio.samples.flags.c_contiguous:
             raise InvalidTranscriptionInputError("Parakeet requires a contiguous one-dimensional float32 waveform.")
         if audio.samples.size == 0:
             raise InvalidTranscriptionInputError("Parakeet cannot transcribe an empty waveform.")
         duration = audio.duration()
-        if duration > self._definition.processing.maximum_input_seconds:
+        if duration > self._definition.maximum_input_seconds:
             raise InvalidTranscriptionInputError(
                 f"Audio exceeds the deployment limit: duration={duration:.3f}s "
-                f"maximum={self._definition.processing.maximum_input_seconds}s."
+                f"maximum={self._definition.maximum_input_seconds}s."
             )
 
 

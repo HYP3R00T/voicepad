@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from threading import Event
 from typing import Protocol
 
-from voicepad_core.deployments import DeclaredCapabilities, DeploymentDefinition
+from voicepad_core.deployments import DeploymentDefinition
 from voicepad_core.preprocessing import PreprocessedAudio
 
 
@@ -89,8 +89,7 @@ class TranscriptionSession(Protocol):
     @property
     def deployment(self) -> ActiveDeployment: ...
 
-    @property
-    def capabilities(self) -> DeclaredCapabilities: ...
+    def warm(self) -> None: ...
 
     def transcribe(
         self,

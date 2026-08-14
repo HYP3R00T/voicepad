@@ -28,6 +28,9 @@ def test_live_recording_reads_sample_range_and_finalizes(tmp_path: Path) -> None
     np.testing.assert_allclose(window.samples, [0.5, 0.75])
     assert (artifact.frame_count, artifact.duration(), sample_rate, len(persisted)) == (6, 1.5, 4, 6)
     assert tuple(tmp_path.glob(".recording-live-*.wav")) == ()
+    assert recording.finish() is artifact
+    with pytest.raises(AudioStreamStateError):
+        recording.append(np.zeros(1, dtype=np.float32))
 
 
 def test_live_recording_refuses_overwrite_and_retains_recoverable_spool(tmp_path: Path) -> None:
@@ -42,6 +45,8 @@ def test_live_recording_refuses_overwrite_and_retains_recoverable_spool(tmp_path
 
     assert destination.read_bytes() == b"existing recording"
     assert len(tuple(tmp_path.glob(".recording-live-*.wav"))) == 1
+    with pytest.raises(AudioStreamStateError):
+        recording.append(np.zeros(1, dtype=np.float32))
 
 
 def test_abort_retains_spool_if_writer_does_not_stop(tmp_path: Path) -> None:
@@ -56,6 +61,31 @@ def test_abort_retains_spool_if_writer_does_not_stop(tmp_path: Path) -> None:
 
     assert spool.exists()
     assert recording._thread is writer
+
+
+def test_abort_is_a_terminal_state_and_wakes_waiters(tmp_path: Path) -> None:
+    recording = LiveWavRecording(tmp_path / "recording.wav", 16_000, 1)
+    recording.start()
+
+    recording.abort()
+
+    assert recording.is_final is False
+    with pytest.raises(AudioStreamStateError, match="aborted"):
+        recording.wait_for_update(0, timeout=0)
+    with pytest.raises(AudioStreamStateError):
+        recording.append(np.zeros(1, dtype=np.float32))
+
+
+def test_writer_start_failure_is_reported(tmp_path: Path) -> None:
+    recording = LiveWavRecording(tmp_path / "recording.wav", 16_000, 1)
+
+    with (
+        patch("voicepad_core.audio.live_recording.sf.SoundFile", side_effect=OSError("disk unavailable")),
+        pytest.raises(AudioStreamStateError, match="writer failed") as failure,
+    ):
+        recording.start()
+
+    assert isinstance(failure.value.__cause__, OSError)
 
 
 def test_live_read_failure_does_not_stop_audio_persistence(tmp_path: Path) -> None:

@@ -14,7 +14,6 @@ from voicepad_core.inference import (
     BackendResult,
     CancellationToken,
     CudaDevice,
-    EngineState,
     InferenceError,
     ResidentTranscriptionEngine,
     TranscriptionIntent,
@@ -54,7 +53,6 @@ class FakeSession:
             "NVIDIA Test GPU",
             4_000_000_000,
         )
-        self.capabilities = PARAKEET_V3_CUDA.capabilities
         self.failure = failure
         self.warm_failure = warm_failure
         self.close_failure = close_failure
@@ -96,7 +94,7 @@ def build_engine(tmp_path: Path, session: FakeSession) -> tuple[ResidentTranscri
         tmp_path / "artifacts",
         artifact_store=store,
         device_admitter=lambda definition, index: device(),
-        session_factories={"transformers-parakeet-tdt": lambda *args: session},
+        session_factory=lambda *args: session,
     )
     return engine, store
 
@@ -109,7 +107,6 @@ def test_activate_warms_and_reuses_resident_session(tmp_path: Path) -> None:
     repeated = engine.activate(PARAKEET_V3_CUDA.id)
 
     assert active == repeated
-    assert engine.state is EngineState.READY
     assert engine.active_deployment == active
     assert session.warmed is True
     assert store.calls == 1
@@ -125,7 +122,6 @@ def test_transcribe_returns_to_ready_and_unload_closes_session(tmp_path: Path) -
 
     assert result.text == "ready"
     assert session.closed is True
-    assert engine.state is EngineState.UNPREPARED
     assert engine.active_deployment is None
 
 
@@ -137,7 +133,7 @@ def test_unsupported_intent_does_not_invalidate_session(tmp_path: Path) -> None:
     with pytest.raises(UnsupportedIntentError):
         engine.transcribe(audio())
 
-    assert engine.state is EngineState.READY
+    assert engine.active_deployment is not None
     assert session.closed is False
 
 
@@ -155,10 +151,9 @@ def test_activation_preserves_primary_failure_when_candidate_cleanup_fails(
 
     assert failure.value.__notes__ == ["Session cleanup also failed: close failed"]
     assert "Session cleanup failed after activation failure" in caplog.text
-    assert engine.state is EngineState.FAILED
     assert engine.active_deployment is None
     engine.unload()
-    assert engine.state is EngineState.UNPREPARED
+    assert engine.active_deployment is None
 
 
 def test_unknown_inference_failure_invalidates_and_closes_session(tmp_path: Path) -> None:
@@ -169,7 +164,6 @@ def test_unknown_inference_failure_invalidates_and_closes_session(tmp_path: Path
     with pytest.raises(InferenceError, match="CUDA failure"):
         engine.transcribe(audio())
 
-    assert engine.state is EngineState.FAILED
     assert engine.active_deployment is None
     assert session.closed is True
 
@@ -189,14 +183,11 @@ def test_transcription_preserves_primary_failure_when_session_cleanup_fails(
 
     assert failure.value.__notes__ == ["Session cleanup also failed: close failed"]
     assert "Session cleanup failed after transcription failure" in caplog.text
-    assert engine.state is EngineState.FAILED
     assert engine.active_deployment is None
     engine.unload()
 
 
-def test_unload_failure_sets_failed_state_and_releases_operation_lock(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_unload_failure_releases_operation_lock(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     session = FakeSession(close_failure=RuntimeError("close failed"))
     engine, _ = build_engine(tmp_path, session)
     engine.activate(PARAKEET_V3_CUDA.id)
@@ -205,7 +196,6 @@ def test_unload_failure_sets_failed_state_and_releases_operation_lock(
         engine.unload()
 
     assert "Session cleanup failed while unloading" in caplog.text
-    assert engine.state is EngineState.FAILED
     assert engine.active_deployment is None
     engine.unload()
-    assert engine.state is EngineState.UNPREPARED
+    assert engine.active_deployment is None

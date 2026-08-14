@@ -1,25 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import StrEnum
 from pathlib import PurePosixPath
 from urllib.parse import urlparse
-
-
-class Precision(StrEnum):
-    FP16 = "fp16"
-
-
-class TimestampGranularity(StrEnum):
-    TOKEN_DURATION = "token-duration"
-
-
-class ContextBiasingMode(StrEnum):
-    NONE = "none"
-
-
-class CancellationMode(StrEnum):
-    GENERATION = "generation"
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,32 +87,11 @@ class WheelExtraction:
 
 
 @dataclass(frozen=True, slots=True)
-class DeclaredCapabilities:
-    native_sample_rate: int
-    languages: tuple[str, ...]
-    timestamps: TimestampGranularity
-    accepts_language_hint: bool = False
-    returns_detected_language: bool = False
-    native_streaming: bool = False
-    translation_targets: tuple[str, ...] = ()
-    context_biasing: ContextBiasingMode = ContextBiasingMode.NONE
-    cancellation: CancellationMode = CancellationMode.GENERATION
-
-
-@dataclass(frozen=True, slots=True)
 class ResourceProfile:
     required_device: str
     platforms: tuple[str, ...]
     minimum_gpu_memory_bytes: int
-    measured_gpu: str
     measured_peak_memory_bytes: int
-
-
-@dataclass(frozen=True, slots=True)
-class ProcessingProfile:
-    preferred_chunk_seconds: int
-    maximum_input_seconds: int
-    warmup_seconds: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,9 +99,8 @@ class DeploymentDefinition:
     id: str
     model_id: str
     artifact_manifest_id: str
-    adapter_id: str
-    precision: Precision
-    capabilities: DeclaredCapabilities
+    precision: str
+    sample_rate: int
     resources: ResourceProfile
-    processing: ProcessingProfile
-    recommended: bool
+    maximum_input_seconds: int
+    warmup_seconds: int

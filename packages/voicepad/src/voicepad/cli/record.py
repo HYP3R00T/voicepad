@@ -40,7 +40,7 @@ def start_recording(
         else:
             typer.echo("Preparing and warming the NVIDIA deployment…")
             active = runtime.activate()
-            typer.echo(f"Ready: {active.device_name} / {active.definition.precision.value}")
+            typer.echo(f"Ready: {active.device_name} / {active.definition.precision}")
             microphone, job = runtime.start_recording()
 
         typer.secho("Recording…", fg=typer.colors.RED, bold=True)

@@ -1,5 +1,5 @@
 from .cuda import ADMISSION_HEADROOM_BYTES, CudaDevice, admit_cuda_device
-from .engine import EngineState, ResidentTranscriptionEngine
+from .engine import ResidentTranscriptionEngine
 from .parakeet import TransformersParakeetTDTSession
 from .types import (
     ActiveDeployment,
@@ -25,7 +25,6 @@ __all__ = [
     "CancellationToken",
     "CudaAdmissionError",
     "CudaDevice",
-    "EngineState",
     "InferenceError",
     "InvalidTranscriptionInputError",
     "ResidentTranscriptionEngine",

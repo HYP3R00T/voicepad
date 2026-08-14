@@ -17,7 +17,7 @@ def render_markdown(audio_path: Path, result: TranscriptionResult) -> str:
         f"model: {active.definition.model_id}",
         f"artifact_revision: {active.snapshot_revision}",
         f"device_id: {active.device_id}",
-        f"precision: {active.definition.precision.value}",
+        f"precision: {active.definition.precision}",
         f"duration_seconds: {result.duration_seconds:.3f}",
         f"latency_seconds: {result.latency_seconds:.3f}",
         f"complete: {'true' if result.complete else 'false'}",
