@@ -7,7 +7,6 @@ from voicepad_core.deployments import (
     ArtifactFile,
     HttpSource,
     HuggingFaceSource,
-    Precision,
     get_deployment,
     get_manifest,
 )
@@ -46,14 +45,12 @@ def test_official_silero_artifacts_are_pinned() -> None:
 def test_initial_deployment_requires_linux_cuda_fp16() -> None:
     deployment = PARAKEET_V3_CUDA
 
-    assert deployment.precision is Precision.FP16
+    assert deployment.precision == "fp16"
     assert deployment.resources.required_device == "cuda"
     assert deployment.resources.platforms == ("linux-x86_64",)
     assert deployment.resources.minimum_gpu_memory_bytes == 3_900_000_000
-    assert deployment.processing.maximum_input_seconds == 60
-    assert deployment.capabilities.native_sample_rate == 16_000
-    assert deployment.capabilities.native_streaming is False
-    assert deployment.capabilities.accepts_language_hint is False
+    assert deployment.maximum_input_seconds == 60
+    assert deployment.sample_rate == 16_000
 
 
 def test_catalogue_lookups_use_stable_ids() -> None:

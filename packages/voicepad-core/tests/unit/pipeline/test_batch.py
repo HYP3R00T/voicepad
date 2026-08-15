@@ -8,7 +8,7 @@ from voicepad_core.inference import (
     TimedWord,
     TokenTimestamp,
 )
-from voicepad_core.pipeline import FiniteFileTranscriber
+from voicepad_core.pipeline import BatchTranscriber
 from voicepad_core.vad import VadFrame
 
 SR = 16_000
@@ -47,8 +47,8 @@ def raw_audio() -> RawAudio:
     return RawAudio(np.zeros(2 * SR, dtype=np.float32), SR, 1)
 
 
-def test_finite_pipeline_returns_one_authoritative_complete_result() -> None:
-    result = FiniteFileTranscriber(FakeEngine(), SpeechVad()).transcribe_audio(raw_audio())
+def test_batch_pipeline_returns_one_authoritative_complete_result() -> None:
+    result = BatchTranscriber(FakeEngine(), SpeechVad()).transcribe_audio(raw_audio())
 
     assert result.text == "working"
     assert result.complete is True
@@ -57,10 +57,8 @@ def test_finite_pipeline_returns_one_authoritative_complete_result() -> None:
     assert result.coverage_gaps == ()
 
 
-def test_finite_pipeline_returns_honest_partial_failure() -> None:
-    result = FiniteFileTranscriber(FakeEngine(failure=RuntimeError("failed")), SpeechVad()).transcribe_audio(
-        raw_audio()
-    )
+def test_batch_pipeline_returns_honest_partial_failure() -> None:
+    result = BatchTranscriber(FakeEngine(failure=RuntimeError("failed")), SpeechVad()).transcribe_audio(raw_audio())
 
     assert result.text == ""
     assert result.complete is False
@@ -68,11 +66,11 @@ def test_finite_pipeline_returns_honest_partial_failure() -> None:
     assert result.coverage_gaps
 
 
-def test_finite_pipeline_honors_precancelled_job() -> None:
+def test_batch_pipeline_honors_precancelled_job() -> None:
     cancellation = CancellationToken()
     cancellation.cancel()
 
-    result = FiniteFileTranscriber(FakeEngine(), SpeechVad()).transcribe_audio(raw_audio(), cancellation=cancellation)
+    result = BatchTranscriber(FakeEngine(), SpeechVad()).transcribe_audio(raw_audio(), cancellation=cancellation)
 
     assert result.complete is False
     assert result.chunks == ()

@@ -1,125 +1,119 @@
 from __future__ import annotations
 
-import json
-import os
-import tempfile
-from dataclasses import asdict, dataclass, field
+import logging
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    SerializerFunctionWrapHandler,
+    field_validator,
+    model_serializer,
+)
+from utilityhub_config import expand_path, get_config_path, load_settings, write_config
+from utilityhub_config.errors import ConfigError
 from voicepad_core.deployments import PARAKEET_V3_CUDA
 
 from voicepad.tui.theme import DEFAULT_THEME, THEMES
 
-CONFIG_SCHEMA = 1
+APP_NAME = "voicepad"
+logger = logging.getLogger(__name__)
 
 
 class ConfigurationError(ValueError):
-    """Raised when VoicePad configuration is obsolete or invalid."""
+    """Raised when VoicePad configuration cannot be loaded or saved."""
 
 
-@dataclass(frozen=True, slots=True)
-class AppConfig:
+class AppConfig(BaseModel):
+    """Validated application-owned settings consumed explicitly by VoicePad Core."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
     deployment_id: str = PARAKEET_V3_CUDA.id
-    recordings_path: Path = field(default_factory=lambda: Path.home() / ".config/voicepad/data/recordings")
-    markdown_path: Path = field(default_factory=lambda: Path.home() / ".config/voicepad/data/markdown")
-    artifact_cache_path: Path = field(default_factory=lambda: Path.home() / ".cache/voicepad-v2/artifacts")
+    recordings_path: Path = Path.home() / ".config/voicepad/data/recordings"
+    markdown_path: Path = Path.home() / ".config/voicepad/data/markdown"
+    artifact_cache_path: Path = Path.home() / ".cache/voicepad/artifacts"
     recording_prefix: str = "recording"
     input_device_index: int | None = None
     copy_complete_text: bool = True
     theme: str = DEFAULT_THEME
 
-    def __post_init__(self) -> None:
-        if self.deployment_id != PARAKEET_V3_CUDA.id:
-            raise ConfigurationError(f"Unsupported deployment_id: {self.deployment_id}")
-        if not self.recording_prefix or any(separator in self.recording_prefix for separator in ("/", "\\")):
-            raise ConfigurationError("recording_prefix must be a nonempty filename prefix")
-        if self.theme not in THEMES:
-            raise ConfigurationError(f"Unsupported Textual theme: {self.theme}")
+    @model_serializer(mode="wrap")
+    def serialize_config(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
+        serialized = cast(dict[str, Any], handler(self))
+        return {key: value for key, value in serialized.items() if value is not None}
+
+    @field_validator("recordings_path", "markdown_path", "artifact_cache_path", mode="before")
+    @classmethod
+    def expand_configured_path(cls, value: Path | str) -> Path:
+        return expand_path(str(value))
+
+    @field_validator("deployment_id")
+    @classmethod
+    def validate_deployment(cls, value: str) -> str:
+        if value != PARAKEET_V3_CUDA.id:
+            raise ValueError(f"Unsupported deployment_id: {value}")
+        return value
+
+    @field_validator("recording_prefix")
+    @classmethod
+    def validate_recording_prefix(cls, value: str) -> str:
+        if not value or any(separator in value for separator in ("/", "\\")):
+            raise ValueError("recording_prefix must be a nonempty filename prefix")
+        return value
+
+    @field_validator("theme")
+    @classmethod
+    def validate_theme(cls, value: str) -> str:
+        if value not in THEMES:
+            raise ValueError(f"Unsupported Textual theme: {value}")
+        return value
 
 
 def config_path() -> Path:
-    return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "voicepad" / "config-v2.json"
+    """Return UtilityHub Config's canonical VoicePad TOML path."""
+    return get_config_path(APP_NAME, format="toml")
 
 
 def load_config(path: Path | None = None) -> AppConfig:
+    """Load and validate VoicePad settings through UtilityHub Config."""
     selected = path or config_path()
     if not selected.exists():
         return AppConfig()
-    try:
-        loaded = json.loads(selected.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        raise ConfigurationError(f"Could not read configuration: {selected}") from error
-    if not isinstance(loaded, dict):
-        raise ConfigurationError("VoicePad configuration must be a JSON object")
-    raw = cast(dict[str, object], loaded)
-    raw.pop("proper_nouns", None)
-    expected = {
-        "schema",
-        "deployment_id",
-        "recordings_path",
-        "markdown_path",
-        "artifact_cache_path",
-        "recording_prefix",
-        "input_device_index",
-        "copy_complete_text",
-        "theme",
-    }
-    unknown = set(raw) - expected
-    if unknown:
-        raise ConfigurationError(
-            f"Obsolete or unknown configuration fields: {', '.join(sorted(unknown))}. "
-            "Rewrite the file for VoicePad configuration schema 1."
-        )
-    if raw.get("schema") != CONFIG_SCHEMA:
-        raise ConfigurationError(f"Unsupported configuration schema: {raw.get('schema')!r}")
-    try:
-        input_device = raw.get("input_device_index")
-        if input_device is not None and (not isinstance(input_device, int) or isinstance(input_device, bool)):
-            raise TypeError("input_device_index must be an integer or null")
-        copy_complete = raw["copy_complete_text"]
-        if not isinstance(copy_complete, bool):
-            raise TypeError("copy_complete_text must be a boolean")
-        theme = raw.get("theme", DEFAULT_THEME)
-        if not isinstance(theme, str):
-            raise TypeError("theme must be a string")
-        return AppConfig(
-            deployment_id=_required_string(raw, "deployment_id"),
-            recordings_path=Path(_required_string(raw, "recordings_path")).expanduser(),
-            markdown_path=Path(_required_string(raw, "markdown_path")).expanduser(),
-            artifact_cache_path=Path(_required_string(raw, "artifact_cache_path")).expanduser(),
-            recording_prefix=_required_string(raw, "recording_prefix"),
-            input_device_index=input_device,
-            copy_complete_text=copy_complete,
-            theme=theme,
-        )
-    except (KeyError, TypeError, ValueError) as error:
-        raise ConfigurationError("VoicePad configuration schema 1 is invalid") from error
 
+    try:
+        config, metadata = load_settings(
+            AppConfig,
+            app_name=APP_NAME,
+            cwd=selected.parent,
+            config_file=selected,
+            env_vars=False,
+        )
+    except (ConfigError, OSError, RuntimeError, ValueError) as error:
+        raise ConfigurationError(f"Could not load VoicePad configuration: {selected}") from error
 
-def _required_string(raw: dict[str, object], key: str) -> str:
-    value = raw[key]
-    if not isinstance(value, str):
-        raise TypeError(f"{key} must be a string")
-    return value
+    sources = sorted({source.source for source in metadata.per_field.values()})
+    logger.info("Configuration loaded: path=%s sources=%s", selected, sources)
+    return config
 
 
 def save_config(config: AppConfig, path: Path | None = None) -> Path:
+    """Persist validated VoicePad settings through UtilityHub Config."""
     selected = path or config_path()
-    selected.parent.mkdir(parents=True, exist_ok=True)
-    payload = asdict(config)
-    payload["schema"] = CONFIG_SCHEMA
-    for key in ("recordings_path", "markdown_path", "artifact_cache_path"):
-        payload[key] = str(payload[key])
-    descriptor, temporary_name = tempfile.mkstemp(dir=selected.parent, prefix=".config-v2-", suffix=".json")
     try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as file:
-            json.dump(payload, file, indent=2, sort_keys=True)
-            file.write("\n")
-            file.flush()
-            os.fsync(file.fileno())
-        os.replace(temporary_name, selected)
-    except Exception:
-        Path(temporary_name).unlink(missing_ok=True)
-        raise
-    return selected
+        saved = write_config(config, APP_NAME, path=selected, format="toml")
+    except (OSError, TypeError, ValueError) as error:
+        raise ConfigurationError(f"Could not write VoicePad configuration: {selected}") from error
+    logger.info("Configuration saved: path=%s", saved)
+    return saved
+
+
+__all__ = [
+    "APP_NAME",
+    "AppConfig",
+    "ConfigurationError",
+    "config_path",
+    "load_config",
+    "save_config",
+]

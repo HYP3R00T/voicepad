@@ -43,6 +43,7 @@ dependencies = [
   "soundfile>=0.13.1",
   "torch==2.13.0",
   "transformers==5.14.1",
+  "utilityhub-logging>=0.1.0",
 ]
 
 [project.urls]

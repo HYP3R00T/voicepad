@@ -126,7 +126,7 @@ class CuratedAcquirer:
 
 
 class ArtifactStore:
-    """Prepare and verify curated snapshots without consulting legacy caches."""
+    """Prepare and verify curated artifact snapshots."""
 
     def __init__(self, root: Path, acquirer: ArtifactAcquirer | None = None) -> None:
         self.root = root.expanduser().resolve()

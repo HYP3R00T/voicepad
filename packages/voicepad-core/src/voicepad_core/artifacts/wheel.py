@@ -11,7 +11,7 @@ from threading import RLock
 
 from voicepad_core.deployments import WheelExtraction, get_manifest
 
-from .store import COPY_BUFFER_SIZE, ArtifactIntegrityError, ArtifactStore
+from .store import COPY_BUFFER_SIZE, ArtifactIntegrityError, ArtifactStore, ProgressCallback
 
 EXTRACTION_PROVENANCE_FILE = "voicepad-extraction.json"
 
@@ -27,14 +27,18 @@ class WheelExtractor:
     def output_path(self, extraction: WheelExtraction) -> Path:
         return self._root / extraction.id / extraction.output_name
 
-    def prepare(self, extraction: WheelExtraction) -> Path:
+    def prepare(
+        self,
+        extraction: WheelExtraction,
+        on_progress: ProgressCallback | None = None,
+    ) -> Path:
         with self._lock:
             target = self._root / extraction.id
             if os.path.lexists(target):
                 return self.verify(extraction)
 
             manifest = get_manifest(extraction.wheel_manifest_id)
-            snapshot = self._store.prepare(manifest)
+            snapshot = self._store.prepare(manifest, on_progress)
             if len(manifest.files) != 1:
                 raise ArtifactIntegrityError("Wheel extraction requires exactly one verified wheel artifact.")
             wheel = snapshot / manifest.files[0].path

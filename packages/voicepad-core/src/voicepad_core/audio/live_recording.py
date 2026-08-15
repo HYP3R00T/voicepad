@@ -1,3 +1,5 @@
+"""Queue, persist, and expose audio while a recording is still growing."""
+
 from __future__ import annotations
 
 import contextlib
@@ -6,6 +8,7 @@ import os
 import queue
 import tempfile
 import threading
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -13,27 +16,11 @@ from typing import cast
 import numpy as np
 import soundfile as sf
 from numpy.typing import NDArray
+from utilityhub_logging import bind_context
 
-from .constants import PCM_WAV_SUBTYPE
 from .errors import AudioStreamStateError, AudioWriteBackpressureError
-from .types import AudioWindow, RawAudio
-
-logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class WavArtifact:
-    """Metadata for an atomically persisted WAV recording."""
-
-    path: Path
-    sample_rate: int
-    channels: int
-    frame_count: int
-    duration_s: float
-
-    def duration(self) -> float:
-        """Return the persisted recording duration in seconds."""
-        return self.duration_s
+from .types import AudioWindow
+from .wav_persistence import WavArtifact, _finalize_live_wav, _read_wav_window
 
 
 @dataclass
@@ -58,6 +45,8 @@ class LiveWavRecording:
         channels: int,
         *,
         max_pending_chunks: int = 256,
+        logger: logging.Logger | logging.LoggerAdapter[logging.Logger] | None = None,
+        log_context: Mapping[str, str] | None = None,
     ) -> None:
         if sample_rate <= 0 or channels <= 0:
             raise ValueError("sample_rate and channels must be positive")
@@ -72,11 +61,13 @@ class LiveWavRecording:
         self._state_lock = threading.Lock()
         self._committed_condition = threading.Condition(self._state_lock)
         self._thread: threading.Thread | None = None
-        self._finishing = False
+        self._stopping = False
         self._spool_path: Path | None = None
         self._frame_count = 0
         self._error: Exception | None = None
         self._artifact: WavArtifact | None = None
+        self._logger = logger or logging.getLogger(__name__)
+        self._log_context = dict(log_context or {})
 
     @property
     def sample_rate(self) -> int:
@@ -104,15 +95,22 @@ class LiveWavRecording:
     def wait_for_update(self, after_sample: int, timeout: float | None = None) -> tuple[int, bool]:
         with self._committed_condition:
             self._committed_condition.wait_for(
-                lambda: self._frame_count > after_sample or self._artifact is not None or self._error is not None,
+                lambda: (
+                    self._frame_count > after_sample
+                    or self._artifact is not None
+                    or self._error is not None
+                    or self._finished.is_set()
+                ),
                 timeout=timeout,
             )
             self._raise_if_failed()
+            if self._finished.is_set() and self._artifact is None:
+                raise AudioStreamStateError("Live recording was aborted or did not finish successfully.")
             return self._frame_count, self._artifact is not None
 
     def start(self) -> None:
-        if self._thread is not None:
-            raise AudioStreamStateError("Live recording is already started.")
+        if self._thread is not None or self._stopping or self._artifact is not None:
+            raise AudioStreamStateError("Live recording is already started or closed.")
         self._path.parent.mkdir(parents=True, exist_ok=True)
         descriptor, name = tempfile.mkstemp(
             dir=self._path.parent,
@@ -121,22 +119,30 @@ class LiveWavRecording:
         )
         os.close(descriptor)
         self._spool_path = Path(name)
-        self._thread = threading.Thread(target=self._write_loop, name="audio-writer", daemon=True)
+        self._thread = threading.Thread(target=self._write_loop_with_context, name="audio-writer", daemon=True)
         self._thread.start()
         self._ready.wait(timeout=10.0)
         self._raise_if_failed()
         if not self._ready.is_set():
             raise AudioStreamStateError("Timed out while starting the live audio writer.")
+        self._logger.info(
+            "Live audio writer started: destination=%s sample_rate=%s channels=%s queue_capacity=%s",
+            self._path,
+            self._sample_rate,
+            self._channels,
+            self._queue.maxsize,
+        )
 
     def append(self, samples: np.ndarray) -> None:
-        self._require_active()
-        self._raise_if_failed()
-        try:
-            self._queue.put_nowait(np.ascontiguousarray(samples, dtype=np.float32))
-        except queue.Full as exc:
-            raise AudioWriteBackpressureError(
-                f"Audio writer exceeded its {self._queue.maxsize}-chunk backlog."
-            ) from exc
+        with self._state_lock:
+            self._require_active()
+            self._raise_if_failed()
+            try:
+                self._queue.put_nowait(np.ascontiguousarray(samples, dtype=np.float32))
+            except queue.Full as exc:
+                raise AudioWriteBackpressureError(
+                    f"Audio writer exceeded its {self._queue.maxsize}-chunk backlog."
+                ) from exc
 
     def read_from(self, start_sample: int, max_samples: int | None = None) -> AudioWindow:
         if start_sample < 0:
@@ -146,24 +152,27 @@ class LiveWavRecording:
 
         with self._state_lock:
             artifact = self._artifact
-            finishing = self._finishing
-            if artifact is None and not finishing:
+            stopping = self._stopping
+            if artifact is None and not stopping:
                 self._require_active()
+                self._raise_if_failed()
                 request = _ReadRequest(start_sample, max_samples, threading.Event())
                 self._queue.put(request)
             else:
                 request = None
 
         if artifact is not None:
+            assert artifact is not None
             return self._read_artifact(artifact, start_sample, max_samples)
-        if finishing:
+        if stopping:
             if not self._finished.wait(timeout=60.0):
                 raise AudioStreamStateError("Timed out while waiting for live audio to finish.")
-            self._raise_if_failed()
-            if self._artifact is None:
-                raise AudioStreamStateError("Live recording did not finish successfully.")
-            return self._read_artifact(self._artifact, start_sample, max_samples)
-
+            with self._state_lock:
+                self._raise_if_failed()
+                if self._artifact is None:
+                    raise AudioStreamStateError("Live recording did not finish successfully.")
+                artifact = self._artifact
+            return self._read_artifact(artifact, start_sample, max_samples)
         assert request is not None
         if not request.completed.wait(timeout=10.0):
             raise AudioStreamStateError("Timed out while reading live audio.")
@@ -177,7 +186,8 @@ class LiveWavRecording:
             if self._artifact is not None:
                 return self._artifact
             self._require_active()
-            self._finishing = True
+            self._raise_if_failed()
+            self._stopping = True
             self._queue.put(_FINISH)
             thread = self._thread
 
@@ -188,7 +198,7 @@ class LiveWavRecording:
                 raise AudioStreamStateError("Timed out while finishing the live audio writer.")
             self._raise_if_failed()
             assert self._spool_path is not None
-            artifact = _finalize_spool(
+            artifact = _finalize_live_wav(
                 self._spool_path,
                 self._path,
                 self._sample_rate,
@@ -199,21 +209,40 @@ class LiveWavRecording:
                 self._artifact = artifact
                 self._thread = None
                 self._committed_condition.notify_all()
+            self._logger.info(
+                "Live audio writer finalized: destination=%s frames=%s duration_s=%.3f",
+                artifact.path,
+                artifact.frame_count,
+                artifact.duration_s,
+            )
             return artifact
         finally:
             self._finished.set()
 
     def abort(self) -> None:
-        if self._thread is not None and self._thread.is_alive():
+        with self._committed_condition:
+            if self._artifact is not None or (self._stopping and not self._finished.is_set()):
+                return
+            self._stopping = True
+            self._committed_condition.notify_all()
+            thread = self._thread
+        if thread is not None and thread.is_alive():
             with contextlib.suppress(queue.Full):
                 self._queue.put(_FINISH, timeout=5.0)
-            self._thread.join(timeout=5.0)
-            if self._thread.is_alive():
-                logger.error("Audio writer did not stop; retaining recoverable spool: %s", self._spool_path)
+            thread.join(timeout=5.0)
+            if thread.is_alive():
+                self._logger.error("Audio writer did not stop; retaining recoverable spool: %s", self._spool_path)
                 return
         if self._spool_path is not None:
             self._spool_path.unlink(missing_ok=True)
-        self._thread = None
+        with self._committed_condition:
+            self._thread = None
+            self._finished.set()
+            self._committed_condition.notify_all()
+
+    def _write_loop_with_context(self) -> None:
+        with bind_context(**self._log_context):
+            self._write_loop()
 
     def _write_loop(self) -> None:
         assert self._spool_path is not None
@@ -240,10 +269,10 @@ class LiveWavRecording:
                                     if item.max_samples is None
                                     else min(self._frame_count, item.start_sample + item.max_samples)
                                 )
-                                item.result = _read_window(self._spool_path, item.start_sample, requested_end)
+                                item.result = _read_wav_window(self._spool_path, item.start_sample, requested_end)
                             except Exception as error:
                                 item.error = error
-                                logger.exception(
+                                self._logger.exception(
                                     "Live transcription read failed without stopping audio persistence: "
                                     "destination=%s start_sample=%s max_samples=%s committed_frames=%s",
                                     self._path,
@@ -262,10 +291,18 @@ class LiveWavRecording:
                     finally:
                         self._queue.task_done()
         except Exception as exc:
+            self._logger.error(
+                "Live audio writer failed: destination=%s error_type=%s error=%s",
+                self._path,
+                type(exc).__name__,
+                exc,
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
             with self._committed_condition:
                 self._error = exc
                 self._committed_condition.notify_all()
             self._ready.set()
+            self._finished.set()
             self._fail_pending_reads(exc)
 
     def _fail_pending_reads(self, error: Exception) -> None:
@@ -280,7 +317,7 @@ class LiveWavRecording:
             self._queue.task_done()
 
     def _require_active(self) -> None:
-        if self._thread is None:
+        if self._thread is None or self._stopping:
             raise AudioStreamStateError("Live recording is not active.")
 
     def _raise_if_failed(self) -> None:
@@ -290,137 +327,7 @@ class LiveWavRecording:
     @staticmethod
     def _read_artifact(artifact: WavArtifact, start_sample: int, max_samples: int | None) -> AudioWindow:
         end_sample = None if max_samples is None else start_sample + max_samples
-        return _read_window(artifact.path, start_sample, end_sample)
+        return _read_wav_window(artifact.path, start_sample, end_sample)
 
 
-def write_wav_atomic(audio: RawAudio, path: str | Path) -> WavArtifact:
-    """Persist raw audio as PCM WAV without exposing a partial destination file."""
-    destination = Path(path)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    file_descriptor, temporary_name = tempfile.mkstemp(
-        dir=destination.parent,
-        prefix=f".{destination.stem}-",
-        suffix=".wav",
-    )
-    os.close(file_descriptor)
-    temporary_path = Path(temporary_name)
-
-    try:
-        sf.write(
-            str(temporary_path),
-            audio.samples,
-            audio.sample_rate,
-            subtype=PCM_WAV_SUBTYPE,
-            format="WAV",
-        )
-        _flush_file(temporary_path)
-        _promote_new_file(temporary_path, destination)
-        _flush_file(destination)
-    except Exception:
-        temporary_path.unlink(missing_ok=True)
-        raise
-
-    artifact = WavArtifact(
-        path=destination,
-        sample_rate=audio.sample_rate,
-        channels=audio.channels,
-        frame_count=audio.frame_count,
-        duration_s=audio.duration(),
-    )
-    logger.info(
-        "Persisted WAV atomically: path=%s, duration_s=%.3f, frames=%s, rate=%s, channels=%s",
-        artifact.path,
-        artifact.duration_s,
-        artifact.frame_count,
-        artifact.sample_rate,
-        artifact.channels,
-    )
-    return artifact
-
-
-def _read_window(path: Path, start_sample: int, end_sample: int | None = None) -> AudioWindow:
-    with sf.SoundFile(str(path), mode="r") as recording:
-        available = len(recording) if end_sample is None else end_sample
-        start = min(start_sample, available)
-        recording.seek(start)
-        samples = recording.read(available - start, dtype="float32", always_2d=False)
-    if samples.ndim == 2:
-        if samples.shape[1] != 1:
-            raise AudioStreamStateError("Live transcription currently requires mono capture.")
-        samples = samples[:, 0]
-    return AudioWindow(np.ascontiguousarray(samples, dtype=np.float32), start)
-
-
-def _finalize_spool(
-    spool_path: Path,
-    destination: Path,
-    sample_rate: int,
-    channels: int,
-    frame_count: int,
-) -> WavArtifact:
-    descriptor, name = tempfile.mkstemp(
-        dir=destination.parent,
-        prefix=f".{destination.stem}-",
-        suffix=".wav",
-    )
-    os.close(descriptor)
-    temporary_path = Path(name)
-    try:
-        with (
-            sf.SoundFile(str(spool_path), mode="r") as source,
-            sf.SoundFile(
-                str(temporary_path),
-                mode="w",
-                samplerate=sample_rate,
-                channels=channels,
-                subtype=PCM_WAV_SUBTYPE,
-                format="WAV",
-            ) as output,
-        ):
-            while True:
-                block = source.read(65_536, dtype="float32", always_2d=True)
-                if len(block) == 0:
-                    break
-                output.write(block)
-        _flush_file(temporary_path)
-        _promote_new_file(temporary_path, destination)
-        _flush_file(destination)
-    except Exception:
-        temporary_path.unlink(missing_ok=True)
-        raise
-    spool_path.unlink(missing_ok=True)
-
-    artifact = WavArtifact(
-        path=destination,
-        sample_rate=sample_rate,
-        channels=channels,
-        frame_count=frame_count,
-        duration_s=frame_count / sample_rate,
-    )
-    logger.info(
-        "Finalized live WAV: path=%s, duration_s=%.3f, frames=%s, rate=%s, channels=%s",
-        artifact.path,
-        artifact.duration_s,
-        artifact.frame_count,
-        artifact.sample_rate,
-        artifact.channels,
-    )
-    return artifact
-
-
-def _promote_new_file(temporary_path: Path, destination: Path) -> None:
-    os.link(temporary_path, destination)
-    temporary_path.unlink()
-    descriptor = os.open(destination.parent, os.O_RDONLY)
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
-
-
-def _flush_file(path: Path) -> None:
-    with path.open("r+b") as persisted_file:
-        os.fsync(persisted_file.fileno())
-
-
-__all__ = ["LiveWavRecording", "WavArtifact", "write_wav_atomic"]
+__all__ = ["LiveWavRecording"]

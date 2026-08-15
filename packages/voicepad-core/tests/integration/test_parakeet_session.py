@@ -17,7 +17,7 @@ from voicepad_core.preprocessing import PreprocessedAudio
 @pytest.mark.gpu
 def test_official_parakeet_session_loads_warms_and_reuses_offline() -> None:
     cache_home = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
-    snapshot = ArtifactStore(cache_home / "voicepad-v2" / "artifacts").verify(PARAKEET_V3_MANIFEST)
+    snapshot = ArtifactStore(cache_home / "voicepad" / "artifacts").verify(PARAKEET_V3_MANIFEST)
     device = admit_cuda_device(PARAKEET_V3_CUDA)
     session = TransformersParakeetTDTSession(PARAKEET_V3_CUDA, PARAKEET_V3_MANIFEST, snapshot, device)
     silence = PreprocessedAudio(np.zeros(16_000, dtype=np.float32), sample_rate=16_000, channels=1)

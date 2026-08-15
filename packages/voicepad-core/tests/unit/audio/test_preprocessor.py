@@ -1,9 +1,7 @@
-from unittest.mock import Mock
-
 import numpy as np
 import numpy.testing as npt
 import pytest
-from voicepad_core.audio import AudioSource, RawAudio, WaveformSpec
+from voicepad_core.audio import RawAudio, WaveformSpec
 from voicepad_core.preprocessing import (
     DEFAULT_WAVEFORM_SPEC,
     TARGET_SAMPLE_RATE,
@@ -50,20 +48,6 @@ def test_prepare_resamples_to_16khz(source_rate: int) -> None:
 
     assert result.dtype == np.float32
     assert len(result) == TARGET_SAMPLE_RATE
-
-
-def test_process_reads_audio_source() -> None:
-    source = Mock(spec=AudioSource)
-    samples = np.array([0.1, 0.2], dtype=np.float32)
-    source.read_audio.return_value = RawAudio(samples, sample_rate=TARGET_SAMPLE_RATE, channels=1)
-
-    result = AudioPreProcessor(source).process()
-
-    source.read_audio.assert_called_once_with()
-    npt.assert_array_equal(result.samples, samples)
-    assert result.sample_rate == TARGET_SAMPLE_RATE
-    assert result.channels == 1
-    assert result.transformations == ()
 
 
 def test_prepare_records_transformations() -> None:

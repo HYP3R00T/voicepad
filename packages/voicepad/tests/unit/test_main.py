@@ -17,7 +17,10 @@ def test_toggle_forwards_to_running_tui() -> None:
 def test_prepare_reports_runtime_cleanup_failure_after_success() -> None:
     runtime = MagicMock()
     runtime.close.side_effect = RuntimeError("close failed")
-    with patch("voicepad.main.ApplicationRuntime", return_value=runtime):
+    with (
+        patch("voicepad.main.load_config", return_value=MagicMock()),
+        patch("voicepad.main.ApplicationRuntime", return_value=runtime),
+    ):
         result = runner.invoke(app, ["prepare"])
 
     assert result.exit_code == 1
@@ -30,7 +33,10 @@ def test_prepare_preserves_primary_failure_when_runtime_cleanup_fails(caplog) ->
     activation_error = RuntimeError("activation failed")
     runtime.activate.side_effect = activation_error
     runtime.close.side_effect = RuntimeError("close failed")
-    with patch("voicepad.main.ApplicationRuntime", return_value=runtime):
+    with (
+        patch("voicepad.main.load_config", return_value=MagicMock()),
+        patch("voicepad.main.ApplicationRuntime", return_value=runtime),
+    ):
         result = runner.invoke(app, ["prepare"])
 
     assert result.exit_code == 1
@@ -45,7 +51,10 @@ def test_transcribe_preserves_primary_failure_when_runtime_cleanup_fails(tmp_pat
     runtime = MagicMock()
     runtime.transcribe_file.side_effect = RuntimeError("transcription failed")
     runtime.close.side_effect = RuntimeError("close failed")
-    with patch("voicepad.main.ApplicationRuntime", return_value=runtime):
+    with (
+        patch("voicepad.main.load_config", return_value=MagicMock()),
+        patch("voicepad.main.ApplicationRuntime", return_value=runtime),
+    ):
         result = runner.invoke(app, ["transcribe", str(audio)])
 
     assert result.exit_code == 1
@@ -61,3 +70,17 @@ def test_config_show_prints_new_deployment() -> None:
 
     assert result.exit_code == 0
     assert "parakeet-v3.transformers-fp16-cuda" in result.stdout
+
+
+def test_config_init_uses_validated_defaults_without_loading_existing_settings(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    path = tmp_path / "voicepad.toml"
+    with (
+        patch("voicepad.cli.config.config_path", return_value=path),
+        patch("voicepad.cli.config.load_config") as load,
+    ):
+        result = runner.invoke(app, ["config", "init"])
+
+    assert result.exit_code == 0
+    assert result.stdout.strip() == str(path)
+    load.assert_not_called()
+    assert 'deployment_id = "parakeet-v3.transformers-fp16-cuda"' in path.read_text()

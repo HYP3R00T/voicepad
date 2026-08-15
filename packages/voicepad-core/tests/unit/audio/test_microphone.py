@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import ANY, MagicMock, Mock, patch
 
 import numpy as np
 import pytest
@@ -34,7 +34,13 @@ def test_start_opens_writer_before_microphone(
 
     stream.start()
 
-    recording_type.assert_called_once_with(tmp_path / "recording.wav", 16_000, 1)
+    recording_type.assert_called_once_with(
+        tmp_path / "recording.wav",
+        16_000,
+        1,
+        logger=ANY,
+        log_context={},
+    )
     recording_type.return_value.start.assert_called_once_with()
     input_stream_type.assert_called_once_with(
         samplerate=16_000,

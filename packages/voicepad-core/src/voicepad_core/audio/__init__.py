@@ -1,4 +1,5 @@
 from .constants import SUPPORTED_FORMATS
+from .contracts import IncrementalAudioSource
 from .errors import (
     AudioConversionDependencyError,
     AudioConversionError,
@@ -8,15 +9,14 @@ from .errors import (
     AudioWriteBackpressureError,
     UnsupportedAudioFormatError,
 )
-from .file import AudioSource, FileSource
+from .file import FileSource
+from .live_recording import LiveWavRecording
 from .microphone import MicrophoneStream
-from .persistence import LiveWavRecording, WavArtifact, write_wav_atomic
-from .source import GrowingAudioSource
 from .types import AudioWindow, RawAudio, WaveformSpec
+from .wav_persistence import WavArtifact, write_wav_atomic
 
 __all__ = [
     "AudioWindow",
-    "AudioSource",
     "RawAudio",
     "AudioError",
     "AudioFileNotFoundError",
@@ -29,7 +29,7 @@ __all__ = [
     "SUPPORTED_FORMATS",
     "MicrophoneStream",
     "LiveWavRecording",
-    "GrowingAudioSource",
+    "IncrementalAudioSource",
     "WavArtifact",
     "write_wav_atomic",
     "WaveformSpec",

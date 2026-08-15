@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 import torch
 
-from voicepad_core.deployments import DeploymentDefinition, Precision
+from voicepad_core.deployments import DeploymentDefinition
 
 from .types import CudaAdmissionError, UnsupportedPlatformError
 
@@ -32,7 +32,7 @@ def admit_cuda_device(deployment: DeploymentDefinition, index: int = 0) -> CudaD
         raise UnsupportedPlatformError(
             f"Deployment '{deployment.id}' supports {deployment.resources.platforms}, not '{platform_id}'."
         )
-    if deployment.resources.required_device != "cuda" or deployment.precision is not Precision.FP16:
+    if deployment.resources.required_device != "cuda" or deployment.precision != "fp16":
         raise CudaAdmissionError(f"Deployment '{deployment.id}' is not a CUDA FP16 deployment.")
     if not torch.cuda.is_available():
         raise CudaAdmissionError("CUDA is unavailable. VoicePad requires a supported NVIDIA GPU and driver.")

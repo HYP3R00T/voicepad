@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import json
+import logging
 from pathlib import Path
 from threading import Event
 from unittest.mock import patch
 
 import numpy as np
+from utilityhub_logging import LogFormat, begin_scope_logging, cleanup_logging, end_scope_logging
 from voicepad_core.audio import AudioWindow, LiveWavRecording
 from voicepad_core.deployments import PARAKEET_V3_CUDA, PARAKEET_V3_MANIFEST, HuggingFaceSource
 from voicepad_core.inference import ActiveDeployment, BackendResult, TimedWord, TokenTimestamp
-from voicepad_core.pipeline import GrowingTranscriptionJob, GrowingTranscriptionUpdate
+from voicepad_core.pipeline import IncrementalTranscriptionJob, TranscriptionProgress
 from voicepad_core.preprocessing import PreprocessedAudio
 from voicepad_core.vad import VadFrame
 
@@ -74,16 +77,31 @@ class FakeEngine:
     def transcribe(self, audio: PreprocessedAudio, intent=None, cancellation=None) -> BackendResult:  # type: ignore[no-untyped-def]
         self.calls += 1
         duration = audio.duration()
-        word = TimedWord("growing", 0.25, min(0.75, duration))
-        return BackendResult("growing", (TokenTimestamp("▁growing", word.start_seconds, word.end_seconds),), (word,))
+        word = TimedWord("incremental", 0.25, min(0.75, duration))
+        return BackendResult(
+            "incremental",
+            (TokenTimestamp("▁incremental", word.start_seconds, word.end_seconds),),
+            (word,),
+        )
 
 
-def test_growing_job_waits_for_persistence_finalization(tmp_path: Path) -> None:
+class PrivateTextEngine(FakeEngine):
+    def transcribe(self, audio: PreprocessedAudio, intent=None, cancellation=None) -> BackendResult:  # type: ignore[no-untyped-def]
+        self.calls += 1
+        word = TimedWord("PRIVATE_TRANSCRIPT_SENTINEL", 0.25, min(0.75, audio.duration()))
+        return BackendResult(
+            word.text,
+            (TokenTimestamp("PRIVATE_TOKEN_SENTINEL", word.start_seconds, word.end_seconds),),
+            (word,),
+        )
+
+
+def test_incremental_job_waits_for_persistence_finalization(tmp_path: Path) -> None:
     recording = LiveWavRecording(tmp_path / "recording.wav", SR, 1)
     recording.start()
     engine = FakeEngine()
-    updates: list[GrowingTranscriptionUpdate] = []
-    job = GrowingTranscriptionJob(engine, SpeechVad(), recording, on_update=updates.append)
+    updates: list[TranscriptionProgress] = []
+    job = IncrementalTranscriptionJob(engine, SpeechVad(), recording, on_update=updates.append)
     job.start()
 
     recording.append(np.zeros(SR, dtype=np.float32))
@@ -94,22 +112,22 @@ def test_growing_job_waits_for_persistence_finalization(tmp_path: Path) -> None:
     assert artifact.path.exists()
     assert result.complete is True
     assert result.duration_seconds == 2.0
-    assert result.text == "growing"
+    assert result.text == "incremental"
     assert engine.calls == 1
-    assert updates == [GrowingTranscriptionUpdate("growing", 1, 2 * SR)]
+    assert updates == [TranscriptionProgress("incremental", 1, 2 * SR)]
 
 
-def test_growing_job_emits_update_before_recording_stops(tmp_path: Path) -> None:
+def test_incremental_job_emits_update_before_recording_stops(tmp_path: Path) -> None:
     recording = LiveWavRecording(tmp_path / "recording.wav", SR, 1)
     recording.start()
     received = Event()
-    updates: list[GrowingTranscriptionUpdate] = []
+    updates: list[TranscriptionProgress] = []
 
-    def on_update(update: GrowingTranscriptionUpdate) -> None:
+    def on_update(update: TranscriptionProgress) -> None:
         updates.append(update)
         received.set()
 
-    job = GrowingTranscriptionJob(FakeEngine(), BoundaryVad(), recording, on_update=on_update)
+    job = IncrementalTranscriptionJob(FakeEngine(), BoundaryVad(), recording, on_update=on_update)
     job.start()
     recording.append(np.zeros(30 * SR, dtype=np.float32))
 
@@ -121,10 +139,10 @@ def test_growing_job_emits_update_before_recording_stops(tmp_path: Path) -> None
     job.finish()
 
 
-def test_growing_job_cancellation_is_not_reported_complete(tmp_path: Path) -> None:
+def test_incremental_job_cancellation_is_not_reported_complete(tmp_path: Path) -> None:
     recording = LiveWavRecording(tmp_path / "recording.wav", SR, 1)
     recording.start()
-    job = GrowingTranscriptionJob(FakeEngine(), SpeechVad(), recording)
+    job = IncrementalTranscriptionJob(FakeEngine(), SpeechVad(), recording)
     job.start()
     recording.append(np.zeros(SR, dtype=np.float32))
 
@@ -137,7 +155,7 @@ def test_growing_job_cancellation_is_not_reported_complete(tmp_path: Path) -> No
 
 def test_inference_read_failure_finishes_incomplete_without_leaking_workers() -> None:
     source = FailingInferenceReadSource()
-    job = GrowingTranscriptionJob(FakeEngine(), SpeechVad(), source)
+    job = IncrementalTranscriptionJob(FakeEngine(), SpeechVad(), source)
     job.start()
 
     result = job.finish(timeout=2)
@@ -151,18 +169,18 @@ def test_inference_read_failure_finishes_incomplete_without_leaking_workers() ->
 
 def test_unexpected_inference_worker_failure_does_not_strand_planner() -> None:
     source = FailingInferenceReadSource()
-    job = GrowingTranscriptionJob(FakeEngine(), SpeechVad(), source)
+    job = IncrementalTranscriptionJob(FakeEngine(), SpeechVad(), source)
     with patch.object(job._queue, "get", side_effect=RuntimeError("queue failed")):
         job.start()
         result = job.finish(timeout=2)
 
     assert result.complete is False
-    assert "growing inference worker failed" in result.warnings
+    assert "incremental inference worker failed" in result.warnings
     assert job._planner_thread is not None and not job._planner_thread.is_alive()
     assert job._inference_thread is not None and not job._inference_thread.is_alive()
 
 
-def test_growing_source_publishes_committed_cursor_and_final_state(tmp_path: Path) -> None:
+def test_incremental_source_publishes_committed_cursor_and_final_state(tmp_path: Path) -> None:
     recording = LiveWavRecording(tmp_path / "recording.wav", SR, 1)
     recording.start()
     recording.append(np.ones(512, dtype=np.float32))
@@ -176,3 +194,55 @@ def test_growing_source_publishes_committed_cursor_and_final_state(tmp_path: Pat
     recording.finish()
     _, final = recording.wait_for_update(committed, timeout=2)
     assert final is True
+
+
+def test_core_worker_logs_are_correlated_without_exposing_transcript_content(tmp_path: Path) -> None:
+    scope_logger, log_path = begin_scope_logging(
+        "recording",
+        "core-worker-test",
+        app_name="voicepad",
+        logs_path=tmp_path,
+        log_format=LogFormat.JSON,
+    )
+    context = {
+        "recording_id": "core-worker-test",
+        "scope_id": "core-worker-test",
+        "scope_type": "recording",
+        "component": "voicepad_core.pipeline.incremental",
+    }
+    scoped_logger = logging.LoggerAdapter(scope_logger.getChild("pipeline"), {"utilityhub_context": context})
+    recording = LiveWavRecording(
+        tmp_path / "recording.wav",
+        SR,
+        1,
+        logger=scoped_logger,
+        log_context=context,
+    )
+    job = IncrementalTranscriptionJob(
+        PrivateTextEngine(),
+        SpeechVad(),
+        recording,
+        logger=scoped_logger,
+        log_context=context,
+    )
+
+    try:
+        recording.start()
+        job.start()
+        recording.append(np.zeros(2 * SR, dtype=np.float32))
+        recording.finish()
+        result = job.finish()
+    finally:
+        end_scope_logging(scope_logger)
+        cleanup_logging(close_all_loggers=True)
+
+    records = [json.loads(line) for line in log_path.read_text().splitlines()]
+    chunk_records = [
+        record for record in records if str(record["message"]).startswith("Incremental transcription chunk completed")
+    ]
+    assert result.text == "PRIVATE_TRANSCRIPT_SENTINEL"
+    assert len(chunk_records) == 1
+    assert chunk_records[0]["context"]["recording_id"] == "core-worker-test"
+    assert chunk_records[0]["context"]["component"] == "voicepad_core.pipeline.incremental"
+    assert "PRIVATE_TRANSCRIPT_SENTINEL" not in log_path.read_text()
+    assert "PRIVATE_TOKEN_SENTINEL" not in log_path.read_text()
