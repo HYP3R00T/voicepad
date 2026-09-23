@@ -10,7 +10,13 @@ from unittest.mock import ANY, Mock, patch
 import numpy as np
 import pytest
 import sounddevice as sd
-from voicepad_core.audio import AudioStreamStateError, AudioWindow, MicrophoneStream, WavArtifact
+from voicepad_core.audio import (
+    AudioStreamStateError,
+    AudioWindow,
+    AudioWriteBackpressureError,
+    MicrophoneStream,
+    WavArtifact,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -398,3 +404,46 @@ def test_non_input_status_is_logged_but_not_labeled_input_loss(
     assert stream.capture_error is None
     assert stream.discontinuity_warnings == ()
     assert "output underflow" in caplog.text
+
+
+@patch("voicepad_core.audio.microphone.LiveWavRecording")
+@patch("voicepad_core.audio.microphone.sd.InputStream")
+def test_callback_failure_is_logged_only_when_capture_stops(
+    _input_stream_type: Mock, recording_type: Mock, tmp_path: Path
+) -> None:
+    logger = Mock()
+    error = AudioWriteBackpressureError("writer queue full")
+    recording_type.return_value.append.side_effect = error
+    artifact = WavArtifact(tmp_path / "recording.wav", 16_000, 1, 4, 4 / 16_000)
+    recording_type.return_value.finish.return_value = artifact
+    stream = MicrophoneStream(artifact.path, logger=logger)
+    stream.start()
+    logger.reset_mock()
+
+    with pytest.raises(sd.CallbackAbort):
+        stream._callback(np.zeros((1, 1), dtype=np.float32), 1, None, sd.CallbackFlags())
+    stream._stream_finished()
+
+    assert stream.capture_error is error
+    logger.assert_not_called()
+    assert logger.method_calls == []  # No logging handler can block the native callback.
+    assert stream.stop() == artifact
+    logger.error.assert_called_once()
+    assert logger.error.call_args.args[-1] is error
+
+
+@patch("voicepad_core.audio.microphone.LiveWavRecording")
+@patch("voicepad_core.audio.microphone.sd.InputStream")
+def test_finished_callback_defers_error_logging(_input_stream_type: Mock, recording_type: Mock, tmp_path: Path) -> None:
+    logger = Mock()
+    artifact = WavArtifact(tmp_path / "recording.wav", 16_000, 1, 0, 0.0)
+    recording_type.return_value.finish.return_value = artifact
+    stream = MicrophoneStream(artifact.path, logger=logger)
+    stream.start()
+    logger.reset_mock()
+    stream._stream_finished()
+
+    assert "stopped unexpectedly" in str(stream.capture_error)
+    assert logger.method_calls == []
+    stream.stop()
+    logger.error.assert_called_once()

@@ -261,6 +261,15 @@ class MicrophoneStream:
             self._logger.warning("Microphone callback status summary: %s", self._callback_status)
         for warning in self.discontinuity_warnings:
             self._logger.warning("Microphone discontinuity: path=%s warning=%s", artifact.path, warning)
+        error = self.capture_error
+        if error is not None:
+            self._logger.error(
+                "Microphone capture failure: path=%s error_type=%s error=%s",
+                self._recording_path,
+                type(error).__name__,
+                error,
+                exc_info=(type(error), error, error.__traceback__),
+            )
         return artifact
 
     def read_window(self, start_sample: int, max_samples: int | None = None) -> AudioWindow:
@@ -295,16 +304,8 @@ class MicrophoneStream:
         with self._lock:
             if self._recording and self._capture_error is None:
                 self._capture_error = AudioStreamStateError("Microphone input stream stopped unexpectedly.")
-                self._logger.error("Microphone input stream stopped unexpectedly: path=%s", self._recording_path)
 
     def _remember_error(self, error: Exception) -> None:
         with self._lock:
             if self._capture_error is None:
                 self._capture_error = error
-        self._logger.error(
-            "Microphone capture failure: path=%s error_type=%s error=%s",
-            self._recording_path,
-            type(error).__name__,
-            error,
-            exc_info=(type(error), error, error.__traceback__),
-        )

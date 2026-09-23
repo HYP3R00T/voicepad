@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import contextlib
 import logging
 import os
 import queue
 import tempfile
 import threading
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,9 +33,6 @@ class _ReadRequest:
     error: Exception | None = None
 
 
-_FINISH = object()
-
-
 class LiveWavRecording:
     """Append live audio on a worker thread and expose sample-addressed windows."""
 
@@ -56,7 +53,7 @@ class LiveWavRecording:
         self._path = Path(path)
         self._sample_rate = sample_rate
         self._channels = channels
-        self._queue: queue.Queue[np.ndarray | _ReadRequest | object] = queue.Queue(max_pending_chunks)
+        self._queue: queue.Queue[np.ndarray | _ReadRequest] = queue.Queue(max_pending_chunks)
         self._ready = threading.Event()
         self._finished = threading.Event()
         self._state_lock = threading.Lock()
@@ -129,10 +126,13 @@ class LiveWavRecording:
         self._spool_path = Path(name)
         self._thread = threading.Thread(target=self._write_loop_with_context, name="audio-writer", daemon=True)
         self._thread.start()
-        self._ready.wait(timeout=10.0)
-        self._raise_if_failed()
-        if not self._ready.is_set():
-            raise AudioStreamStateError("Timed out while starting the live audio writer.")
+        try:
+            if not self._ready.wait(timeout=10.0):
+                raise AudioStreamStateError("Timed out while starting the live audio writer.")
+            self._raise_if_failed()
+        except Exception:
+            self.abort()
+            raise
         self._logger.info(
             "Live audio writer started: destination=%s sample_rate=%s channels=%s queue_capacity=%s",
             self._path,
@@ -142,11 +142,12 @@ class LiveWavRecording:
         )
 
     def append(self, samples: np.ndarray) -> None:
+        prepared = np.ascontiguousarray(samples, dtype=np.float32)
         with self._state_lock:
             self._require_active()
             self._raise_if_failed()
             try:
-                self._queue.put_nowait(np.ascontiguousarray(samples, dtype=np.float32))
+                self._queue.put_nowait(prepared)
             except queue.Full as exc:
                 raise AudioWriteBackpressureError(
                     f"Audio writer exceeded its {self._queue.maxsize}-chunk backlog."
@@ -158,16 +159,26 @@ class LiveWavRecording:
         if max_samples is not None and max_samples <= 0:
             raise ValueError("max_samples must be positive")
 
-        with self._state_lock:
-            artifact = self._artifact
-            stopping = self._stopping
-            if artifact is None and not stopping:
-                self._require_active()
+        deadline = time.monotonic() + 10.0
+        with self._committed_condition:
+            while True:
                 self._raise_if_failed()
+                artifact = self._artifact
+                stopping = self._stopping
+                if artifact is not None or stopping:
+                    request = None
+                    break
+                self._require_active()
                 request = _ReadRequest(start_sample, max_samples, threading.Event())
-                self._queue.put(request)
-            else:
-                request = None
+                try:
+                    self._queue.put_nowait(request)
+                    break
+                except queue.Full:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise AudioStreamStateError("Timed out while queueing a live audio read.") from None
+                    # Release the writer's lock while waiting for queue space.
+                    self._committed_condition.wait(timeout=remaining)
 
         if artifact is not None:
             assert artifact is not None
@@ -182,7 +193,7 @@ class LiveWavRecording:
                 artifact = self._artifact
             return self._read_artifact(artifact, start_sample, max_samples)
         assert request is not None
-        if not request.completed.wait(timeout=10.0):
+        if not request.completed.wait(timeout=max(0.0, deadline - time.monotonic())):
             raise AudioStreamStateError("Timed out while reading live audio.")
         if request.error is not None:
             raise AudioStreamStateError("Could not read live audio.") from request.error
@@ -190,13 +201,13 @@ class LiveWavRecording:
         return request.result
 
     def finish(self) -> WavArtifact:
-        with self._state_lock:
+        with self._committed_condition:
             if self._artifact is not None:
                 return self._artifact
             self._require_active()
             self._raise_if_failed()
             self._stopping = True
-            self._queue.put(_FINISH)
+            self._committed_condition.notify_all()
             thread = self._thread
 
         assert thread is not None
@@ -238,7 +249,9 @@ class LiveWavRecording:
                 self._logger.warning("Recording signal warning: path=%s warning=%s", artifact.path, warning)
             return artifact
         finally:
-            self._finished.set()
+            with self._committed_condition:
+                self._finished.set()
+                self._committed_condition.notify_all()
 
     def abort(self) -> None:
         with self._committed_condition:
@@ -248,14 +261,18 @@ class LiveWavRecording:
             self._committed_condition.notify_all()
             thread = self._thread
         if thread is not None and thread.is_alive():
-            with contextlib.suppress(queue.Full):
-                self._queue.put(_FINISH, timeout=5.0)
             thread.join(timeout=5.0)
             if thread.is_alive():
+                with self._committed_condition:
+                    self._finished.set()
+                    self._committed_condition.notify_all()
                 self._logger.error("Audio writer did not stop; retaining recoverable spool: %s", self._spool_path)
                 return
         if self._spool_path is not None:
-            self._spool_path.unlink(missing_ok=True)
+            if self._frame_count or self._error is not None:
+                self._logger.warning("Aborted recording retained for recovery: %s", self._spool_path)
+            else:
+                self._spool_path.unlink(missing_ok=True)
         with self._committed_condition:
             self._thread = None
             self._finished.set()
@@ -278,10 +295,16 @@ class LiveWavRecording:
             ) as spool:
                 self._ready.set()
                 while True:
-                    item = self._queue.get()
                     try:
-                        if item is _FINISH:
-                            break
+                        item = self._queue.get(timeout=0.1)
+                    except queue.Empty:
+                        with self._state_lock:
+                            if self._stopping and self._queue.empty():
+                                break
+                        continue
+                    with self._committed_condition:
+                        self._committed_condition.notify_all()  # Queue space is available.
+                    try:
                         if isinstance(item, _ReadRequest):
                             try:
                                 spool.flush()
@@ -323,9 +346,9 @@ class LiveWavRecording:
             )
             with self._committed_condition:
                 self._error = exc
+                self._ready.set()
+                self._finished.set()
                 self._committed_condition.notify_all()
-            self._ready.set()
-            self._finished.set()
             self._fail_pending_reads(exc)
 
     def _fail_pending_reads(self, error: Exception) -> None:
