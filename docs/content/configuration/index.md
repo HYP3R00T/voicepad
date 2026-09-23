@@ -1,9 +1,9 @@
 # Configuration
 
-VoicePad owns a strict schema-1 JSON configuration at:
+VoicePad uses UtilityHub Config to load and validate its TOML configuration at:
 
 ```text
-~/.config/voicepad/config-v2.json
+~/.config/voicepad/voicepad.toml
 ```
 
 Inspect or initialize it with:
@@ -16,20 +16,16 @@ voicepad config init
 
 Supported fields are:
 
-```json
-{
-  "schema": 1,
-  "deployment_id": "parakeet-v3.transformers-fp16-cuda",
-  "recordings_path": "~/.config/voicepad/data/recordings",
-  "markdown_path": "~/.config/voicepad/data/markdown",
-  "artifact_cache_path": "~/.cache/voicepad-v2/artifacts",
-  "recording_prefix": "recording",
-  "input_device_index": null,
-  "copy_complete_text": true,
-  "theme": "tokyo-night"
-}
+```toml
+deployment_id = "parakeet-v3.transformers-fp16-cuda"
+recordings_path = "~/.config/voicepad/data/recordings"
+markdown_path = "~/.config/voicepad/data/markdown"
+artifact_cache_path = "~/.cache/voicepad/artifacts"
+recording_prefix = "recording"
+copy_complete_text = true
+theme = "tokyo-night"
 ```
 
-Unknown fields and obsolete schemas fail with an actionable error. VoicePad does
-not silently migrate or overwrite old configuration. The retired `proper_nouns`
-field is ignored for compatibility and omitted the next time settings are saved.
+Unknown fields and invalid values fail with an actionable error. VoicePad does
+not rewrite invalid configuration. Omit `input_device_index` to use the system
+default microphone, because TOML has no null value.

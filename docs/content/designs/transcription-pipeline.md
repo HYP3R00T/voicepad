@@ -807,9 +807,10 @@ it never silently replaces official bytes.
 ## Observability and privacy
 
 Logs may include deployment/device IDs, state transitions, queue depth, sample
-ranges, timings, memory, hashes, and typed failures. They do not include audio,
-transcript text, token/word text, credentials, private fixture names, or private
-paths by default.
+ranges, timings, memory, hashes, operation-owned local paths needed for
+recovery, and typed failures. They do not include audio, transcript text,
+token/word text, credentials, or private fixture names. Log directories and
+files remain private to the user.
 
 Model download is public and requires no token. User WAV files, transcripts,
 private logs, model binaries, and caches never enter Git or GitHub. Model and

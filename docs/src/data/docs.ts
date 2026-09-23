@@ -21,7 +21,7 @@ export const docGroups: DocGroup[] = [
   {
     label: 'Configure',
     links: [
-      { slug: 'configuration/index', label: 'Configuration', description: 'The strict schema-1 application configuration.' },
+      { slug: 'configuration/index', label: 'Configuration', description: 'The validated application configuration.' },
       { slug: 'configuration/global-hotkey', label: 'Global shortcut', description: 'Record from any application on Wayland.' },
       { slug: 'configuration/gpu', label: 'NVIDIA GPU', description: 'CUDA admission and memory requirements.' },
       { slug: 'configuration/input-device', label: 'Input device', description: 'Shared Linux microphone selection.' },

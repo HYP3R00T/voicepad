@@ -120,6 +120,12 @@ class ApplicationRuntime:
         try:
             artifact = microphone.stop()
             result = job.finish()
+            if microphone.signal_health.warnings:
+                result = replace(result, warnings=(*result.warnings, *microphone.signal_health.warnings))
+            if microphone.discontinuity_warnings:
+                result = replace(
+                    result, complete=False, warnings=(*result.warnings, *microphone.discontinuity_warnings)
+                )
             if microphone.capture_error is not None:
                 result = replace(
                     result,

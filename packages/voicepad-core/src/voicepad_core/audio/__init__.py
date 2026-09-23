@@ -12,6 +12,7 @@ from .errors import (
 from .file import FileSource
 from .live_recording import LiveWavRecording
 from .microphone import MicrophoneStream
+from .signal_health import SignalHealth
 from .types import AudioWindow, RawAudio, WaveformSpec
 from .wav_persistence import WavArtifact, write_wav_atomic
 
@@ -28,6 +29,7 @@ __all__ = [
     "FileSource",
     "SUPPORTED_FORMATS",
     "MicrophoneStream",
+    "SignalHealth",
     "LiveWavRecording",
     "IncrementalAudioSource",
     "WavArtifact",
