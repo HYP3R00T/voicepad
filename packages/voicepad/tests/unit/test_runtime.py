@@ -1,9 +1,11 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import numpy as np
 import pytest
 from voicepad.config import AppConfig
 from voicepad.runtime import ApplicationRuntime
+from voicepad_core.audio import SignalHealth
 from voicepad_core.deployments import (
     PARAKEET_V3_CUDA,
     PARAKEET_V3_MANIFEST,
@@ -78,6 +80,24 @@ def test_successful_recording_scope_stays_open_until_host_persistence_finishes(t
     assert runtime._recording_scope is scope
     runtime.end_recording(outcome="completed")
     scope.close.assert_called_once_with(outcome="completed", error=None)
+
+
+def test_signal_warning_is_preserved_without_marking_transcription_incomplete(tmp_path: Path) -> None:
+    source = PARAKEET_V3_MANIFEST.source
+    assert isinstance(source, HuggingFaceSource)
+    active = ActiveDeployment(PARAKEET_V3_CUDA, source.revision, "gpu", "gpu", 4_000_000_000)
+    result = TranscriptionResult("text", (), (), 1, 0.1, active, (), (), (), ("existing warning",), True)
+    microphone = MagicMock(capture_error=None)
+    microphone.signal_health = SignalHealth().with_samples(np.ones(16, dtype=np.float32), 16)
+    job = MagicMock()
+    job.finish.return_value = result
+    runtime = ApplicationRuntime(AppConfig(recordings_path=tmp_path))
+
+    _, finalized = runtime.stop_recording(microphone, job)
+
+    assert finalized.complete is True
+    assert finalized.text == "text"
+    assert finalized.warnings == ("existing warning", *microphone.signal_health.warnings)
 
 
 def test_recording_stop_failure_closes_scope_with_primary_error(tmp_path: Path) -> None:

@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import cast
 from unittest.mock import MagicMock, patch
 
+import numpy as np
 import pytest
 from textual.widgets import Input, Label, Markdown, OptionList, ProgressBar, Select, Static, Switch, TabPane
 from voicepad.config import AppConfig, load_config
@@ -10,6 +11,7 @@ from voicepad.runtime import ApplicationRuntime
 from voicepad.tui.app import HistoryEntry, VoicePadApp, _history_label, _recorded_at
 from voicepad.tui.components import VoiceButton
 from voicepad.tui.setup import SetupModal
+from voicepad_core.audio import SignalHealth
 from voicepad_core.deployments import PARAKEET_V3_CUDA, PARAKEET_V3_MANIFEST, HuggingFaceSource
 from voicepad_core.inference import ActiveDeployment
 from voicepad_core.pipeline import TranscriptionProgress
@@ -125,6 +127,18 @@ async def test_tui_activates_resident_nvidia_runtime(tmp_path: Path) -> None:
             app._record_started = time.monotonic() - 2.0
             app._update_timer()
             assert "2.0s" in str(app.query_one("#status").render())
+
+            app._microphone = meter_microphone = MagicMock(capture_error=None)
+            meter_microphone.signal_health = SignalHealth().with_samples(np.full(16, 0.25), 16)
+            app._update_timer()
+            assert "RMS -12 dBFS" in str(app.query_one("#status").render())
+            meter_microphone.signal_health = SignalHealth().with_samples(np.ones(16), 16)
+            app._update_timer()
+            assert "possible clipping" in str(app.query_one("#status").render())
+            meter_microphone.signal_health = SignalHealth().with_samples(np.zeros(32), 16)
+            app._update_timer()
+            assert "near-silent" in str(app.query_one("#status").render())
+            app._microphone = None
 
             desktop_status = cast(FakeDesktopStatus, app._desktop_status)
             assert desktop_status.states == ["initializing", "ready"]

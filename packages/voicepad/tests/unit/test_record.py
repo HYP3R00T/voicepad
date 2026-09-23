@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import time
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import numpy as np
 from typer.testing import CliRunner
 from voicepad.cli.record import _wait_for_stop
 from voicepad.config import AppConfig
 from voicepad.main import app
-from voicepad_core.audio import WavArtifact
+from voicepad_core.audio import SignalHealth, WavArtifact
 
 
 def test_cli_wait_stops_on_capture_failure() -> None:
@@ -57,3 +59,21 @@ def test_no_transcribe_rejects_partial_wav(tmp_path) -> None:  # type: ignore[no
 
     assert result.exit_code == 2
     assert "Partial WAV preserved" in result.stderr
+
+
+def test_no_transcribe_prints_signal_warning_without_failing(tmp_path: Path) -> None:
+    microphone = MagicMock(capture_error=None)
+    microphone.signal_health = SignalHealth().with_samples(np.zeros(32, dtype=np.float32), 16)
+    runtime = MagicMock()
+    runtime.start_capture.return_value = microphone
+    runtime.stop_capture.return_value = WavArtifact(tmp_path / "quiet.wav", 16, 1, 32, 2.0)
+    with (
+        patch("voicepad.cli.record.load_config", return_value=AppConfig()),
+        patch("voicepad.cli.record.ApplicationRuntime", return_value=runtime),
+        patch("voicepad.cli.record._wait_for_stop"),
+    ):
+        result = CliRunner().invoke(app, ["record", "start", "--no-transcribe", "--duration", "2"])
+
+    assert result.exit_code == 0
+    assert "near-silent" in result.stderr
+    assert "Saved WAV:" in result.stdout

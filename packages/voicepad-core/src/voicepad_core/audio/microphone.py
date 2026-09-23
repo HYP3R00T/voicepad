@@ -14,6 +14,7 @@ import sounddevice as sd
 from .constants import DEFAULT_INPUT_CHANNELS, FALLBACK_INPUT_SAMPLE_RATE
 from .errors import AudioStreamStateError
 from .live_recording import LiveWavRecording
+from .signal_health import SignalHealth
 from .types import AudioWindow
 from .wav_persistence import WavArtifact
 
@@ -72,6 +73,13 @@ class MicrophoneStream:
         """Return the first fatal capture or native-stream error, if any."""
         with self._lock:
             return self._capture_error
+
+    @property
+    def signal_health(self) -> SignalHealth:
+        """Return writer-side signal measurements without doing work in the callback."""
+        with self._lock:
+            recording = self._live_recording
+        return recording.signal_health if recording is not None else SignalHealth()
 
     @property
     def incremental_source(self) -> LiveWavRecording:

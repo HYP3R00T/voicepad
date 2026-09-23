@@ -34,6 +34,7 @@ def test_construction_does_not_query_hardware(input_backend: tuple[Mock, Mock, M
     for query in input_backend:
         query.assert_not_called()
     assert stream.sample_rate == 16_000
+    assert stream.signal_health.samples == 0
 
 
 @patch("voicepad_core.audio.microphone.LiveWavRecording")
@@ -307,3 +308,6 @@ def test_disk_backed_capture_reads_and_finalizes(input_stream_type: Mock, tmp_pa
     assert (window.start_sample, window.end_sample) == (1, 3)
     np.testing.assert_allclose(window.samples, [0.25, 0.5])
     assert (artifact.path, artifact.frame_count, destination.exists()) == (destination, 3, True)
+    assert stream.signal_health.peak == 0.5
+    assert stream.signal_health.samples == 3
+    assert stream.signal_health.warnings == ()

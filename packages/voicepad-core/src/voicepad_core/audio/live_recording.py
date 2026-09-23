@@ -19,6 +19,7 @@ from numpy.typing import NDArray
 from utilityhub_logging import bind_context
 
 from .errors import AudioStreamStateError, AudioWriteBackpressureError
+from .signal_health import SignalHealth
 from .types import AudioWindow
 from .wav_persistence import WavArtifact, _finalize_live_wav, _read_wav_window
 
@@ -64,6 +65,7 @@ class LiveWavRecording:
         self._stopping = False
         self._spool_path: Path | None = None
         self._frame_count = 0
+        self._signal_health = SignalHealth()
         self._error: Exception | None = None
         self._artifact: WavArtifact | None = None
         self._logger = logger or logging.getLogger(__name__)
@@ -81,6 +83,12 @@ class LiveWavRecording:
     def committed_samples(self) -> int:
         with self._state_lock:
             return self._frame_count
+
+    @property
+    def signal_health(self) -> SignalHealth:
+        """Return measurements of committed audio, computed by the writer thread."""
+        with self._state_lock:
+            return self._signal_health
 
     @property
     def is_final(self) -> bool:
@@ -215,6 +223,19 @@ class LiveWavRecording:
                 artifact.frame_count,
                 artifact.duration_s,
             )
+            health = self.signal_health
+            self._logger.info(
+                "Recording signal health: path=%s samples=%s peak_dbfs=%.2f rms_dbfs=%.2f "
+                "pcm_limit_samples=%s nonfinite_samples=%s",
+                artifact.path,
+                health.samples,
+                health.peak_dbfs,
+                health.rms_dbfs,
+                health.pcm_limit_samples,
+                health.nonfinite_samples,
+            )
+            for warning in health.warnings:
+                self._logger.warning("Recording signal warning: path=%s warning=%s", artifact.path, warning)
             return artifact
         finally:
             self._finished.set()
@@ -285,7 +306,9 @@ class LiveWavRecording:
                             continue
                         if isinstance(item, np.ndarray):
                             spool.write(cast("NDArray[np.float32]", item))
+                            health = self._signal_health.with_samples(item, self._sample_rate)
                             with self._committed_condition:
+                                self._signal_health = health
                                 self._frame_count += len(item)
                                 self._committed_condition.notify_all()
                     finally:
