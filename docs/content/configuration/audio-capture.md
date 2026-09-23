@@ -33,3 +33,24 @@ in transcription Markdown metadata when transcribing a live recording. They are
 advisory: they do not stop capture or by themselves mark transcription incomplete.
 An empty recording has no level measurements. Live readings may lag by the writer
 queue and do not identify the physical device behind a shared endpoint.
+
+## Dropped or substituted audio
+
+VoicePad counts PortAudio callbacks reporting input overflow (discarded audio)
+or input underflow (potentially substituted silence). It keeps saving subsequent
+audio instead of aborting on the first event. The TUI shows **audio gaps** while
+recording, and callback status summaries are logged when capture stops rather
+than logging each status from the audio callback.
+
+Any reported input discontinuity marks a live transcription **incomplete**.
+Warnings, including callback-event counts, are retained in transcription Markdown;
+the result is not automatically copied. Capture-only `--no-transcribe` preserves
+the WAV, warns that it is partial, and exits with code 2, as does incomplete CLI
+transcription. Captured samples are not padded with guessed silence.
+
+Event counts are not counts of lost samples. PortAudio does not provide exact
+lost durations or locations here, so VoicePad leaves them unknown. Elapsed and
+persisted durations remain in logs, but their difference is not labeled missing
+audio. Device loss that stops the stream remains a fatal capture error; VoicePad
+attempts to finalize the already captured audio. Some backends can substitute
+silence without reporting device loss, so this is not universal unplug detection.

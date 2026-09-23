@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterator
 from pathlib import Path
-from unittest.mock import ANY, MagicMock, Mock, patch
+from unittest.mock import ANY, Mock, patch
 
 import numpy as np
 import pytest
@@ -232,7 +232,7 @@ def test_callback_copies_audio_to_writer(
     stream.start()
     samples = np.array([[0.1], [0.2]], dtype=np.float32)
 
-    stream._callback(samples, 2, None, MagicMock(__bool__=Mock(return_value=False)))
+    stream._callback(samples, 2, None, sd.CallbackFlags())
     samples[0, 0] = 1.0
 
     written = recording_type.return_value.append.call_args.args[0]
@@ -251,7 +251,7 @@ def test_callback_failure_aborts_capture(
     stream.start()
 
     with pytest.raises(sd.CallbackAbort):
-        stream._callback(np.zeros((1, 1), dtype=np.float32), 1, None, MagicMock())
+        stream._callback(np.zeros((1, 1), dtype=np.float32), 1, None, sd.CallbackFlags())
 
     assert str(stream.capture_error) == "writer failed"
 
@@ -299,7 +299,7 @@ def test_disk_backed_capture_reads_and_finalizes(input_stream_type: Mock, tmp_pa
         np.array([[0.0], [0.25], [0.5]], dtype=np.float32),
         3,
         None,
-        MagicMock(__bool__=Mock(return_value=False)),
+        sd.CallbackFlags(),
     )
 
     window = stream.read_window(1)
@@ -311,3 +311,90 @@ def test_disk_backed_capture_reads_and_finalizes(input_stream_type: Mock, tmp_pa
     assert stream.signal_health.peak == 0.5
     assert stream.signal_health.samples == 3
     assert stream.signal_health.warnings == ()
+    assert stream.discontinuity_warnings == ()
+
+
+@pytest.mark.parametrize("flag", ["input_overflow", "input_underflow"])
+@patch("voicepad_core.audio.microphone.sd.InputStream")
+def test_input_discontinuities_are_counted_without_stopping_or_discarding_delivered_audio(
+    _input_stream_type: Mock, tmp_path: Path, caplog: pytest.LogCaptureFixture, flag: str
+) -> None:
+    import soundfile as sf
+
+    stream = MicrophoneStream(tmp_path / "gaps.wav")
+    stream.start()
+    status = sd.CallbackFlags()
+    setattr(status, flag, True)
+    block = np.array([[0.25], [-0.5]], dtype=np.float32)
+    stream._callback(block, 2, None, status)
+    stream._callback(block, 2, None, sd.CallbackFlags())
+    stream._callback(block, 2, None, status)
+
+    assert stream.is_recording
+    assert stream.capture_error is None
+    assert stream.input_overflow_count == (2 if flag == "input_overflow" else 0)
+    assert stream.input_underflow_count == (2 if flag == "input_underflow" else 0)
+    assert "2 callback event(s)" in stream.discontinuity_warnings[0]
+    assert "duration unknown" in stream.discontinuity_warnings[0]
+    assert "Microphone callback status" not in caplog.text
+
+    with caplog.at_level(logging.INFO):
+        artifact = stream.stop()
+    persisted, _ = sf.read(artifact.path, dtype="float32")
+    np.testing.assert_array_equal(persisted, np.tile(block[:, 0], 3))
+    assert artifact.frame_count == 6  # No guessed padding for unknown lost samples.
+    assert "Microphone callback status summary" in caplog.text
+    assert "Microphone discontinuity" in caplog.text
+    assert "missing_duration_s" not in caplog.text
+    stream._callback(block, 2, None, status)  # Late callback after stop is ignored.
+    assert "2 callback event(s)" in stream.discontinuity_warnings[0]
+
+
+@patch("voicepad_core.audio.microphone.LiveWavRecording")
+@patch("voicepad_core.audio.microphone.sd.InputStream")
+def test_discontinuity_counts_reset_on_a_new_recording(
+    _input_stream_type: Mock, recording_type: Mock, tmp_path: Path
+) -> None:
+    recording_type.return_value.finish.return_value = WavArtifact(tmp_path / "recording.wav", 16_000, 1, 1, 1 / 16_000)
+    stream = MicrophoneStream(tmp_path / "recording.wav")
+    status = sd.CallbackFlags()
+    status.input_overflow = status.input_underflow = True
+    stream.start()
+    stream._callback(np.zeros((1, 1), dtype=np.float32), 1, None, status)
+    assert len(stream.discontinuity_warnings) == 2
+    assert stream.input_overflow_count == stream.input_underflow_count == 1
+    stream.stop()
+    stream.start()
+    assert stream.input_overflow_count == stream.input_underflow_count == 0
+    assert stream.discontinuity_warnings == ()
+
+
+@patch("voicepad_core.audio.microphone.sd.InputStream")
+def test_unexpected_stream_end_preserves_delivered_audio(_input_stream_type: Mock, tmp_path: Path) -> None:
+    stream = MicrophoneStream(tmp_path / "disconnected.wav")
+    stream.start()
+    stream._callback(np.full((4, 1), 0.25, dtype=np.float32), 4, None, sd.CallbackFlags())
+    stream._stream_finished()  # Simulate device loss reported by PortAudio.
+    artifact = stream.stop()
+
+    assert "stopped unexpectedly" in str(stream.capture_error)
+    assert artifact.path.exists()
+    assert artifact.frame_count == 4
+    np.testing.assert_array_equal(stream.read_window(0).samples, np.full(4, 0.25))
+
+
+@patch("voicepad_core.audio.microphone.sd.InputStream")
+def test_non_input_status_is_logged_but_not_labeled_input_loss(
+    _input_stream_type: Mock, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    stream = MicrophoneStream(tmp_path / "status.wav")
+    stream.start()
+    status = sd.CallbackFlags()
+    status.output_underflow = True
+    stream._callback(np.zeros((1, 1), dtype=np.float32), 1, None, status)
+    stream.stop()
+    stream._stream_finished()  # Expected completion must not become a capture error.
+
+    assert stream.capture_error is None
+    assert stream.discontinuity_warnings == ()
+    assert "output underflow" in caplog.text

@@ -45,6 +45,7 @@ def test_capture_error_marks_result_incomplete(tmp_path: Path) -> None:
     result = TranscriptionResult("partial", (), (), 1, 0.1, active, (), (), (), (), True)
     microphone = MagicMock()
     microphone.capture_error = RuntimeError("capture failed")
+    microphone.discontinuity_warnings = ()
     job = MagicMock()
     job.finish.return_value = result
 
@@ -67,7 +68,7 @@ def test_successful_recording_scope_stays_open_until_host_persistence_finishes(t
     assert isinstance(source, HuggingFaceSource)
     active = ActiveDeployment(PARAKEET_V3_CUDA, source.revision, "gpu", "gpu", 4_000_000_000)
     result = TranscriptionResult("complete", (), (), 1, 0.1, active, (), (), (), (), True)
-    microphone = MagicMock(capture_error=None)
+    microphone = MagicMock(capture_error=None, discontinuity_warnings=())
     job = MagicMock()
     job.finish.return_value = result
     runtime = ApplicationRuntime(AppConfig(recordings_path=tmp_path))
@@ -87,7 +88,7 @@ def test_signal_warning_is_preserved_without_marking_transcription_incomplete(tm
     assert isinstance(source, HuggingFaceSource)
     active = ActiveDeployment(PARAKEET_V3_CUDA, source.revision, "gpu", "gpu", 4_000_000_000)
     result = TranscriptionResult("text", (), (), 1, 0.1, active, (), (), (), ("existing warning",), True)
-    microphone = MagicMock(capture_error=None)
+    microphone = MagicMock(capture_error=None, discontinuity_warnings=())
     microphone.signal_health = SignalHealth().with_samples(np.ones(16, dtype=np.float32), 16)
     job = MagicMock()
     job.finish.return_value = result
@@ -98,6 +99,33 @@ def test_signal_warning_is_preserved_without_marking_transcription_incomplete(tm
     assert finalized.complete is True
     assert finalized.text == "text"
     assert finalized.warnings == ("existing warning", *microphone.signal_health.warnings)
+
+
+@pytest.mark.parametrize("fatal_error", [None, RuntimeError("device disconnected")])
+def test_discontinuity_marks_result_incomplete_and_preserves_existing_warnings(
+    tmp_path: Path, fatal_error: Exception | None
+) -> None:
+    source = PARAKEET_V3_MANIFEST.source
+    assert isinstance(source, HuggingFaceSource)
+    active = ActiveDeployment(PARAKEET_V3_CUDA, source.revision, "gpu", "gpu", 4_000_000_000)
+    result = TranscriptionResult("partial text", (), (), 1, 0.1, active, (), (), (), ("existing",), True)
+    warning = "audio input overflow: 2 callback event(s); audio was discarded (lost duration unknown)."
+    microphone = MagicMock(capture_error=fatal_error, discontinuity_warnings=(warning,))
+    microphone.signal_health = SignalHealth()
+    job = MagicMock()
+    job.finish.return_value = result
+    runtime = ApplicationRuntime(AppConfig(recordings_path=tmp_path))
+
+    artifact, finalized = runtime.stop_recording(microphone, job)
+
+    assert artifact is microphone.stop.return_value
+    assert finalized.complete is False
+    assert finalized.text == "partial text"
+    expected = ("existing", warning)
+    if fatal_error is not None:
+        expected = (*expected, f"audio capture failed: {fatal_error}")
+    assert finalized.warnings == expected
+    assert finalized.coverage_gaps == ()  # No fabricated time/sample locations.
 
 
 def test_recording_stop_failure_closes_scope_with_primary_error(tmp_path: Path) -> None:

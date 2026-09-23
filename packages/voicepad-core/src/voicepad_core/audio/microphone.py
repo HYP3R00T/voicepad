@@ -52,6 +52,9 @@ class MicrophoneStream:
         self._stream: sd.InputStream | None = None
         self._live_recording: LiveWavRecording | None = None
         self._capture_error: Exception | None = None
+        self._input_overflow_count = 0
+        self._input_underflow_count = 0
+        self._callback_status = sd.CallbackFlags()
         self._started_at = 0.0
         self._recording = False
         self._logger = logger or logging.getLogger(__name__)
@@ -73,6 +76,35 @@ class MicrophoneStream:
         """Return the first fatal capture or native-stream error, if any."""
         with self._lock:
             return self._capture_error
+
+    @property
+    def input_overflow_count(self) -> int:
+        """Count callbacks reporting discarded input, not the number of lost samples."""
+        with self._lock:
+            return self._input_overflow_count
+
+    @property
+    def input_underflow_count(self) -> int:
+        """Count callbacks reporting substituted input, not its duration."""
+        with self._lock:
+            return self._input_underflow_count
+
+    @property
+    def discontinuity_warnings(self) -> tuple[str, ...]:
+        """Report known input discontinuities without estimating missing audio."""
+        with self._lock:
+            warnings: list[str] = []
+            if self._input_overflow_count:
+                warnings.append(
+                    f"audio input overflow: {self._input_overflow_count} callback event(s); "
+                    "audio was discarded (lost duration unknown)."
+                )
+            if self._input_underflow_count:
+                warnings.append(
+                    f"audio input underflow: {self._input_underflow_count} callback event(s); "
+                    "input may contain substituted silence (duration unknown)."
+                )
+            return tuple(warnings)
 
     @property
     def signal_health(self) -> SignalHealth:
@@ -145,6 +177,9 @@ class MicrophoneStream:
             with self._lock:
                 self._live_recording = live_recording
                 self._capture_error = None
+                self._input_overflow_count = 0
+                self._input_underflow_count = 0
+                self._callback_status = sd.CallbackFlags()
                 self._started_at = time.monotonic()
                 self._recording = True
 
@@ -213,14 +248,19 @@ class MicrophoneStream:
         elapsed = time.monotonic() - self._started_at
         self._logger.info(
             "Microphone capture stopped: path=%s elapsed_s=%.3f persisted_frames=%s "
-            "persisted_duration_s=%.3f missing_duration_s=%.3f failed=%s",
+            "persisted_duration_s=%.3f input_overflows=%s input_underflows=%s failed=%s",
             artifact.path,
             elapsed,
             artifact.frame_count,
             artifact.duration_s,
-            max(0.0, elapsed - artifact.duration_s),
+            self.input_overflow_count,
+            self.input_underflow_count,
             self.capture_error is not None,
         )
+        if self._callback_status:
+            self._logger.warning("Microphone callback status summary: %s", self._callback_status)
+        for warning in self.discontinuity_warnings:
+            self._logger.warning("Microphone discontinuity: path=%s warning=%s", artifact.path, warning)
         return artifact
 
     def read_window(self, start_sample: int, max_samples: int | None = None) -> AudioWindow:
@@ -237,10 +277,11 @@ class MicrophoneStream:
         status: sd.CallbackFlags,
     ) -> None:
         del frames, time
-        if status:
-            self._logger.warning("Microphone callback status: %s", status)
         with self._lock:
             if self._recording:
+                self._callback_status |= status
+                self._input_overflow_count += int(status.input_overflow)
+                self._input_underflow_count += int(status.input_underflow)
                 copied = indata.copy()
                 if self._live_recording is None:
                     raise sd.CallbackAbort

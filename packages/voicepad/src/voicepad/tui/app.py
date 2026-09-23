@@ -394,6 +394,8 @@ class VoicePadApp(App[None]):
                     level += " · possible clipping"
                 elif health.warnings:
                     level += " · near-silent"
+            if self._microphone.discontinuity_warnings:
+                level += " · audio gaps"
         self._set_status("recording", f"recording… 󰔛 {rendered}{level}")
 
     @work(thread=True, exclusive=True, group="recording-stop")
@@ -415,7 +417,7 @@ class VoicePadApp(App[None]):
             self.call_from_thread(self._set_error, f"transcription failed: {error}")
             return
         self.runtime.end_recording(outcome="completed" if result.complete else "incomplete")
-        for warning in microphone.signal_health.warnings:
+        for warning in (*microphone.signal_health.warnings, *microphone.discontinuity_warnings):
             self.call_from_thread(self.notify, warning, severity="warning")
         self.call_from_thread(self._recording_finished, markdown, result, copied)
 

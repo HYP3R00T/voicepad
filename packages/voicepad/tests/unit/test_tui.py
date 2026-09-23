@@ -128,7 +128,7 @@ async def test_tui_activates_resident_nvidia_runtime(tmp_path: Path) -> None:
             app._update_timer()
             assert "2.0s" in str(app.query_one("#status").render())
 
-            app._microphone = meter_microphone = MagicMock(capture_error=None)
+            app._microphone = meter_microphone = MagicMock(capture_error=None, discontinuity_warnings=())
             meter_microphone.signal_health = SignalHealth().with_samples(np.full(16, 0.25), 16)
             app._update_timer()
             assert "RMS -12 dBFS" in str(app.query_one("#status").render())
@@ -138,6 +138,10 @@ async def test_tui_activates_resident_nvidia_runtime(tmp_path: Path) -> None:
             meter_microphone.signal_health = SignalHealth().with_samples(np.zeros(32), 16)
             app._update_timer()
             assert "near-silent" in str(app.query_one("#status").render())
+            meter_microphone.discontinuity_warnings = ("audio input overflow",)
+            app._update_timer()
+            assert "audio gaps" in str(app.query_one("#status").render())
+            assert app._state == "recording"  # Recoverable overflow does not end capture.
             app._microphone = None
 
             desktop_status = cast(FakeDesktopStatus, app._desktop_status)
