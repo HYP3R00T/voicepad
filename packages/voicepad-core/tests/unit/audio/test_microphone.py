@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import ANY, MagicMock, Mock, patch
 
@@ -11,54 +13,141 @@ import sounddevice as sd
 from voicepad_core.audio import AudioStreamStateError, AudioWindow, MicrophoneStream, WavArtifact
 
 
-@patch("voicepad_core.audio.microphone.sd.query_devices")
-def test_capture_uses_canonical_sample_rate_without_device_query(mock_query: Mock, tmp_path: Path) -> None:
+@pytest.fixture(autouse=True)
+def input_backend() -> Iterator[tuple[Mock, Mock, Mock]]:
+    """Keep device discovery and format checks independent of host audio hardware."""
+    with (
+        patch(
+            "voicepad_core.audio.microphone.sd.query_devices",
+            return_value={"index": 25, "name": "default", "hostapi": 0, "default_samplerate": 48_000},
+        ) as devices,
+        patch("voicepad_core.audio.microphone.sd.query_hostapis", return_value={"name": "ALSA"}) as host_apis,
+        patch("voicepad_core.audio.microphone.sd.check_input_settings") as check,
+        patch("voicepad_core.audio.microphone.sys.platform", "linux"),
+    ):
+        yield devices, host_apis, check
+
+
+def test_construction_does_not_query_hardware(input_backend: tuple[Mock, Mock, Mock], tmp_path: Path) -> None:
     stream = MicrophoneStream(tmp_path / "recording.wav", device_index=2)
 
-    mock_query.assert_not_called()
+    for query in input_backend:
+        query.assert_not_called()
     assert stream.sample_rate == 16_000
 
 
 @patch("voicepad_core.audio.microphone.LiveWavRecording")
 @patch("voicepad_core.audio.microphone.sd.InputStream")
-@patch("voicepad_core.audio.microphone.sd.query_devices")
-def test_start_opens_writer_before_microphone(
-    mock_query: Mock,
+def test_start_checks_endpoint_then_opens_writer_before_microphone(
     input_stream_type: Mock,
     recording_type: Mock,
+    input_backend: tuple[Mock, Mock, Mock],
     tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    mock_query.return_value = {"default_samplerate": 48_000}
-    native_stream = input_stream_type.return_value
+    devices, host_apis, check = input_backend
+    calls = Mock()
+    calls.attach_mock(check, "check")
+    calls.attach_mock(recording_type.return_value.start, "writer_start")
+    calls.attach_mock(input_stream_type, "open_stream")
     stream = MicrophoneStream(tmp_path / "recording.wav", device_index=3)
 
-    stream.start()
+    with caplog.at_level(logging.INFO):
+        stream.start()
 
-    recording_type.assert_called_once_with(
-        tmp_path / "recording.wav",
-        16_000,
-        1,
-        logger=ANY,
-        log_context={},
-    )
+    devices.assert_called_once_with(None, "input")
+    host_apis.assert_called_once_with(0)
+    check.assert_called_once_with(device=25, channels=1, dtype="float32", samplerate=16_000)
+    recording_type.assert_called_once_with(tmp_path / "recording.wav", 16_000, 1, logger=ANY, log_context={})
     recording_type.return_value.start.assert_called_once_with()
     input_stream_type.assert_called_once_with(
         samplerate=16_000,
         channels=1,
         dtype="float32",
-        device=None,
+        device=25,
         callback=stream._callback,
         finished_callback=stream._stream_finished,
     )
-    native_stream.start.assert_called_once_with()
+    input_stream_type.return_value.start.assert_called_once_with()
+    assert [call[0] for call in calls.mock_calls][:3] == ["check", "writer_start", "open_stream"]
+    assert "requested=system-default device_index=25 device_name=default host_api=ALSA" in caplog.text
+    assert "default_sample_rate=48000 requested_sample_rate=16000 channels=1 dtype=float32" in caplog.text
     assert stream.is_recording
 
 
 @patch("voicepad_core.audio.microphone.LiveWavRecording")
+@patch("voicepad_core.audio.microphone.sd.InputStream")
+def test_non_linux_explicit_input_is_resolved_and_opened(
+    input_stream_type: Mock,
+    _recording_type: Mock,
+    input_backend: tuple[Mock, Mock, Mock],
+    tmp_path: Path,
+) -> None:
+    devices, _, check = input_backend
+    devices.return_value["index"] = 3
+    with patch("voicepad_core.audio.microphone.sys.platform", "darwin"):
+        stream = MicrophoneStream(tmp_path / "recording.wav", device_index=3)
+        stream.start()
+
+    devices.assert_called_once_with(3, "input")
+    check.assert_called_once_with(device=3, channels=1, dtype="float32", samplerate=16_000)
+    assert input_stream_type.call_args.kwargs["device"] == 3
+
+
+@pytest.mark.parametrize("stage", ["discovery", "format"])
+@pytest.mark.parametrize("error_type", [sd.PortAudioError, ValueError])
+@patch("voicepad_core.audio.microphone.LiveWavRecording")
+@patch("voicepad_core.audio.microphone.sd.InputStream")
+def test_preflight_failure_does_not_create_writer_or_open_stream(
+    input_stream_type: Mock,
+    recording_type: Mock,
+    input_backend: tuple[Mock, Mock, Mock],
+    tmp_path: Path,
+    stage: str,
+    error_type: type[Exception],
+) -> None:
+    devices, _, check = input_backend
+    error = error_type("input unavailable")
+    (devices if stage == "discovery" else check).side_effect = error
+    destination = tmp_path / "recordings" / "recording.wav"
+    stream = MicrophoneStream(destination)
+
+    with pytest.raises(AudioStreamStateError, match="system sound settings") as exc:
+        stream.start()
+
+    assert exc.value.__cause__ is error
+    if stage == "format":
+        assert "'default' (ALSA, index 25) cannot use 16000 Hz, 1 channel(s), float32" in str(exc.value)
+    recording_type.assert_not_called()
+    input_stream_type.assert_not_called()
+    assert not destination.parent.exists()
+    assert not stream.is_recording
+
+
+@patch("voicepad_core.audio.microphone.LiveWavRecording")
+@patch("voicepad_core.audio.microphone.sd.InputStream")
+def test_start_rechecks_default_after_failed_preflight(
+    input_stream_type: Mock,
+    _recording_type: Mock,
+    input_backend: tuple[Mock, Mock, Mock],
+    tmp_path: Path,
+) -> None:
+    devices, _, check = input_backend
+    check.side_effect = [sd.PortAudioError("unavailable"), None]
+    stream = MicrophoneStream(tmp_path / "recording.wav")
+    with pytest.raises(AudioStreamStateError):
+        stream.start()
+    devices.return_value["index"] = 26
+
+    stream.start()
+
+    assert devices.call_count == 2
+    assert input_stream_type.call_args.kwargs["device"] == 26
+
+
+@patch("voicepad_core.audio.microphone.LiveWavRecording")
 @patch("voicepad_core.audio.microphone.sd.InputStream", side_effect=RuntimeError("open failed"))
-@patch("voicepad_core.audio.microphone.sd.query_devices", return_value={"default_samplerate": 16_000})
 def test_start_failure_aborts_writer(
-    mock_query: Mock,
     input_stream_type: Mock,
     recording_type: Mock,
     tmp_path: Path,
@@ -77,9 +166,7 @@ def test_start_failure_aborts_writer(
     "voicepad_core.audio.microphone.sd.InputStream",
     side_effect=RuntimeError("Error opening InputStream: Device unavailable [PaErrorCode -9985]"),
 )
-@patch("voicepad_core.audio.microphone.sd.query_devices", return_value={"default_samplerate": 16_000})
 def test_unavailable_system_microphone_has_linux_guidance(
-    mock_query: Mock,
     input_stream_type: Mock,
     recording_type: Mock,
     tmp_path: Path,
@@ -94,9 +181,7 @@ def test_unavailable_system_microphone_has_linux_guidance(
 
 @patch("voicepad_core.audio.microphone.LiveWavRecording")
 @patch("voicepad_core.audio.microphone.sd.InputStream")
-@patch("voicepad_core.audio.microphone.sd.query_devices", return_value={"default_samplerate": 16_000})
 def test_stop_finalizes_recording(
-    mock_query: Mock,
     input_stream_type: Mock,
     recording_type: Mock,
     tmp_path: Path,
@@ -114,17 +199,14 @@ def test_stop_finalizes_recording(
     assert not stream.is_recording
 
 
-@patch("voicepad_core.audio.microphone.sd.query_devices", return_value={"default_samplerate": 16_000})
-def test_stop_before_start_is_rejected(mock_query: Mock, tmp_path: Path) -> None:
+def test_stop_before_start_is_rejected(tmp_path: Path) -> None:
     with pytest.raises(AudioStreamStateError, match="not recording"):
         MicrophoneStream(tmp_path / "recording.wav").stop()
 
 
 @patch("voicepad_core.audio.microphone.LiveWavRecording")
 @patch("voicepad_core.audio.microphone.sd.InputStream")
-@patch("voicepad_core.audio.microphone.sd.query_devices", return_value={"default_samplerate": 16_000})
 def test_read_window_uses_absolute_sample_position(
-    mock_query: Mock,
     input_stream_type: Mock,
     recording_type: Mock,
     tmp_path: Path,
@@ -140,9 +222,7 @@ def test_read_window_uses_absolute_sample_position(
 
 @patch("voicepad_core.audio.microphone.LiveWavRecording")
 @patch("voicepad_core.audio.microphone.sd.InputStream")
-@patch("voicepad_core.audio.microphone.sd.query_devices", return_value={"default_samplerate": 16_000})
 def test_callback_copies_audio_to_writer(
-    mock_query: Mock,
     input_stream_type: Mock,
     recording_type: Mock,
     tmp_path: Path,
@@ -160,9 +240,7 @@ def test_callback_copies_audio_to_writer(
 
 @patch("voicepad_core.audio.microphone.LiveWavRecording")
 @patch("voicepad_core.audio.microphone.sd.InputStream")
-@patch("voicepad_core.audio.microphone.sd.query_devices", return_value={"default_samplerate": 16_000})
 def test_callback_failure_aborts_capture(
-    mock_query: Mock,
     input_stream_type: Mock,
     recording_type: Mock,
     tmp_path: Path,
@@ -212,12 +290,7 @@ def test_unexpected_stream_end_is_observable(
 
 
 @patch("voicepad_core.audio.microphone.sd.InputStream")
-@patch("voicepad_core.audio.microphone.sd.query_devices", return_value={"default_samplerate": 16_000})
-def test_disk_backed_capture_reads_and_finalizes(
-    mock_query: Mock,
-    input_stream_type: Mock,
-    tmp_path: Path,
-) -> None:
+def test_disk_backed_capture_reads_and_finalizes(input_stream_type: Mock, tmp_path: Path) -> None:
     destination = tmp_path / "recording.wav"
     stream = MicrophoneStream(destination)
     stream.start()
