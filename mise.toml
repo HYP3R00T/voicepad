@@ -3,7 +3,7 @@ git-cliff = "latest"
 prek = "latest"
 node = "lts"
 pnpm = "latest"
-python = "3.13"
+python = "3.14"
 rumdl = "latest"
 tombi = "latest"
 uv = "latest"
@@ -13,9 +13,7 @@ experimental = true
 idiomatic_version_file_enable_tools = ["python"]
 
 [hooks]
-enter = [
-  "bash ./scripts/enter_project.sh",
-]
+enter = ["bash ./scripts/enter_project.sh"]
 
 [env]
 _.file = ".env"  # for sensitive data

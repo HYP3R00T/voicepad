@@ -22,6 +22,8 @@ the default. The header intentionally reports the compact runtime identity
 
 ## States
 
+- **Setup** — explains missing configuration or model files and waits for
+  confirmation before downloading. Failures remain visible and can be retried.
 - **Loading** — verifies artifacts, admits CUDA, loads and warms Parakeet.
 - **Ready** — the model is resident and recording can begin immediately.
 - **Recording** — canonical audio is continuously persisted while CPU VAD and

@@ -22,6 +22,14 @@ has also been qualified, but is not yet the public distribution path.
 
 ## Prepare the deployment
 
+The first TUI launch opens a setup screen when the configuration is missing or
+the required model files are not ready. VoicePad explains the download and
+waits for confirmation before retrieving anything. It then shows preparation
+progress and enters the normal interface only after the models are verified and
+loaded.
+
+For non-interactive preparation, run:
+
 ```bash
 uv run voicepad prepare
 ```

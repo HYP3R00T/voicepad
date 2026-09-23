@@ -54,3 +54,23 @@ persisted durations remain in logs, but their difference is not labeled missing
 audio. Device loss that stops the stream remains a fatal capture error; VoicePad
 attempts to finalize the already captured audio. Some backends can substitute
 silence without reporting device loss, so this is not universal unplug detection.
+
+## Writer backpressure and recovery
+
+Audio submission never waits for queue space. A full bounded queue raises a
+capture error; VoicePad attempts to finalize the blocks already accepted rather
+than silently dropping them. Live reads can wait for space, but release the
+writer's state lock and have a bounded queue/read wait. A read racing with stop
+uses the finalized WAV or reports failure if finalization did not succeed.
+
+Stopping rejects new submissions and drains the accepted queue without needing
+to enqueue a stop marker. Shutdown, writer failures, and finalization failures
+wake waiting readers. Native microphone callbacks only remember errors; error
+logging is deferred until capture stops.
+
+Hidden `.<recording-stem>-live-*.wav` spools are kept when they contain committed
+audio, the writer fails, or shutdown times out. Clean, empty aborted spools are
+removed. A retained spool may contain only part of a recording, especially after
+a disk failure; do not assume queued or unwritten samples were saved. No automatic
+recovery is performed. Blocked native disk I/O cannot be forcibly cancelled, but
+the writer is requested to exit after I/O resumes and accepted work is drained.
