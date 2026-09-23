@@ -52,7 +52,9 @@ def start_recording(
         if no_transcribe:
             assert microphone is not None
             artifact = runtime.stop_capture(microphone)
-            if microphone.capture_error is not None:
+            for warning in (*microphone.signal_health.warnings, *microphone.discontinuity_warnings):
+                typer.secho(warning, fg=typer.colors.YELLOW, err=True)
+            if microphone.capture_error is not None or microphone.discontinuity_warnings:
                 runtime.end_recording(outcome="incomplete")
                 typer.secho(f"Partial WAV preserved: {artifact.path}", fg=typer.colors.YELLOW, err=True)
                 raise typer.Exit(2)
@@ -62,6 +64,8 @@ def start_recording(
 
         assert microphone is not None and job is not None
         artifact, result = runtime.stop_recording(microphone, job)
+        for warning in (*microphone.signal_health.warnings, *microphone.discontinuity_warnings):
+            typer.secho(warning, fg=typer.colors.YELLOW, err=True)
         markdown = persist_markdown(artifact.path, result, config.markdown_path)
         typer.echo(result.text)
         typer.echo(f"WAV: {artifact.path}")

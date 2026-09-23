@@ -14,6 +14,7 @@ import sounddevice as sd
 from .constants import DEFAULT_INPUT_CHANNELS, FALLBACK_INPUT_SAMPLE_RATE
 from .errors import AudioStreamStateError
 from .live_recording import LiveWavRecording
+from .signal_health import SignalHealth
 from .types import AudioWindow
 from .wav_persistence import WavArtifact
 
@@ -51,6 +52,9 @@ class MicrophoneStream:
         self._stream: sd.InputStream | None = None
         self._live_recording: LiveWavRecording | None = None
         self._capture_error: Exception | None = None
+        self._input_overflow_count = 0
+        self._input_underflow_count = 0
+        self._callback_status = sd.CallbackFlags()
         self._started_at = 0.0
         self._recording = False
         self._logger = logger or logging.getLogger(__name__)
@@ -58,7 +62,7 @@ class MicrophoneStream:
 
     @property
     def sample_rate(self) -> int:
-        """Return the input device's native sample rate."""
+        """Return the requested capture sample rate, not the hardware's native rate."""
         return self._sample_rate
 
     @property
@@ -74,6 +78,42 @@ class MicrophoneStream:
             return self._capture_error
 
     @property
+    def input_overflow_count(self) -> int:
+        """Count callbacks reporting discarded input, not the number of lost samples."""
+        with self._lock:
+            return self._input_overflow_count
+
+    @property
+    def input_underflow_count(self) -> int:
+        """Count callbacks reporting substituted input, not its duration."""
+        with self._lock:
+            return self._input_underflow_count
+
+    @property
+    def discontinuity_warnings(self) -> tuple[str, ...]:
+        """Report known input discontinuities without estimating missing audio."""
+        with self._lock:
+            warnings: list[str] = []
+            if self._input_overflow_count:
+                warnings.append(
+                    f"audio input overflow: {self._input_overflow_count} callback event(s); "
+                    "audio was discarded (lost duration unknown)."
+                )
+            if self._input_underflow_count:
+                warnings.append(
+                    f"audio input underflow: {self._input_underflow_count} callback event(s); "
+                    "input may contain substituted silence (duration unknown)."
+                )
+            return tuple(warnings)
+
+    @property
+    def signal_health(self) -> SignalHealth:
+        """Return writer-side signal measurements without doing work in the callback."""
+        with self._lock:
+            recording = self._live_recording
+        return recording.signal_health if recording is not None else SignalHealth()
+
+    @property
     def incremental_source(self) -> LiveWavRecording:
         """Return the active disk-backed source for transcription workers."""
         with self._lock:
@@ -81,11 +121,51 @@ class MicrophoneStream:
                 raise AudioStreamStateError("MicrophoneStream has no active recording writer.")
             return self._live_recording
 
+    def _check_input(self) -> int:
+        """Resolve and validate the endpoint without opening a recording stream."""
+        requested = self._device_index if self._device_index is not None else "system-default"
+        try:
+            device_info = sd.query_devices(self._device_index, "input")
+            device_index = int(device_info["index"])
+            host_api = sd.query_hostapis(int(device_info["hostapi"]))["name"]
+        except (sd.PortAudioError, ValueError) as error:
+            raise AudioStreamStateError(
+                f"Could not resolve microphone input {requested}: {error}. "
+                "Check that an input is connected and selected in system sound settings."
+            ) from error
+
+        self._logger.info(
+            "Microphone input resolved: requested=%s device_index=%s device_name=%s host_api=%s "
+            "default_sample_rate=%s requested_sample_rate=%s channels=%s dtype=float32",
+            requested,
+            device_index,
+            device_info["name"],
+            host_api,
+            device_info["default_samplerate"],
+            self._sample_rate,
+            self._channels,
+        )
+        try:
+            sd.check_input_settings(
+                device=device_index,
+                channels=self._channels,
+                dtype="float32",
+                samplerate=self._sample_rate,
+            )
+        except (sd.PortAudioError, ValueError) as error:
+            raise AudioStreamStateError(
+                f"Microphone input '{device_info['name']}' ({host_api}, index {device_index}) "
+                f"cannot use {self._sample_rate} Hz, {self._channels} channel(s), float32: {error}. "
+                "Check input availability, format support, and application permissions in system sound settings."
+            ) from error
+        return device_index
+
     def start(self) -> None:
         with self._lifecycle_lock:
             with self._lock:
                 if self._recording:
                     raise AudioStreamStateError("MicrophoneStream is already recording. Call stop() first.")
+            device_index = self._check_input()
             live_recording = LiveWavRecording(
                 self._recording_path,
                 self._sample_rate,
@@ -97,6 +177,9 @@ class MicrophoneStream:
             with self._lock:
                 self._live_recording = live_recording
                 self._capture_error = None
+                self._input_overflow_count = 0
+                self._input_underflow_count = 0
+                self._callback_status = sd.CallbackFlags()
                 self._started_at = time.monotonic()
                 self._recording = True
 
@@ -106,7 +189,7 @@ class MicrophoneStream:
                     samplerate=self._sample_rate,
                     channels=self._channels,
                     dtype="float32",
-                    device=self._device_index,
+                    device=device_index,
                     callback=self._callback,
                     finished_callback=self._stream_finished,
                 )
@@ -134,7 +217,7 @@ class MicrophoneStream:
         self._logger.info(
             "Microphone capture started: path=%s device=%s sample_rate=%s",
             self._recording_path,
-            self._device_index if self._device_index is not None else "system-default",
+            device_index,
             self._sample_rate,
         )
 
@@ -165,14 +248,28 @@ class MicrophoneStream:
         elapsed = time.monotonic() - self._started_at
         self._logger.info(
             "Microphone capture stopped: path=%s elapsed_s=%.3f persisted_frames=%s "
-            "persisted_duration_s=%.3f missing_duration_s=%.3f failed=%s",
+            "persisted_duration_s=%.3f input_overflows=%s input_underflows=%s failed=%s",
             artifact.path,
             elapsed,
             artifact.frame_count,
             artifact.duration_s,
-            max(0.0, elapsed - artifact.duration_s),
+            self.input_overflow_count,
+            self.input_underflow_count,
             self.capture_error is not None,
         )
+        if self._callback_status:
+            self._logger.warning("Microphone callback status summary: %s", self._callback_status)
+        for warning in self.discontinuity_warnings:
+            self._logger.warning("Microphone discontinuity: path=%s warning=%s", artifact.path, warning)
+        error = self.capture_error
+        if error is not None:
+            self._logger.error(
+                "Microphone capture failure: path=%s error_type=%s error=%s",
+                self._recording_path,
+                type(error).__name__,
+                error,
+                exc_info=(type(error), error, error.__traceback__),
+            )
         return artifact
 
     def read_window(self, start_sample: int, max_samples: int | None = None) -> AudioWindow:
@@ -189,10 +286,11 @@ class MicrophoneStream:
         status: sd.CallbackFlags,
     ) -> None:
         del frames, time
-        if status:
-            self._logger.warning("Microphone callback status: %s", status)
         with self._lock:
             if self._recording:
+                self._callback_status |= status
+                self._input_overflow_count += int(status.input_overflow)
+                self._input_underflow_count += int(status.input_underflow)
                 copied = indata.copy()
                 if self._live_recording is None:
                     raise sd.CallbackAbort
@@ -206,16 +304,8 @@ class MicrophoneStream:
         with self._lock:
             if self._recording and self._capture_error is None:
                 self._capture_error = AudioStreamStateError("Microphone input stream stopped unexpectedly.")
-                self._logger.error("Microphone input stream stopped unexpectedly: path=%s", self._recording_path)
 
     def _remember_error(self, error: Exception) -> None:
         with self._lock:
             if self._capture_error is None:
                 self._capture_error = error
-        self._logger.error(
-            "Microphone capture failure: path=%s error_type=%s error=%s",
-            self._recording_path,
-            type(error).__name__,
-            error,
-            exc_info=(type(error), error, error.__traceback__),
-        )

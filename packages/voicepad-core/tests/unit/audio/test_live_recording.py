@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
-from threading import Event, Thread
+from threading import Event, Thread, current_thread
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -9,6 +10,7 @@ import pytest
 import soundfile as sf
 from voicepad_core.audio.errors import AudioStreamStateError
 from voicepad_core.audio.live_recording import LiveWavRecording
+from voicepad_core.audio.signal_health import SignalHealth
 from voicepad_core.audio.types import AudioWindow
 from voicepad_core.audio.wav_persistence import WavArtifact
 
@@ -143,3 +145,50 @@ def test_live_recording_read_during_finalization_uses_finished_artifact(tmp_path
     assert not finish_thread.is_alive() and not read_thread.is_alive()
     assert len(result) == 1
     np.testing.assert_allclose(result[0].samples, [0.25, 0.5])
+
+
+def test_signal_health_is_computed_on_writer_thread_and_preserves_amplitude(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    recording = LiveWavRecording(tmp_path / "signal.wav", 4, 1)
+    original_update = SignalHealth.with_samples
+    threads: list[str] = []
+
+    def update(health: SignalHealth, samples: np.ndarray, sample_rate: int) -> SignalHealth:
+        threads.append(current_thread().name)
+        return original_update(health, samples, sample_rate)
+
+    samples = np.array([-0.5, 0.0, 0.25, 0.5], dtype=np.float32)
+    with patch.object(SignalHealth, "with_samples", update), caplog.at_level(logging.INFO):
+        recording.start()
+        recording.append(samples)
+        recording.read_from(0)  # Wait for the queued write and measurements.
+        snapshot = recording.signal_health
+        artifact = recording.finish()
+
+    assert threads == ["audio-writer"]
+    assert snapshot.frames == 4
+    assert snapshot.peak == 0.5
+    assert snapshot.rms == pytest.approx(float(np.sqrt(np.mean(samples.astype(float) ** 2))))
+    assert snapshot.warnings == ()
+    assert recording.signal_health is snapshot
+    persisted, _ = sf.read(artifact.path, dtype="float32")
+    np.testing.assert_array_equal(persisted, samples)
+    assert "Recording signal health:" in caplog.text
+    assert "pcm_limit_samples=0" in caplog.text
+
+
+@pytest.mark.parametrize("level,message", [(0.0, "near-silent"), (1.25, "possible clipping")])
+def test_signal_warnings_are_logged_without_failing_capture(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, level: float, message: str
+) -> None:
+    recording = LiveWavRecording(tmp_path / "warning.wav", 4, 1)
+    recording.start()
+    recording.append(np.full(8, level, dtype=np.float32))
+    artifact = recording.finish()
+
+    assert artifact.frame_count == 8
+    assert message in caplog.text
+    assert message in recording.signal_health.warnings[0]
+    persisted, _ = sf.read(artifact.path, dtype="float32")
+    np.testing.assert_allclose(persisted, min(level, 32767 / 32768))
