@@ -5,12 +5,17 @@ node = "lts"
 pnpm = "latest"
 python = "3.14"
 rumdl = "latest"
+shellcheck = { version = "latest", os = ["linux", "macos"] }
 tombi = "latest"
 uv = "latest"
 
 [settings]
 experimental = true
 idiomatic_version_file_enable_tools = ["python"]
+lockfile = true
+
+[settings.github]
+use_git_credentials = true
 
 [hooks]
 enter = ["bash ./scripts/enter_project.sh"]
